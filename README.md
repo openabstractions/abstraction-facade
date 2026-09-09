@@ -1,6 +1,6 @@
 # abstraction-facade
 
-**In development.** Tagged `go/v0.2.0` and the example below runs, but this
+**In development.** Tagged `go/v0.3.0` and the example below runs, but this
 layer defines no conformance rules of its own — see Status.
 
 For a Go application that wants jobs, downloads, storage and logging without
@@ -33,7 +33,7 @@ go get github.com/openabstractions/abstraction-facade/go
 ```
 
 The newest tag is
-[`go/v0.2.0`](https://github.com/openabstractions/abstraction-facade/releases/tag/go%2Fv0.2.0);
+[`go/v0.3.0`](https://github.com/openabstractions/abstraction-facade/releases/tag/go%2Fv0.3.0);
 `@main` is the tree as it stands.
 
 **Python, C++.** None. This layer is Go only.
