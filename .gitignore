@@ -1,0 +1,15 @@
+# Go build artefacts
+/go/bin/
+*.exe
+*.test
+*.out
+
+# Python (in case scripts or bindings are added here later)
+__pycache__/
+*.pyc
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
