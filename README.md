@@ -1,7 +1,10 @@
 # abstraction-facade
 
-**In development.** Tagged `go/v0.3.0` and the example below runs, but this
-layer defines no conformance rules of its own — see Status.
+**In development.** The example below runs, but this layer defines no
+conformance rules of its own — see Status. No version number is typed on this
+page: [the tag list](https://github.com/openabstractions/abstraction-facade/tags)
+is the answer to "which release", because a tag is the only thing that cannot
+drift.
 
 For a Go application that wants jobs, downloads, storage and logging without
 naming an implementation: one call reports what the machine it is running on
@@ -32,11 +35,16 @@ diagnostic line and nothing branches on them.
 go get github.com/openabstractions/abstraction-facade/go
 ```
 
-The newest tag is
-[`go/v0.3.0`](https://github.com/openabstractions/abstraction-facade/releases/tag/go%2Fv0.3.0);
-`@main` is the tree as it stands.
+[Releases, newest first](https://github.com/openabstractions/abstraction-facade/tags);
+pin the exact tag you tested against, or `@main` for the tree as it stands.
 
-**Python, C++.** None. This layer is Go only.
+**Python, C++.** None. This layer is Go only, so an application in either
+language calls the layers directly — `abstraction-download`'s
+[Python page](https://github.com/openabstractions/abstraction-download/blob/main/python/README.md)
+is where a Python adopter starts.
+
+Whether to adopt this at all, what it costs and what is not proven:
+[Adopting](CONTRIBUTING.md#adopting).
 
 ## An example that runs
 
