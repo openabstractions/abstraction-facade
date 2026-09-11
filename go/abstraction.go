@@ -14,7 +14,7 @@
 // It does not link download tiers. BITS and a NAS binding are the system
 // downloader's business; an application that linked them would be choosing who
 // fetches its bytes. A program that wants a tier in its own process
-// blank-imports download/go/all and calls Discover here unchanged: registration
+// blank-imports abstraction-download/go/all and calls Discover here unchanged: registration
 // is global to the download package, so this root picks it up without importing
 // it. A machine with no system downloader fetches in this process, and Bindings
 // says so.
