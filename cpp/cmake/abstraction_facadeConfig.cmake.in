@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(abstraction_logging CONFIG)
+find_dependency(abstraction_config CONFIG)
+find_dependency(abstraction_router CONFIG)
+include("${CMAKE_CURRENT_LIST_DIR}/abstraction_facadeTargets.cmake")
