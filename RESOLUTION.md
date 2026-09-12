@@ -85,7 +85,16 @@ same reference binding. This first binding supports `oa-framed-local@1` with
 `local` scope only; another transport or remote reference is refused as
 `unsupported_transport`, never interpreted as a local endpoint. Bootstrap uses
 the shared `runtime-v1` endpoint convention, or an explicitly supplied location.
-Endpoint convention alone does not authenticate the server. Installation,
+On Windows the default is
+`\\.\pipe\openabstractions-user-<process-token SID>-runtime-v1`.
+Runtime provider endpoints use the same account namespace. Go and C++ derive
+the SID from the process token. An identity lookup failure is reported before
+connection. Explicit endpoint overrides retain their supplied value.
+Unix endpoint conventions and legacy standalone hosts retain their existing
+names. Sessions belonging to one Windows account share this namespace;
+installation must coordinate their runtime ownership. Endpoint naming supplies
+location; server authentication remains a separate boundary.
+Installation,
 server trust, automatic activation and a waiting budget shared by subsequent
 capability calls remain unfinished. These development APIs do not claim them.
 

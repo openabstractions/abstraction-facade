@@ -6,6 +6,7 @@ int main(int argc,char**argv){
  namespace f=abstraction::facade;
  static_assert(std::is_base_of_v<f::job_api::RecoverableAcceptance,f::JobsClient>);
  static_assert(f::JobsClient::MaxFrameBytes==2097152);
+ if(argc==2&&std::string(argv[1])=="--default-runtime-endpoint") {std::cout<<abstraction::facade::runtime_endpoint()<<"\n";return 0;}
  if(argc==5&&std::string(argv[1])=="--runtime"&&std::string(argv[3])=="--jobs") {
    auto jobs=f::ResolveJobs(f::ResolutionClient(argv[2]),{"abstraction.job/reconciliation@1"});
    auto history=jobs.GetHistoryWindow();
@@ -19,7 +20,7 @@ int main(int argc,char**argv){
       recovered.receipt->logical_owner!=accepted.receipt->logical_owner||recovered.receipt->accepted_guarantees!=accepted.receipt->accepted_guarantees)return 6;
    std::cout<<f::job_api::encode(recovered);return 0;
  }
- if(argc!=1)throw std::runtime_error("usage: facade_jobs_consumer [--runtime endpoint --jobs caller-key]");
+ if(argc!=1)throw std::runtime_error("usage: facade_jobs_consumer [--default-runtime-endpoint | --runtime endpoint --jobs caller-key]");
  f::JobsClient client("unused");
  try{client.Reconcile({});return 1;}catch(const f::job_api::ServiceError&e){if(e.code!="invalid_submission")return 2;}
  f::ResolveRequest q;q.capability="abstraction.job";q.contracts={"abstraction.job/acceptance@1"};q.scope="any";

@@ -3,6 +3,9 @@
 #include <abstraction/ipc/frame.hpp>
 #include <algorithm>
 #include <cstdlib>
+#ifdef _WIN32
+#include <abstraction/ipc/process.hpp>
+#endif
 
 namespace abstraction::facade {
 
@@ -11,7 +14,7 @@ inline std::string runtime_endpoint() {
         if (*value) return value;
     }
 #ifdef _WIN32
-    return R"(\\.\pipe\openabstractions-runtime-v1)";
+    return std::string(R"(\\.\pipe\openabstractions-user-)") + ipc::process_user_sid() + "-runtime-v1";
 #else
     if (const char* value = std::getenv("XDG_RUNTIME_DIR")) {
         if (*value) return std::string(value) + "/openabstractions-runtime-v1.sock";

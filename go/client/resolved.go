@@ -29,7 +29,11 @@ func New(runtimeEndpoint string) *Machine { return &Machine{endpoint: runtimeEnd
 func (m *Machine) resolve(ctx context.Context, capability, contract string, need Requirements) (string, error) {
 	endpoint := m.endpoint
 	if endpoint == "" {
-		endpoint = resolution.DefaultEndpoint()
+		var err error
+		endpoint, err = resolution.CheckedDefaultEndpoint()
+		if err != nil {
+			return "", err
+		}
 	}
 	if need.Scope == "" {
 		need.Scope = wire.ScopeAny

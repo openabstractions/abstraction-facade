@@ -13,6 +13,7 @@ import (
 
 	configservice "github.com/openabstractions/abstraction-config/go/service"
 	wire "github.com/openabstractions/abstraction-facade/go/abstraction/facade"
+	"github.com/openabstractions/abstraction-facade/go/bootstrap"
 	"github.com/openabstractions/abstraction-facade/go/resolution"
 	identity "github.com/openabstractions/abstraction-identity"
 	"github.com/openabstractions/abstraction-identity/listen"
@@ -45,6 +46,37 @@ type Host struct {
 	started    atomic.Bool
 }
 
+// configureEndpoints resolves defaults before any listeners or stores open.
+func configureEndpoints(options Options) (Options, error) {
+	var err error
+	if options.Endpoint == "" {
+		options.Endpoint, err = resolution.CheckedDefaultEndpoint()
+		if err != nil {
+			return Options{}, err
+		}
+	}
+	for _, item := range []struct {
+		value   *string
+		service string
+	}{
+		{&options.LogEndpoint, "logging-v1"}, {&options.ConfigEndpoint, "config-v1"},
+	} {
+		if *item.value == "" {
+			*item.value, err = bootstrap.Endpoint(item.service)
+			if err != nil {
+				return Options{}, err
+			}
+		}
+	}
+	if options.JobRoot != "" && options.JobEndpoint == "" {
+		options.JobEndpoint, err = bootstrap.Endpoint("job-acceptance-v1")
+		if err != nil {
+			return Options{}, err
+		}
+	}
+	return options, nil
+}
+
 func Listen(options Options) (*Host, error) {
 	if options.Sink == nil {
 		return nil, errors.New("runtime: logging provider required")
@@ -60,14 +92,9 @@ func Listen(options Options) (*Host, error) {
 	if owner.Uid == "" {
 		return nil, errors.New("runtime: owner identity unavailable")
 	}
-	if options.Endpoint == "" {
-		options.Endpoint = resolution.DefaultEndpoint()
-	}
-	if options.LogEndpoint == "" {
-		options.LogEndpoint = listen.Endpoint("logging-v1")
-	}
-	if options.ConfigEndpoint == "" {
-		options.ConfigEndpoint = listen.Endpoint("config-v1")
+	options, err = configureEndpoints(options)
+	if err != nil {
+		return nil, err
 	}
 	l, err := logservice.Listen(options.LogEndpoint, options.Sink)
 	if err != nil {
@@ -80,9 +107,6 @@ func Listen(options Options) (*Host, error) {
 	}
 	h := &Host{logging: l, config: c, onError: options.OnError}
 	if jobsConfigured {
-		if options.JobEndpoint == "" {
-			options.JobEndpoint = listen.Endpoint("job-acceptance-v1")
-		}
 		h.jobs, err = listenJobs(options.JobEndpoint, options.JobRoot, options.JobOwner, owner.Uid, options.JobPolicy)
 		if err != nil {
 			h.Close()

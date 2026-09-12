@@ -192,6 +192,7 @@ void selected_endpoints() {
 }
 #endif
 int main(int argc,char**argv){try{
+ if(argc==2&&std::string(argv[1])=="--default-runtime-endpoint") {std::cout<<abstraction::facade::runtime_endpoint()<<"\n";return 0;}
  if(argc==5&&std::string(argv[1])=="--runtime"&&std::string(argv[3])=="--jobs") {
    auto jobs=f::Machine(argv[2]).ResolveJobs({"abstraction.job/reconciliation@1"});
    auto history=jobs.GetHistoryWindow();
@@ -210,7 +211,7 @@ int main(int argc,char**argv){try{
    machine.ResolveConfig().ReadWithOverrides({});
    std::cout<<"C++ runtime resolution passed\n";return 0;
  }
- if(argc!=1)throw std::runtime_error("usage: facade_binding_consumer [--runtime endpoint [--jobs caller-key]]");
+ if(argc!=1)throw std::runtime_error("usage: facade_binding_consumer [--default-runtime-endpoint | --runtime endpoint [--jobs caller-key]]");
  f::Machine legacy = {}; // preserve legacy default initialization
  (void)legacy;
  semantics();

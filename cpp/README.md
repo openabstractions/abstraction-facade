@@ -24,8 +24,10 @@ Legacy `Log`, `Config` and `Router` remain unchanged.
 `Machine(explicit_runtime_endpoint)` and `ResolutionClient(endpoint, timeout_ms)`
 allow explicit bootstrap, including isolated tests. The default bootstrap uses
 `ABSTRACTION_RUNTIME_ENDPOINT` when nonempty, otherwise the established
-`openabstractions-runtime-v1` local pipe/socket convention. On Windows this is a
-fixed pipe name, not a SID-specific endpoint. The resolver uses the existing
+local pipe/socket convention. On Windows the process-token SID supplies
+`\\.\pipe\openabstractions-user-<canonical SID>-runtime-v1`.
+SID lookup errors propagate. Unix uses the existing runtime-v1 socket convention.
+The resolver uses the existing
 identity IPC `FrameTransport`; this does not prove server authentication.
 
 `ResolutionClient::Resolve` returns the validated `ResolveResult`, including
@@ -41,6 +43,10 @@ installed prefix in `CMAKE_PREFIX_PATH`, build, then run CTest. It checks semant
 refusals and forged references; on Windows it additionally exercises real named
 pipes for bootstrap and the selected logging/config/router endpoint using private
 single-frame test fixtures. No provider endpoint environment override is used.
+
+Both consumers expose `--default-runtime-endpoint` for comparison with the Go
+bootstrap, including an explicit environment override. Windows CTest also checks
+identity lookup failures and token cleanup through injected API failures.
 
 The consumer's `--runtime <endpoint>` mode uses an actual external runtime and
 starts no listeners. It resolves logging, writes `cpp-resolved-log`, then resolves

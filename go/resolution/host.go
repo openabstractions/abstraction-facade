@@ -8,18 +8,31 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/openabstractions/abstraction-facade/go/bootstrap"
 	"github.com/openabstractions/abstraction-identity/listen"
 )
 
 const LocalTransport = "oa-framed-local@1"
 
-// DefaultEndpoint is only bootstrap location; it does not assert installation,
-// readiness, or server authority. Installation supplies the trusted runtime.
+// DefaultEndpoint returns the current-user bootstrap location. Identity lookup
+// failure panics; new callers should use CheckedDefaultEndpoint to handle errors.
 func DefaultEndpoint() string {
-	if endpoint := os.Getenv("ABSTRACTION_RUNTIME_ENDPOINT"); endpoint != "" {
-		return endpoint
+	endpoint, err := CheckedDefaultEndpoint()
+	if err != nil {
+		panic(err)
 	}
-	return listen.Endpoint("runtime-v1")
+	return endpoint
+}
+
+// CheckedDefaultEndpoint preserves an explicit environment endpoint. Otherwise
+// it derives the current-user location and reports identity lookup errors.
+// Endpoint naming supplies a bootstrap convention; server trust is a separate
+// receiving-boundary requirement.
+func CheckedDefaultEndpoint() (string, error) {
+	if endpoint := os.Getenv("ABSTRACTION_RUNTIME_ENDPOINT"); endpoint != "" {
+		return endpoint, nil
+	}
+	return bootstrap.Endpoint("runtime-v1")
 }
 
 // Host serves runtime-owned registrations. Clients cannot register providers.
