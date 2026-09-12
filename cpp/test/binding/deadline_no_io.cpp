@@ -25,6 +25,11 @@ int main() {
     expired([&]{copy.Log(1,"must not send");});
     abstraction::config::Client config("missing-endpoint",deadline);
     expired([&]{config.ReadWithOverrides({});});
+    expired([&]{machine.ResolveRouter({},"any",deadline);});
+    abstraction::router::Client router("missing-endpoint",deadline);auto routerCopy=router;
+    expired([&]{routerCopy.Models();});
+    expired([&]{routerCopy.Hosts();});
+    expired([&]{routerCopy.Pick({});});
     abstraction::ipc::FrameTransport frame("missing-endpoint",deadline);
     expired([&]{frame.ExchangeFrame("{}");});
     expired([&]{frame.WriteFrame("{}");});

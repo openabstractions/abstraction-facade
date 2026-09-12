@@ -32,6 +32,9 @@ public:
     router::Client ResolveRouter(std::vector<std::string> guarantees = {}, std::string scope = "any") const {
         return router::Client(Bind("abstraction.router", "abstraction.router/router@1", guarantees, scope).endpoint);
     }
+    router::Client ResolveRouter(std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) const {
+        return router::Client(Bind("abstraction.router", "abstraction.router/router@1", guarantees, scope, deadline).endpoint, deadline);
+    }
     JobsClient ResolveJobs(std::vector<std::string> guarantees = {}, std::string scope = "any") const {
         return facade::ResolveJobs(resolver_, std::move(guarantees), std::move(scope));
     }
