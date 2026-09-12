@@ -1,0 +1,78 @@
+name: C++ installed bindings
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: facade-binding-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  installed-binding:
+    name: C++ installed binding (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.sha }}
+          path: abstraction-facade
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-identity
+          path: abstraction-identity
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-job
+          path: abstraction-job
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-logging
+          path: abstraction-logging
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-config
+          path: abstraction-config
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-router
+          path: abstraction-router
+          persist-credentials: false
+      - name: record source revisions
+        run: |
+          test "$(git -C abstraction-facade rev-parse HEAD)" = "$GITHUB_SHA"
+          for repo in facade identity job logging config router; do
+            printf 'abstraction-%s %s\n' "$repo" "$(git -C "abstraction-$repo" rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      - name: install aggregate bindings
+        run: |
+          cmake -S abstraction-facade/cpp -B "$RUNNER_TEMP/binding-build" \
+            -DCMAKE_BUILD_TYPE=Release -DABSTRACTION_FACADE_BUILD_AGGREGATE=ON \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/binding-install"
+          cmake --build "$RUNNER_TEMP/binding-build" --config Release
+          cmake --install "$RUNNER_TEMP/binding-build" --config Release
+      - name: test installed bindings
+        run: |
+          cp -R abstraction-facade/cpp/test/binding "$RUNNER_TEMP/binding-consumer-source"
+          cmake -S "$RUNNER_TEMP/binding-consumer-source" -B "$RUNNER_TEMP/binding-consumer" \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/binding-install"
+          cmake --build "$RUNNER_TEMP/binding-consumer" --config Release
+          ctest --test-dir "$RUNNER_TEMP/binding-consumer" -C Release --output-on-failure --no-tests=error
+          if [ "$RUNNER_OS" = Windows ]; then
+            printf 'Windows: installed consumer, delayed resolver/provider shared budget, legacy reuse, expired-before-open, selected-endpoint and refusal fixtures passed.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s: installed consumer, semantic validation and expired-before-open passed. Delayed resolver/provider fixtures are Windows-only in this suite.\n' "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+          fi
