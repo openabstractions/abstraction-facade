@@ -21,6 +21,29 @@ capability client at the selected endpoint. A client already returned keeps that
 endpoint; it does not silently reselect or replay work when an operation fails.
 Legacy `Log`, `Config` and `Router` remain unchanged.
 
+An explicit deadline gives resolution and the selected logging/config operation
+one waiting budget:
+
+```cpp
+const auto deadline = abstraction::ipc::Clock::now() + std::chrono::seconds(2);
+auto logger = machine.ResolveLog({}, "any", deadline);
+logger.Log(1, "connected within the caller budget");
+// For config: machine.ResolveConfig({}, "any", deadline).Read();
+```
+
+The deadline uses the existing monotonic IPC clock. The resolver, connection,
+frame write and reply share it. These explicit bindings and their copies retain
+the deadline, including time spent by the caller between resolution and use;
+obtain another binding for a later operation scope. The overloads without a
+deadline keep their existing reusable per-call timeouts. This bounded API does
+not yet give ordinary calls a shared budget automatically.
+
+Expired deadlines throw `ipc::FrameError` with `Status::timeout` before opening a
+connection. In-flight timeouts retain that type. Stopping the wait supplies no
+cancellation of provider work already sent; this C++ API exposes no cancellation
+token. Direct `logging::Logger`, `config::Client`, `ResolutionClient::Resolve`
+and shared `FrameTransport` also accept the same absolute deadline.
+
 `Machine(explicit_runtime_endpoint)` and `ResolutionClient(endpoint, timeout_ms)`
 allow explicit bootstrap, including isolated tests. The default bootstrap uses
 `ABSTRACTION_RUNTIME_ENDPOINT` when nonempty, otherwise the established

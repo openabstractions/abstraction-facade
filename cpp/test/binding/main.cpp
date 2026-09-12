@@ -190,6 +190,58 @@ void selected_endpoints() {
     SingleFrame forged([](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;payload.value=resolved(request());payload.value.reference->contract="wrong-contract";std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
     refusal("invalid_resolution",[&]{f::Machine(forged.endpoint).ResolveLog();});forged.finish();
 }
+template<class Fn> void timeout(Fn fn) {
+    try { fn(); } catch(const abstraction::ipc::FrameError& e) {
+        require(e.status==abstraction::ipc::Status::timeout);return;
+    }
+    throw std::runtime_error("expected shared call budget exhaustion");
+}
+void call_budgets() {
+    using namespace std::chrono_literals;
+    for(const std::string cap:{"logging","config"}) {
+        // Each leg fits 800ms independently; their combined delay exceeds it.
+        for(bool limited:{false,true}) {
+            SingleFrame selected([&](const std::string& frame){
+                std::this_thread::sleep_for(500ms);
+                if(cap=="logging")return std::string{};
+                auto v=abstraction::config::service_payload(frame);
+                abstraction::config::OAConfigReaderReadResult payload;payload.value.stamp="budget-config";
+                std::string raw;abstraction::config::enc_oaconfigreaderreadresult(raw,payload,1);
+                return abstraction::config::service_reply(v,raw,nullptr);
+            });
+            ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
+            provider.contract=provider.capability+(cap=="logging"?"/sink@1":"/reader@1");
+            f::ResolverDispatcher dispatcher(provider);
+            SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return dispatcher.ExchangeFrame(frame);});
+            f::Machine machine(bootstrap.endpoint);
+            const auto deadline=abstraction::ipc::Clock::now()+(limited?800ms:2000ms);
+            auto invoke=[&]{
+                if(cap=="logging")machine.ResolveLog({"required@1"},"local",deadline).Log(1,"budget");
+                else require(machine.ResolveConfig({"required@1"},"local",deadline).ReadWithOverrides({}).stamp=="budget-config");
+            };
+            if(limited)timeout(invoke);else invoke();
+            bootstrap.finish();
+            if(!limited)selected.finish(); // A timed-out peer can close before the reply write.
+        }
+        // The ordinary accessor remains reusable and resolves only once.
+        SingleFrame selected([&](const std::string& frame){
+            if(cap=="logging")return std::string{};
+            auto v=abstraction::config::service_payload(frame);
+            abstraction::config::OAConfigReaderReadResult payload;payload.value.stamp="reusable";
+            std::string raw;abstraction::config::enc_oaconfigreaderreadresult(raw,payload,1);
+            return abstraction::config::service_reply(v,raw,nullptr);
+        },2);
+        ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
+        provider.contract=provider.capability+(cap=="logging"?"/sink@1":"/reader@1");
+        f::ResolverDispatcher dispatcher(provider);
+        SingleFrame bootstrap([&](const std::string& frame){return dispatcher.ExchangeFrame(frame);});
+        f::Machine machine(bootstrap.endpoint);
+        if(cap=="logging"){auto logger=machine.ResolveLog({"required@1"},"local");logger.Log(1,"one");logger.Log(1,"two");}
+        else {auto config=machine.ResolveConfig({"required@1"},"local");require(config.ReadWithOverrides({}).stamp=="reusable");require(config.ReadWithOverrides({}).stamp=="reusable");}
+        bootstrap.finish();selected.finish();
+    }
+}
+
 #endif
 int main(int argc,char**argv){try{
  if(argc==2&&std::string(argv[1])=="--default-runtime-endpoint") {std::cout<<abstraction::facade::runtime_endpoint()<<"\n";return 0;}
@@ -216,6 +268,7 @@ int main(int argc,char**argv){try{
  (void)legacy;
  semantics();
 #ifdef _WIN32
+ call_budgets();
  selected_endpoints();
  job_binding();
  weak_job_receipts();

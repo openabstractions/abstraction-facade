@@ -18,3 +18,7 @@ endif()
 add_test(NAME facade_bootstrap_override COMMAND ${CMAKE_COMMAND} -E env
     "ABSTRACTION_RUNTIME_ENDPOINT=explicit-bootstrap" $<TARGET_FILE:facade_binding_consumer> --default-runtime-endpoint)
 set_tests_properties(facade_bootstrap_override PROPERTIES PASS_REGULAR_EXPRESSION "explicit-bootstrap")
+
+add_executable(facade_deadline_no_io deadline_no_io.cpp)
+target_link_libraries(facade_deadline_no_io PRIVATE abstraction::facade_client)
+add_test(NAME facade_deadline_no_io COMMAND facade_deadline_no_io)

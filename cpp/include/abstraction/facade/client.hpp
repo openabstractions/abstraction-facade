@@ -22,6 +22,13 @@ public:
     config::Client ResolveConfig(std::vector<std::string> guarantees = {}, std::string scope = "any") const {
         return config::Client(Bind("abstraction.config", "abstraction.config/reader@1", guarantees, scope).endpoint);
     }
+    // Explicit operation scopes share one deadline across resolution and calls.
+    logging::Logger ResolveLog(std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) const {
+        return logging::Logger(Bind("abstraction.logging", "abstraction.logging/sink@1", guarantees, scope, deadline).endpoint, deadline);
+    }
+    config::Client ResolveConfig(std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) const {
+        return config::Client(Bind("abstraction.config", "abstraction.config/reader@1", guarantees, scope, deadline).endpoint, deadline);
+    }
     router::Client ResolveRouter(std::vector<std::string> guarantees = {}, std::string scope = "any") const {
         return router::Client(Bind("abstraction.router", "abstraction.router/router@1", guarantees, scope).endpoint);
     }
@@ -37,6 +44,16 @@ private:
         request.guarantees = guarantees;
         request.scope = scope;
         return local_binding(request, resolver_.Resolve(request));
+    }
+    ServiceReference Bind(const std::string& capability, const std::string& contract,
+                          const std::vector<std::string>& guarantees, const std::string& scope,
+                          ipc::Deadline deadline) const {
+        ResolveRequest request;
+        request.capability = capability;
+        request.contracts = {contract};
+        request.guarantees = guarantees;
+        request.scope = scope;
+        return local_binding(request, resolver_.Resolve(request, deadline));
     }
     ResolutionClient resolver_;
 };

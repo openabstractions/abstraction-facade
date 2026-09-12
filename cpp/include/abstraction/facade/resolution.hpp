@@ -100,15 +100,21 @@ public:
         : endpoint_(std::move(endpoint)), timeout_(timeout_ms) {}
 
     ResolveResult Resolve(const ResolveRequest& request) const {
-        validate_resolve_request(request);
         ipc::FrameTransport transport(endpoint_, timeout_, 1 << 20);
+        return resolve(request, transport);
+    }
+    ResolveResult Resolve(const ResolveRequest& request, ipc::Deadline deadline) const {
+        ipc::FrameTransport transport(endpoint_, deadline, 1 << 20);
+        return resolve(request, transport);
+    }
+private:
+    static ResolveResult resolve(const ResolveRequest& request, ipc::FrameTransport& transport) {
+        validate_resolve_request(request);
         ResolverClient<ipc::FrameTransport> client(transport);
         auto result = client.Resolve(request);
         validate_resolve_result(request, result);
         return result;
     }
-
-private:
     std::string endpoint_;
     std::uint32_t timeout_;
 };
