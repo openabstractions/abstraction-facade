@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(facade_binding_consumer LANGUAGES CXX)
+find_package(abstraction_facade CONFIG REQUIRED)
+add_executable(facade_binding_consumer main.cpp)
+target_link_libraries(facade_binding_consumer PRIVATE abstraction::facade_client)
+enable_testing()
+add_test(NAME facade_binding_consumer COMMAND facade_binding_consumer)
+set_tests_properties(facade_binding_consumer PROPERTIES TIMEOUT 30)

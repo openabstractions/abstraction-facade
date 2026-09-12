@@ -9,12 +9,13 @@ import (
 	router "github.com/openabstractions/abstraction-router/go/client"
 )
 
-type Machine struct{}
+type Machine struct{ endpoint string }
 
-// Discover resolves capabilities lazily using each service's shared endpoint
-// convention. It does not claim that every possible service is installed.
+// Discover creates a facade using the runtime bootstrap convention.
+// ResolveLog/ResolveConfig/ResolveRouter query its actual registrations.
 func Discover() *Machine { return &Machine{} }
 
+// Log is the legacy fixed-endpoint accessor. Use ResolveLog for runtime selection.
 func (*Machine) Log() *logging.Client   { return logging.Discover() }
 func (*Machine) Config() *config.Client { return config.Discover() }
 func (*Machine) Router() *router.Client { return router.Discover() }

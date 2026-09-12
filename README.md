@@ -9,6 +9,16 @@ contain no file sink or local fallback provider.
 release or an installed OS service. The existing root Go package is a legacy
 facade; its jobs, download and storage paths have not migrated to this API.
 
+The additive [resolution interface](RESOLUTION.md) now describes finding a
+provider that supports your required contract and guarantees. It includes a Go
+selector and shared-IPC client, generated Go/C++/Python bindings and an independent
+C++ protocol package. Go and C++ now also provide `ResolveLog`, `ResolveConfig`
+and `ResolveRouter` to bind a client to the selected compatible service. The Go
+runtime composition and an installed C++ consumer have been tested together for
+logging and config on Windows. Installed activation is not yet connected to this
+runtime. The manual examples below retain the legacy fixed-endpoint accessors;
+see [resolution and its limits](RESOLUTION.md) for the new development path.
+
 ## Start the logging host
 
 With a locally built `openabstractions` executable, run:
@@ -51,7 +61,8 @@ func main() {
 }
 ```
 
-`Discover()` resolves lazily; it does not certify that a service is running.
+These legacy accessors construct the conventional endpoint; they do not query
+the resolver or certify that a service is running.
 The requested operation reports service absence as an error. `Log` supplies the
 schema and timestamp so the application names only its event and attributes.
 

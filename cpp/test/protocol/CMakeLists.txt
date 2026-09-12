@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(facade_protocol_consumer LANGUAGES CXX)
+find_package(abstraction_facade CONFIG REQUIRED)
+add_executable(facade_protocol_consumer main.cpp)
+target_link_libraries(facade_protocol_consumer PRIVATE abstraction::facade_protocol)
+enable_testing()
+add_test(NAME facade_protocol_consumer COMMAND facade_protocol_consumer)

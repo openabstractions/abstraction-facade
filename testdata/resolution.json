@@ -1,0 +1,686 @@
+[
+  {
+    "name": "compatible",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "resolved",
+    "provider": "first"
+  },
+  {
+    "name": "absent",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [],
+    "allowed": [
+      "first"
+    ],
+    "want": "unavailable",
+    "provider": ""
+  },
+  {
+    "name": "forbidden-hides-candidate",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [],
+    "want": "forbidden",
+    "provider": ""
+  },
+  {
+    "name": "incompatible",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@2"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "incompatible",
+    "provider": ""
+  },
+  {
+    "name": "unmet-required-guarantee",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "reboot"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "unmet_requirements",
+    "provider": ""
+  },
+  {
+    "name": "registered-not-ready",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": false
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "not_ready",
+    "provider": ""
+  },
+  {
+    "name": "placement-unavailable",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "remote"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "unavailable",
+    "provider": ""
+  },
+  {
+    "name": "empty-capability",
+    "request": {
+      "capability": "",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "invalid_request",
+    "provider": ""
+  },
+  {
+    "name": "empty-contracts",
+    "request": {
+      "capability": "example.work",
+      "contracts": [],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "invalid_request",
+    "provider": ""
+  },
+  {
+    "name": "duplicate-contracts",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "v1",
+        "v1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "invalid_request",
+    "provider": ""
+  },
+  {
+    "name": "empty-guarantee-name",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        ""
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "invalid_request",
+    "provider": ""
+  },
+  {
+    "name": "duplicate-guarantees",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable",
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "invalid_request",
+    "provider": ""
+  },
+  {
+    "name": "no-extra-guarantees",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first"
+    ],
+    "want": "resolved",
+    "provider": "first"
+  },
+  {
+    "name": "ready-remote-with-any-placement",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": false
+      },
+      {
+        "reference": {
+          "provider": "second",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "remote",
+          "transport": "remote-binding",
+          "endpoint": "opaque-remote"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first",
+      "second"
+    ],
+    "want": "resolved",
+    "provider": "second"
+  },
+  {
+    "name": "no-weaker-fallback",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": false
+      },
+      {
+        "reference": {
+          "provider": "second",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [],
+          "scope": "remote",
+          "transport": "remote-binding",
+          "endpoint": "opaque-remote"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first",
+      "second"
+    ],
+    "want": "not_ready",
+    "provider": ""
+  },
+  {
+    "name": "guarantees-cannot-be-combined",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable",
+        "verified"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      },
+      {
+        "reference": {
+          "provider": "second",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "verified"
+          ],
+          "scope": "remote",
+          "transport": "remote-binding",
+          "endpoint": "opaque-remote"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "first",
+      "second"
+    ],
+    "want": "unmet_requirements",
+    "provider": ""
+  },
+  {
+    "name": "authorized-second",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      },
+      {
+        "reference": {
+          "provider": "second",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "remote",
+          "transport": "remote-binding",
+          "endpoint": "opaque-remote"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "second"
+    ],
+    "want": "resolved",
+    "provider": "second"
+  },
+  {
+    "name": "denied-compatible-provider-not-used",
+    "request": {
+      "capability": "example.work",
+      "contracts": [
+        "example.work/runner@1"
+      ],
+      "guarantees": [
+        "durable"
+      ],
+      "scope": "any"
+    },
+    "candidates": [
+      {
+        "reference": {
+          "provider": "first",
+          "capability": "example.work",
+          "contract": "example.work/runner@1",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "local",
+          "transport": "ipc",
+          "endpoint": "opaque-local"
+        },
+        "ready": true
+      },
+      {
+        "reference": {
+          "provider": "second",
+          "capability": "example.work",
+          "contract": "example.work/runner@2",
+          "guarantees": [
+            "durable",
+            "verified"
+          ],
+          "scope": "remote",
+          "transport": "remote-binding",
+          "endpoint": "opaque-remote"
+        },
+        "ready": true
+      }
+    ],
+    "allowed": [
+      "second"
+    ],
+    "want": "incompatible",
+    "provider": ""
+  }
+]
