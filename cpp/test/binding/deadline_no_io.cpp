@@ -30,6 +30,16 @@ int main() {
     expired([&]{routerCopy.Models();});
     expired([&]{routerCopy.Hosts();});
     expired([&]{routerCopy.Pick({});});
+    expired([&]{machine.ResolveJobs({},"any",deadline);});
+    abstraction::facade::JobsClient jobs("missing-endpoint",deadline);
+    abstraction::facade::job_api::Submission submission;
+    submission.identity.key="key";submission.identity.history_epoch="epoch";submission.kind="test";
+    expired([&]{jobs.GetHistoryWindow();});
+    expired([&]{jobs.Submit(submission);});
+    expired([&]{jobs.Reconcile(submission.identity);});
+    expired([&]{jobs.CancelWork(submission.identity);});
+    auto jobCopy=jobs.WithDeadline(deadline);
+    expired([&]{jobCopy.Reconcile(submission.identity);});
     abstraction::ipc::FrameTransport frame("missing-endpoint",deadline);
     expired([&]{frame.ExchangeFrame("{}");});
     expired([&]{frame.WriteFrame("{}");});

@@ -38,6 +38,9 @@ public:
     JobsClient ResolveJobs(std::vector<std::string> guarantees = {}, std::string scope = "any") const {
         return facade::ResolveJobs(resolver_, std::move(guarantees), std::move(scope));
     }
+    JobsClient ResolveJobs(std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) const {
+        return facade::ResolveJobs(resolver_, std::move(guarantees), std::move(scope), deadline);
+    }
 private:
     ServiceReference Bind(const std::string& capability, const std::string& contract,
                           const std::vector<std::string>& guarantees, const std::string& scope) const {

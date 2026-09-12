@@ -20,10 +20,25 @@ public:
     // GetHistoryWindow or the first valid accepted receipt establishes the pin.
     explicit JobsClient(std::string endpoint, std::uint32_t timeout_ms = 5000,
                         std::vector<std::string> required_guarantees = {}, std::string expected_owner = {})
-        : transport_(std::move(endpoint), timeout_ms, MaxFrameBytes),
+        : endpoint_(std::move(endpoint)), transport_(endpoint_, timeout_ms, MaxFrameBytes),
           required_(std::move(required_guarantees)), owner_(std::make_shared<OwnerState>(std::move(expected_owner))) {
         if (!resolution_detail::distinct(required_))
             throw job_api::ServiceError("invalid_submission", "invalid binding guarantees");
+    }
+
+    JobsClient(std::string endpoint, ipc::Deadline deadline,
+               std::vector<std::string> required_guarantees = {}, std::string expected_owner = {})
+        : JobsClient(std::move(endpoint), 5000, std::move(required_guarantees), std::move(expected_owner)) {
+        transport_ = ipc::FrameTransport(endpoint_, deadline, MaxFrameBytes);
+    }
+
+    // Fresh waiting scope on this exact binding. Copies share the owner pin;
+    // the original scope remains unchanged. A Submit timeout leaves acceptance
+    // unresolved: recover explicitly with Reconcile using the original identity.
+    JobsClient WithDeadline(ipc::Deadline deadline) const {
+        auto scoped = *this;
+        scoped.transport_ = ipc::FrameTransport(endpoint_, deadline, MaxFrameBytes);
+        return scoped;
     }
 
     job_api::HistoryWindow GetHistoryWindow() override {
@@ -86,6 +101,7 @@ private:
             throw job_api::ServiceError("invalid_acceptance", "logical owner changed");
         owner_->value = owner;
     }
+    std::string endpoint_;
     ipc::FrameTransport transport_;
     std::vector<std::string> required_;
     // History (or first valid receipt) pins this client to a logical owner.
@@ -111,4 +127,15 @@ inline JobsClient ResolveJobs(const ResolutionClient& resolver,
     auto binding = local_binding(request, resolver.Resolve(request));
     return JobsClient(binding.endpoint, 5000, request.guarantees);
 }
+inline JobsClient ResolveJobs(const ResolutionClient& resolver,
+                              std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) {
+    ResolveRequest request;
+    request.capability = "abstraction.job";
+    request.contracts = {"abstraction.job/acceptance@1"};
+    request.guarantees = std::move(guarantees);
+    request.scope = std::move(scope);
+    auto binding = local_binding(request, resolver.Resolve(request, deadline));
+    return JobsClient(binding.endpoint, deadline, request.guarantees);
+}
+
 }

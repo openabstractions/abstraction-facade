@@ -196,6 +196,60 @@ template<class Fn> void timeout(Fn fn) {
     }
     throw std::runtime_error("expected shared call budget exhaustion");
 }
+void job_call_budget() {
+    using namespace std::chrono_literals;
+    struct Admission : f::job_api::RecoverableAcceptance {
+        unsigned submits=0,reconciles=0,cancellations=0;
+        f::job_api::AcceptanceResult accepted;
+        f::job_api::HistoryWindow GetHistoryWindow()override {
+            f::job_api::HistoryWindow h;h.logical_owner="fixed-owner";h.history_epoch="epoch";h.minimum_retention_ms=60000;return h;
+        }
+        f::job_api::AcceptanceResult Submit(const f::job_api::Submission& s)override {
+            ++submits;require(submits==1&&s.identity.key=="caller-key"&&s.identity.history_epoch=="epoch");
+            require(s.required_guarantees==std::vector<std::string>{"required@1"});
+            accepted.outcome="accepted";f::job_api::Receipt r;r.identity=s.identity;r.logical_owner="fixed-owner";
+            r.operation_id="only-operation";r.accepted_guarantees=s.required_guarantees;r.history_retention_ms=60000;
+            accepted.receipt=r;return accepted;
+        }
+        f::job_api::AcceptanceResult Reconcile(const f::job_api::RequestIdentity& id)override {
+            ++reconciles;require(id.key==accepted.receipt->identity.key&&id.history_epoch==accepted.receipt->identity.history_epoch);
+            auto result=accepted;
+            if(reconciles==2)result.receipt->logical_owner="other-owner";
+            if(reconciles==3)result.receipt->accepted_guarantees.clear();
+            return result;
+        }
+        f::job_api::CancellationResult CancelWork(const f::job_api::RequestIdentity&)override {
+            ++cancellations;throw std::runtime_error("waiting expiry must not cancel work");
+        }
+    } admission;
+    f::job_api::RecoverableAcceptanceDispatcher dispatcher(admission);
+    SingleFrame selected([&](const std::string& frame){
+        const auto method=f::job_api::service_payload(frame).method;
+        auto reply=dispatcher.ExchangeFrame(frame); // Acceptance precedes delayed/lost reply.
+        if(method=="Submit"){std::this_thread::sleep_for(500ms);return std::string{};}
+        return reply;
+    },5);
+    ResolverFixture provider;provider.capability="abstraction.job";provider.contract="abstraction.job/acceptance@1";provider.endpoint=selected.endpoint;
+    f::ResolverDispatcher resolver(provider);
+    SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return resolver.ExchangeFrame(frame);});
+    auto jobs=f::Machine(bootstrap.endpoint).ResolveJobs({"required@1"},"local",abstraction::ipc::Clock::now()+800ms);
+    auto history=jobs.GetHistoryWindow();
+    f::job_api::Submission submission;submission.identity.key="caller-key";submission.identity.history_epoch=history.history_epoch;submission.kind="test";
+    timeout([&]{jobs.Submit(submission);});
+    require(submission.required_guarantees.empty());
+    auto recovery=jobs.WithDeadline(abstraction::ipc::Clock::now()+2s);
+    const auto result=recovery.Reconcile(submission.identity);
+    require(result.outcome=="accepted"&&result.receipt->operation_id=="only-operation"&&result.receipt->logical_owner==history.logical_owner);
+    timeout([&]{jobs.Reconcile(submission.identity);}); // Original scope stays expired.
+    for(unsigned i=0;i<2;++i) {
+        bool refused=false;
+        try{recovery.WithDeadline(abstraction::ipc::Clock::now()+2s).Reconcile(submission.identity);}
+        catch(const f::job_api::ServiceError&e){refused=e.code=="invalid_acceptance";}
+        require(refused);
+    }
+    bootstrap.finish();selected.finish();
+    require(admission.submits==1&&admission.reconciles==3&&admission.cancellations==0);
+}
 void call_budgets() {
     using namespace std::chrono_literals;
     for(const std::string cap:{"logging","config","router"}) {
@@ -287,5 +341,6 @@ int main(int argc,char**argv){try{
  job_binding();
  weak_job_receipts();
  job_owner_consistency();
+ job_call_budget();
 #endif
  std::cout<<"resolution binding checks passed\n";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

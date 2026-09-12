@@ -21,6 +21,10 @@ int main(int argc,char**argv){
    std::cout<<f::job_api::encode(recovered);return 0;
  }
  if(argc!=1)throw std::runtime_error("usage: facade_jobs_consumer [--default-runtime-endpoint | --runtime endpoint --jobs caller-key]");
+ const auto expired=abstraction::ipc::Clock::now()-std::chrono::seconds(1);
+ auto scoped=f::JobsClient("unused").WithDeadline(expired);
+ try{scoped.GetHistoryWindow();return 8;}catch(const abstraction::ipc::FrameError&e){if(e.status!=abstraction::ipc::Status::timeout)return 9;}
+ try{f::ResolveJobs(f::ResolutionClient("unused"),{},"local",expired);return 10;}catch(const abstraction::ipc::FrameError&e){if(e.status!=abstraction::ipc::Status::timeout)return 11;}
  f::JobsClient client("unused");
  try{client.Reconcile({});return 1;}catch(const f::job_api::ServiceError&e){if(e.code!="invalid_submission")return 2;}
  f::ResolveRequest q;q.capability="abstraction.job";q.contracts={"abstraction.job/acceptance@1"};q.scope="any";
