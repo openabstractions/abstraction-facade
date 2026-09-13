@@ -30,9 +30,10 @@
 <div class="wrap"><table>
 <thead><tr><th>kind</th><th>types</th></tr></thead>
 <tbody>
-<tr><td>built in</td><td><code>ResolutionStatus</code> <code>Scope</code> <code>string</code></td></tr>
-<tr><td>declared below</td><td><code>ServiceReference</code></td></tr>
+<tr><td>built in</td><td><code>BootstrapState</code> <code>ResolutionStatus</code> <code>Scope</code> <code>string</code></td></tr>
+<tr><td>declared below</td><td><code>BootstrapObservation</code> <code>ResolveRequest</code> <code>ResolveResult</code> <code>ServiceReference</code></td></tr>
 <tr><td>container <span class="tag">[DEF-T3]</span></td><td><code>list&lt;string&gt;</code></td></tr>
+<tr><td>repeated record <span class="tag">[DEF-A9]</span></td><td><code>list&lt;CapabilityObservation&gt;</code></td></tr>
 </tbody></table></div>
 <h2 id="structs">Structs <span class="tag">[DEF-T1]</span></h2>
 <p class="meta">A field is required, or says when it is omitted <span class="tag">[DEF-A4]</span>. Each struct says on its own what it does with a field name it has never heard of <span class="tag">[DEF-A7]</span>. A wire name never moves; where a language must spell it differently the field says so <span class="tag">[DEF-A2]</span>.</p>
@@ -67,6 +68,30 @@
 <tr><td>1</td><td><code>status</code></td><td><code>ResolutionStatus</code></td><td>required</td><td>—</td></tr>
 <tr><td>2</td><td><code>reference</code></td><td><code>ServiceReference</code></td><td>optional · omitted when absent</td><td>—</td></tr>
 </tbody></table></div>
+<h3 id="struct-BootstrapObservation"><code>BootstrapObservation</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>state</code></td><td><code>BootstrapState</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>detail</code></td><td><code>string</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-CapabilityObservation"><code>CapabilityObservation</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>request</code></td><td><code>ResolveRequest</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>result</code></td><td><code>ResolveResult</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-RuntimeObservation"><code>RuntimeObservation</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>bootstrap</code></td><td><code>BootstrapObservation</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>capabilities</code></td><td><code>list&lt;CapabilityObservation&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
 <h2 id="enums">Enumerations <span class="tag">[DEF-T5]</span></h2>
 <p>Enum fields carry JSON strings containing exact member names, never numeric IDs. Unknown names are preserved with grant and refused as bad_enum with refuse on read and write. Optional absent fields preserve presence separately from an empty string.</p>
 <p class="meta">An enumeration is a closed vocabulary of wire names, and each one says on its own what a reader does with a member it has never heard of <span class="tag">[DEF-A5]</span>.</p>
@@ -91,6 +116,23 @@
 <tr><td>5</td><td><code>unmet_requirements</code></td></tr>
 <tr><td>6</td><td><code>not_ready</code></td></tr>
 <tr><td>7</td><td><code>invalid_request</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-BootstrapState"><code>BootstrapState</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>unknown</code></td></tr>
+<tr><td>2</td><td><code>installed</code></td></tr>
+<tr><td>3</td><td><code>starting</code></td></tr>
+<tr><td>4</td><td><code>running</code></td></tr>
+<tr><td>5</td><td><code>unavailable</code></td></tr>
+</tbody></table></div>
+<h2 id="constants">Constants <span class="tag">[DEF-A6]</span></h2>
+<div class="wrap"><table>
+<thead><tr><th>name</th><th>type</th><th>value</th></tr></thead>
+<tbody>
+<tr><td><code>default_runtime_contracts</code></td><td><code>list&lt;string&gt;</code></td><td><code>abstraction.logging/sink@1, abstraction.config/reader@1, abstraction.job/acceptance@1, abstraction.job/operations@1, abstraction.config/editor@1</code></td></tr>
 </tbody></table></div>
 <h2 id="refusals">Refusal words <span class="tag">[DEF-R1]</span></h2>
 <div class="wrap"><table>

@@ -1,0 +1,7 @@
+[package]
+name="abstraction-facade-native"
+version="0.0.0"
+edition="2021"
+[dependencies]
+abstraction-facade-service={path="../rust"}
+abstraction-ipc={path="../../abstraction-identity/rust"}

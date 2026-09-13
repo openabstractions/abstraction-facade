@@ -1,3 +1,5 @@
+github.com/openabstractions/abstraction-asks/go v0.3.0 h1:Mstk/Qu5AN15MBUoO/6orbZuhsXJeQyNESR6s/wdSUo=
+github.com/openabstractions/abstraction-asks/go v0.3.0/go.mod h1:rhY8Atq3PmHaFtupx/gQsimbCtEPe4H1ztTxgfyPQUM=
 github.com/openabstractions/abstraction-cas/go v0.2.0 h1:p9oKcdfO2ogoWh59G+gUivIzsi/zuhhGobZjkqIrbaE=
 github.com/openabstractions/abstraction-cas/go v0.2.0/go.mod h1:pR8sRTbXF3k7fiXNjNiBqqc7i0Wu9RQvctH3q/wKUYo=
 github.com/openabstractions/abstraction-config/go v0.3.1-0.20260912072725-eaa28e1dcad4 h1:iBhFd7UNWPKTLyK2cC7eqP0En7If4HkYsXMUuf6g4Bk=
@@ -10,6 +12,10 @@ github.com/openabstractions/abstraction-job/go v0.4.3-0.20260912073823-0c5fe0c03
 github.com/openabstractions/abstraction-job/go v0.4.3-0.20260912073823-0c5fe0c03af5/go.mod h1:aRQv5YUZDvWJtlRMPU3Fj62whnxPWjtq4zId6gYl4As=
 github.com/openabstractions/abstraction-logging/go v0.3.1-0.20260912072712-ccf893212f23 h1:1pYIUcs2YvQM9MrGadHpo3RRwLVUnBe988L6Dvkyg2c=
 github.com/openabstractions/abstraction-logging/go v0.3.1-0.20260912072712-ccf893212f23/go.mod h1:sQgxmRrQiUakH6uhhvSQxN6sTrpTEsSYk5RoUC8gihs=
+github.com/openabstractions/abstraction-model/go v0.3.0 h1:Eemkl4wJOBWCi91TeUS1g4NE3Ch7EG1sWHakuJP+Nb4=
+github.com/openabstractions/abstraction-model/go v0.3.0/go.mod h1:evi89sD/uB2Jm6PHluTErh4+fj4A+JreIt/8TFouNe4=
+github.com/openabstractions/abstraction-rights/go v0.2.0 h1:4TAuO6lmu4BnTjMSmFfLDXqLJrc/ioqfiOWpTJwizpc=
+github.com/openabstractions/abstraction-rights/go v0.2.0/go.mod h1:LqndXiuIbrgHjj+nJsiReVcSWLvWZ4mHV1/CbOp1RNE=
 github.com/openabstractions/abstraction-router/go v0.0.0-20260911213816-49809b228933 h1:In3k3z6rMAk6cdIwe3G3FjRofqBa8aPstIXl/QIrH18=
 github.com/openabstractions/abstraction-router/go v0.0.0-20260911213816-49809b228933/go.mod h1:Xzvud7pO/t3fmXh8vtw+PkJQDkRedUmKR42+vCpLsyg=
 github.com/openabstractions/abstraction-storage/go v0.2.0 h1:aVg7v4gkftC83CJmdJeZzPNifvd5YB+uSl3RYaiEfzE=

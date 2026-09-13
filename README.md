@@ -1,75 +1,72 @@
 # abstraction-facade
 
-Ask for a capability without choosing its provider. The new service-client facade
-provides logging, configuration and model-host routing. Applications call these
-capabilities through IPC; separate Go services own provider behavior. Clients
-contain no file sink or local fallback provider.
+Ask this machine for a capability. The facade resolves a compatible service and
+returns a typed client. Applications use logging, configuration, routing or durable
+jobs through shared IPC. Services own their data and execution.
 
-**Development API.** These examples describe current source, not a published
-release or an installed OS service. The existing root Go package is a legacy
-facade; its jobs, download and storage paths have not migrated to this API.
-
-The additive [resolution interface](RESOLUTION.md) now describes finding a
-provider that supports your required contract and guarantees. It includes a Go
-selector and shared-IPC client, generated Go/C++/Python bindings and an independent
-C++ protocol package. Go and C++ now also provide `ResolveLog`, `ResolveConfig`
-and `ResolveRouter` to bind a client to the selected compatible service. The Go
-runtime composition and an installed C++ consumer have been tested together for
-logging and config on Windows. Installed activation is not yet connected to this
-runtime. The manual examples below retain the legacy fixed-endpoint accessors;
-see [resolution and its limits](RESOLUTION.md) for the new development path.
-
-## Start the logging host
-
-With a locally built `openabstractions` executable, run:
-
-```sh
-openabstractions serve logging --out ./logs/records.jsonl
-```
-
-This runs the logging host in the foreground. `--out` belongs to that host;
-applications do not open the file. Starting this process does not register it
-with the operating system's service manager.
-
-Clients and host use the same default endpoint. `ABSTRACTION_LOG_ENDPOINT`
-overrides the **framed** logging endpoint; the host also accepts `--endpoint`.
-Use the same endpoint for both sides. This is distinct from the legacy
-`ABSTRACTION_LOG_SERVICE` raw-record stream.
+**Development API.** This page describes the source at this revision. These
+examples describe coordinated source builds. Verify the selected public revision
+contains these APIs before adopting it; a released module may expose an earlier API. Python also has typed service clients; see [the Python package](py/README.md)
+for its supported capabilities and native transport requirements. Rust and
+JavaScript connectors require explicit server-trust configuration. Package
+availability and platform qualification are recorded separately from source support.
 
 ## Go
 
-`Discover().Log()`, `Discover().Config()` and `Discover().Router()` select the
-service client. Start the corresponding host with `serve logging`, `serve config`
-or `serve router-v1`. Router's framed endpoint is separate from the legacy
-`serve router` interface; GPU cost reporting remains on that legacy interface.
+Requirements: Go 1.26 or newer and a running compatible runtime.
 
-Use the service-only `/go/client` package:
+The primary package is `github.com/openabstractions/abstraction-facade/go`.
+`Discover` creates the resolver entry point. Each `Resolve*` call checks contracts
+and guarantees and returns either a binding or an error.
 
 ```go
 package main
 
 import (
+    "context"
     "log"
-    facade "github.com/openabstractions/abstraction-facade/go/client"
+    "time"
+
+    facade "github.com/openabstractions/abstraction-facade/go"
 )
 
 func main() {
-    events := facade.Discover().Log()
-    if err := events.Log(0, "worker started", map[string]string{"component": "worker"}); err != nil {
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+    defer cancel()
+    events, err := facade.Discover().ResolveLog(ctx, facade.Requirements{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    if err := events.LogContext(ctx, 0, "worker started", map[string]string{"component": "worker"}); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-These legacy accessors construct the conventional endpoint; they do not query
-the resolver or certify that a service is running.
-The requested operation reports service absence as an error. `Log` supplies the
-schema and timestamp so the application names only its event and attributes.
+The same context bounds resolution and this write. A reusable binding accepts a
+fresh context for each later call. `ResolveConfig`, `ResolveRouter`, `ResolveJobs`
+and `ResolveJobOperations` select their respective contracts. Requirements name
+required guarantees and eligible scope. Unmet requirements return typed refusals.
+
+For a released revision that exposes these methods, create an application module,
+then select that exact facade revision:
+
+```sh
+go mod init example.com/my-app
+go get github.com/openabstractions/abstraction-facade/go@<reviewed-revision>
+go build .
+```
+
+Replace the placeholder with the commit or tag you reviewed. Module metadata
+must resolve all dependencies at that revision. For coordinated development
+checkouts, use a Go workspace containing the public modules; this tests source
+compatibility and leaves release availability to a separate check.
 
 ## C++17
 
-Against locally built and installed development packages, point
-`CMAKE_PREFIX_PATH` at their installation prefix:
+Use the [verified public revision set and complete example](cpp/examples/logging/README.md),
+or build development packages using the [source installation instructions](cpp/README.md#build-and-install),
+then give the resulting prefix to this outside application:
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
@@ -85,7 +82,7 @@ target_link_libraries(my_app PRIVATE abstraction::facade_client)
 
 int main() {
     try {
-        auto events = abstraction::facade::Discover().Log();
+        auto events = abstraction::facade::Discover().ResolveLog();
         events.Log(0, "worker started", {{"component", "worker"}});
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
@@ -94,27 +91,55 @@ int main() {
 }
 ```
 
-The facade depends on `abstraction_logging`, `abstraction_config` and
-`abstraction_router`, which use the shared
-`abstraction_ipc` client runtime. CMake resolves installed dependencies or sibling
-source checkouts; it does not fetch providers. The application gets a client,
-not a logging server.
+`Log`, `Config` and `Router` resolve registered services with default requirements.
+Use their `Resolve*` forms for explicit guarantees and scope. The shared transport
+supports a deadline and cancellation token across resolution and service calls.
+[C++ package and call lifetime](cpp/README.md).
 
-## What success means
+An application using just durable jobs can link the smaller
+`abstraction::facade_jobs` target. The [job consumer](cpp/test/jobs/README.md)
+shows submission, observation and bounded result access.
 
-Logging is one-way. A successful call confirms local transport submission, **not
-a receipt that the host persisted the record**. Connection and encoding failures
-are errors; an absent service never causes a client to create a local store.
-See the [logging contract](https://github.com/openabstractions/abstraction-logging/blob/main/CONTRACT.md)
-for the capability's semantics.
+## Runtime and ownership
 
-The new facade exposes `Log()`, `Config()` and `Router()`. The older import
-`github.com/openabstractions/abstraction-facade/go` still supplies legacy
-`Discover() (Machine, error)`, `Jobs()`, `Download()`, `Storage()`, `Log(program)`
-and `Bindings()`. Those behaviors should not be read as guarantees of the new
-service-client path. Python's generated logging protocol client is separate;
-this page does not claim a Python facade or complete platform conformance.
+The host installs and activates the shared runtime. An application discovers its
+bootstrap address and asks the resolver for a service. For development, a locally
+built `openabstractions serve runtime` runs that host in the foreground. The
+default host registers logging, configuration and durable jobs. Routing requires
+a registered routing provider.
 
-[Adoption and contribution guidance](CONTRIBUTING.md) ·
+`ABSTRACTION_RUNTIME_ENDPOINT` selects an explicit bootstrap address for an
+isolated host. Individual capability endpoint overrides do not choose the
+facade's providers. An absent resolver or unavailable capability returns an error.
+The application creates no local provider as a consequence of that error.
+
+Accepted work stays with its original owner. Persist request identity and binding
+recovery information and reconcile uncertain outcomes there. Cancelling a wait
+ends the caller's wait; `CancelWork` requests cancellation of accepted work.
+[Resolution contract](RESOLUTION.md).
+
+Logging transport completion confirms submission of the frame. Durable logging
+acknowledgment remains outside the current sink contract. Configuration values
+and provenance are diagnostic settings; service storage stays behind service APIs.
+
+## Migrating earlier callers
+
+The root Go package now exposes service resolution. `Discover` returns `*Machine`
+directly; resolution methods return errors. Earlier `Jobs`, `Download`, `Storage`,
+`Log(program)` and `Bindings` methods belong to the explicit
+`github.com/openabstractions/abstraction-facade/go/legacy` adoption package.
+Selecting that package preserves earlier local-provider behavior and its weaker
+lifecycle. It is a temporary migration choice for existing integrations.
+
+The Go `/client` package uses the same resolved APIs. Replace its old `Log`,
+`Config` and `Router` accessors with `ResolveLog`, `ResolveConfig` and
+`ResolveRouter`. C++ convenience accessors retain their spelling and now perform
+resolution; they can throw a resolution error before a capability call.
+
+Explicit capability client constructors still accept a deliberately supplied
+endpoint. Legacy provider APIs expose a different ownership model; keep their store and
+lifecycle requirements explicit when maintaining an earlier integration.
+
+[Agent adoption and contribution checks](CONTRIBUTING.md) ·
 [OpenAbstractions](https://github.com/openabstractions/abstractions) ·
 [Apache-2.0 license](LICENSE)

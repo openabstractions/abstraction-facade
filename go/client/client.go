@@ -1,21 +1,25 @@
-// Package client is the service-only facade. Unlike the legacy facade package,
-// it imports no embedded store or file provider. Service absence is an error
-// from the requested capability, never a request to create local state.
+// Package client supplies service bindings selected by the runtime resolver.
+// Service absence is reported by the requested capability. Discovery performs
+// no activation or provider initialization.
 package client
 
 import (
-	config "github.com/openabstractions/abstraction-config/go/client"
-	logging "github.com/openabstractions/abstraction-logging/go/client"
-	router "github.com/openabstractions/abstraction-router/go/client"
+	"context"
+	"github.com/openabstractions/abstraction-facade/go-core/bootstrap"
+	"github.com/openabstractions/abstraction-facade/go-core/resolution"
+	"github.com/openabstractions/abstraction-identity/listen"
 )
 
-type Machine struct{ endpoint string }
+type Machine struct {
+	endpoint      string
+	server        *listen.ServerExpectation
+	unverified    bool
+	providerTrust resolution.ProviderTrust
+	// Private seam for isolated installation-selection fixtures.
+	selectInstalled func(context.Context) (bootstrap.Selection, error)
+}
 
-// Discover creates a facade using the runtime bootstrap convention.
-// ResolveLog/ResolveConfig/ResolveRouter query its actual registrations.
+// Discover selects registered installation evidence before contacting the resolver.
+// Unsupported installation proof is returned explicitly. No unverified fallback.
+// Resolve* methods query actual registrations and preserve typed refusals.
 func Discover() *Machine { return &Machine{} }
-
-// Log is the legacy fixed-endpoint accessor. Use ResolveLog for runtime selection.
-func (*Machine) Log() *logging.Client   { return logging.Discover() }
-func (*Machine) Config() *config.Client { return config.Discover() }
-func (*Machine) Router() *router.Client { return router.Discover() }

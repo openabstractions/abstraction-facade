@@ -56,3 +56,32 @@ struct ResolveResult {
 service Resolver {
  ResolveResult Resolve(1:ResolveRequest request)(doc="Find an authorized ready candidate satisfying an exact acceptable contract and all required guarantees. Does not submit work, activate an embedded provider, or transfer ownership.")
 }(wire_name="abstraction.facade/resolver@1",doc="Common provider resolution vocabulary. Authorization comes from the receiving boundary, never from request fields. See RESOLUTION.md for selection and refusal semantics.")
+
+// Platform evidence and resolver evidence are independent observations.
+enum BootstrapState {
+ 1: unknown
+ 2: installed
+ 3: starting
+ 4: running
+ 5: unavailable
+}(unknown="refuse")
+struct BootstrapObservation {
+ 1: required BootstrapState state
+ 2: optional string detail(omit="absent")
+}(unknown_fields="refuse",doc="Read-only platform registration or supervisor evidence. Unknown means observation is unavailable; unavailable requires actual evidence that the selected registration is absent. Installed and starting require registration or supervisor evidence. Running describes a supervisor process and does not establish capability readiness. A missing endpoint alone establishes none of these states. Detail is diagnostic text, never authority or a recovery instruction.")
+struct CapabilityObservation {
+ 1: required ResolveRequest request
+ 2: optional ResolveResult result(omit="absent")
+}(unknown_fields="refuse",doc="One authorized resolver observation. An absent result means unobserved because the query was not completed; it does not imply unavailable. Existing resolution statuses and disclosure rules apply unchanged. A resolved reference remains a candidate binding, not proof of successful provider calls.")
+struct RuntimeObservation {
+ 1: required BootstrapObservation bootstrap
+ 2: required list<CapabilityObservation> capabilities
+}(unknown_fields="refuse",doc="Client-composed point-in-time diagnostics, with no new service or activation operation. Platform evidence is explicit and may be unknown. Capability queries use one caller waiting budget and authority; observations are sequential and not an atomic snapshot. Transport or cancellation errors are reported separately by the language observation API; unanswered entries retain absent results.")
+
+const list<string> default_runtime_contracts = [
+ "abstraction.logging/sink@1",
+ "abstraction.config/reader@1",
+ "abstraction.job/acceptance@1",
+ "abstraction.job/operations@1",
+ "abstraction.config/editor@1"
+]

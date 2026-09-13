@@ -1,6 +1,7 @@
 #include <abstraction/facade/client.hpp>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -75,11 +76,114 @@ public:
     ~SingleFrame(){if(worker_.joinable()){CancelSynchronousIo(worker_.native_handle());worker_.join();}CloseHandle(pipe_);}
     void finish(){worker_.join();if(error_)std::rethrow_exception(error_);}
 };
+struct OperationsFixture : f::job_api::OperationControl {
+    f::job_api::ObservationResult observation;
+    f::job_api::ResultRead result;
+    f::job_api::ObservationResult ObserveWork(const f::job_api::RequestIdentity&) override {return observation;}
+    f::job_api::ResultRead ReadResult(const f::job_api::RequestIdentity&,const std::int64_t&,const std::int64_t&) override {return result;}
+};
+void job_operations() {
+    namespace a=f::job_api;
+    const a::RequestIdentity id{"key","epoch"};
+    a::Receipt receipt;receipt.identity=id;receipt.logical_owner="owner";receipt.operation_id="op";
+    receipt.history_retention_ms=1000;receipt.accepted_guarantees={"required@1"};
+    OperationsFixture initial;
+    initial.observation.outcome="observed";
+    a::OperationSnapshot snapshot;snapshot.receipt=receipt;snapshot.state="pending";snapshot.progress.done=2;snapshot.progress.total=1;
+    a::WorkFailure failure;failure.classification="retryable";failure.message="last attempt";snapshot.failure=failure;
+    initial.observation.snapshot=snapshot;
+    initial.result.outcome="data";a::ResultChunk chunk;chunk.receipt=receipt;chunk.offset=0;chunk.total=3;chunk.data={0,10,255};chunk.eof=true;initial.result.chunk=chunk;
+    auto probe=[&](OperationsFixture fixture,bool observation,bool reject){
+      a::OperationControlDispatcher dispatch(fixture);
+      SingleFrame pipe([&](const std::string& frame){return dispatch.ExchangeFrame(frame);});
+      f::JobsClient client(pipe.endpoint,5000,{"required@1"},"owner");
+      bool refused=false;
+      try {if(observation){auto value=client.ObserveWork(id);require(value.snapshot.has_value());}
+           else {auto value=client.ReadResult(id,0,3);require(value.chunk&&value.chunk->data==std::vector<std::uint8_t>({0,10,255}));}}
+      catch(const a::ServiceError&){refused=true;}
+      require(refused==reject);pipe.finish();
+    };
+    probe(initial,true,false);probe(initial,false,false);
+    std::vector<std::function<void(OperationsFixture&)>> bad_observation={
+      [](auto&f){f.observation.snapshot.reset();},
+      [](auto&f){f.observation.outcome="unknown";},
+      [](auto&f){f.observation.snapshot->progress.done=-1;},
+      [](auto&f){f.observation.snapshot->progress.total=-1;},
+      [](auto&f){f.observation.snapshot->receipt.identity.key="other";},
+      [](auto&f){f.observation.snapshot->receipt.logical_owner="other";},
+      [](auto&f){f.observation.snapshot->receipt.accepted_guarantees.clear();}
+    };
+    for(auto edit:bad_observation){auto fixture=initial;edit(fixture);probe(fixture,true,true);}
+    std::vector<std::function<void(OperationsFixture&)>> bad_chunk={
+      [](auto&f){f.result.chunk.reset();},[](auto&f){f.result.outcome="not_ready";},
+      [](auto&f){f.result.chunk->offset=1;},[](auto&f){f.result.chunk->total=-1;},
+      [](auto&f){f.result.chunk->total=2;},[](auto&f){f.result.chunk->total=4;},
+      [](auto&f){f.result.chunk->eof=false;},
+      [](auto&f){f.result.chunk->data.clear();f.result.chunk->eof=false;},
+      [](auto&f){f.result.chunk->data.resize(65537);},
+      [](auto&f){f.result.chunk->receipt.identity.history_epoch="other";},
+      [](auto&f){f.result.chunk->receipt.logical_owner="other";},
+      [](auto&f){f.result.chunk->receipt.accepted_guarantees.clear();}
+    };
+    for(auto edit:bad_chunk){auto fixture=initial;edit(fixture);probe(fixture,false,true);}
+    f::JobsClient unused("unused");
+    for(auto bounds:std::vector<std::pair<std::int64_t,std::int64_t>>{{-1,1},{0,0},{0,65537}}){
+      bool refused=false;try{unused.ReadResult(id,bounds.first,bounds.second);}catch(const a::ServiceError&e){refused=e.code=="invalid_request";}require(refused);
+    }
+    auto expired=unused.WithDeadline(abstraction::ipc::Clock::now()-std::chrono::seconds(1));
+    try{expired.ObserveWork(id);throw std::runtime_error("expired observation sent");}catch(const abstraction::ipc::FrameError&e){require(e.status==abstraction::ipc::Status::timeout);}
+}
+struct CopyFixture : OperationsFixture {
+    unsigned calls=0;
+    std::string mode;
+    f::job_api::ResultRead ReadResult(const f::job_api::RequestIdentity& id,const std::int64_t& offset,const std::int64_t& max) override {
+        ++calls;require(max==65536);
+        f::job_api::ResultRead r;r.outcome="data";f::job_api::ResultChunk c;
+        c.receipt.identity=id;c.receipt.logical_owner="owner";c.receipt.operation_id="op";
+        c.receipt.history_retention_ms=1000;c.offset=offset;c.total=65537;
+        c.data.assign(offset?1:65536,offset?2:1);c.eof=offset!=0;
+        if(mode=="total"&&offset){++c.total;c.eof=false;}
+        if(mode=="operation"&&offset)c.receipt.operation_id="changed";
+        if(mode=="empty"){c.data.clear();c.total=0;c.eof=true;}
+        if(mode=="not_ready"){r.outcome=mode;return r;}
+        r.chunk=c;return r;
+    }
+};
+class CopyBuffer : public std::stringbuf {
+public:
+    std::string mode;
+    std::streamsize xsputn(const char* s,std::streamsize n) override {
+        if(mode=="short")return std::stringbuf::xsputn(s,7);
+        if(mode=="throw"){std::stringbuf::xsputn(s,7);throw std::runtime_error("sink failed after unknown prefix");}
+        return std::stringbuf::xsputn(s,n);
+    }
+};
+void job_copy() {
+    namespace a=f::job_api;
+    for(const std::string mode:{"normal","total","operation","empty","not_ready","short","throw"}){
+        CopyFixture fixture;fixture.mode=mode;a::OperationControlDispatcher dispatch(fixture);
+        const unsigned exchanges=(mode=="normal"||mode=="total"||mode=="operation")?2:1;
+        SingleFrame pipe([&](const std::string& frame){return dispatch.ExchangeFrame(frame);},exchanges);
+        f::JobsClient client(pipe.endpoint,5000,{},"owner");CopyBuffer buffer;buffer.mode=mode;std::ostream output(&buffer);
+        auto copied=client.CopyResult({"key","epoch"},output);pipe.finish();require(fixture.calls==exchanges);
+        if(mode=="normal"){require(!copied.error&&copied.confirmed==65537&&buffer.str().size()==65537&&buffer.str().back()==2);}
+        else if(mode=="empty"){require(!copied.error&&copied.confirmed==0&&buffer.str().empty());}
+        else {
+            require(copied.error!=nullptr);
+            if(mode=="total"||mode=="operation"||mode=="not_ready"){
+                try{std::rethrow_exception(copied.error);}catch(const a::ServiceError&e){require(e.code==(mode=="not_ready"?mode:"invalid_result"));}
+                require(copied.confirmed==(mode=="not_ready"?0:65536));
+            } else if(mode=="short"){require(copied.confirmed==7&&buffer.str().size()==7);}
+            else {require(copied.confirmed==0&&buffer.str().size()==7);}
+        }
+    }
+}
 struct ResolverFixture:f::Resolver {
     std::string capability,contract,endpoint;
+    bool defaults=false;
     f::ResolveResult Resolve(const f::ResolveRequest& q)override {
         require(q.capability==capability&&q.contracts==std::vector<std::string>{contract});
-        require(q.guarantees==std::vector<std::string>{"required@1"}&&q.scope=="local");
+        require(defaults ? (q.guarantees.empty()&&q.scope=="any") : (q.guarantees==std::vector<std::string>{"required@1"}&&q.scope=="local"));
         return resolved(q,endpoint);
     }
 };
@@ -153,7 +257,7 @@ void job_binding() {
   refusal(status=="remote"||status=="wrong-transport"?"unsupported_transport":status,[&]{f::Machine(service.endpoint).ResolveJobs();});service.finish();
  }
 }
-void selected_endpoints() {
+void selected_endpoints(bool defaults=false) {
     for(const std::string cap:{"logging","config","router"}) {
         std::string method;
         SingleFrame selected([&](const std::string& frame){
@@ -174,18 +278,20 @@ void selected_endpoints() {
           return abstraction::router::service_reply(v,raw,nullptr);
         });
         ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
+        provider.defaults=defaults;
         provider.contract=provider.capability+(cap=="logging"?"/sink@1":cap=="config"?"/reader@1":"/router@1");
         f::ResolverDispatcher dispatcher(provider);
         SingleFrame bootstrap([&](const std::string& frame){return dispatcher.ExchangeFrame(frame);});
         f::Machine machine(bootstrap.endpoint);
-        if(cap=="logging")machine.ResolveLog({"required@1"},"local").Log(1,"selected logging");
-        if(cap=="config")require(machine.ResolveConfig({"required@1"},"local").Read().stamp=="selected-config");
-        if(cap=="router")require(machine.ResolveRouter({"required@1"},"local").Hosts().doubled==std::vector<std::string>{"selected-router"});
+        if(cap=="logging")(defaults?machine.Log():machine.ResolveLog({"required@1"},"local")).Log(1,"selected logging");
+        if(cap=="config")require((defaults?machine.Config():machine.ResolveConfig({"required@1"},"local")).Read().stamp=="selected-config");
+        if(cap=="router")require((defaults?machine.Router():machine.ResolveRouter({"required@1"},"local")).Hosts().doubled==std::vector<std::string>{"selected-router"});
         bootstrap.finish();selected.finish();require(!method.empty());
     }
+    for(const std::string cap:{"logging","config","router"})
     for(const std::string status:{"forbidden","not_ready","unavailable"}) {
       SingleFrame bootstrap([&](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;payload.value.status=status;std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
-      refusal(status,[&]{f::Machine(bootstrap.endpoint).ResolveLog();});bootstrap.finish();
+      refusal(status,[&]{f::Machine m(bootstrap.endpoint);if(cap=="logging")m.Log();else if(cap=="config")m.Config();else m.Router();});bootstrap.finish();
     }
     SingleFrame forged([](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;payload.value=resolved(request());payload.value.reference->contract="wrong-contract";std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
     refusal("invalid_resolution",[&]{f::Machine(forged.endpoint).ResolveLog();});forged.finish();
@@ -310,6 +416,9 @@ void call_budgets() {
     }
 }
 
+#include "cancellation_cases.hpp"
+#include "config_editor_cases.hpp"
+#include "status_cases.hpp"
 #endif
 int main(int argc,char**argv){try{
  if(argc==2&&std::string(argv[1])=="--default-runtime-endpoint") {std::cout<<abstraction::facade::runtime_endpoint()<<"\n";return 0;}
@@ -325,6 +434,12 @@ int main(int argc,char**argv){try{
    require(recovered.receipt->accepted_guarantees==accepted.receipt->accepted_guarantees);
    std::cout<<f::job_api::encode(recovered);return 0;
  }
+ if(argc==3&&std::string(argv[1])=="--observe") {
+   auto result=f::Machine(argv[2]).Observe();
+   std::string raw;f::enc_runtimeobservation(raw,result.observation,0);std::cout<<raw<<"\n";
+   if(result.error)std::rethrow_exception(result.error);
+   return 0;
+ }
  if(argc==3&&std::string(argv[1])=="--runtime") {
    f::Machine machine(argv[2]);
    machine.ResolveLog().Log(1,"cpp-resolved-log");
@@ -336,8 +451,14 @@ int main(int argc,char**argv){try{
  (void)legacy;
  semantics();
 #ifdef _WIN32
+ binding_cancellation();
+ config_editor();
+ status_observation();
  call_budgets();
  selected_endpoints();
+ selected_endpoints(true);
+ job_copy();
+ job_operations();
  job_binding();
  weak_job_receipts();
  job_owner_consistency();

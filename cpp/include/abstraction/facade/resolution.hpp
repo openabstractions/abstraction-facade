@@ -1,7 +1,10 @@
 #pragma once
 #include <abstraction/facade/rec.h>
 #include <abstraction/ipc/frame.hpp>
+#include <abstraction/ipc/bootstrap.hpp>
 #include <algorithm>
+#include <memory>
+#include <mutex>
 #include <cstdlib>
 #ifdef _WIN32
 #include <abstraction/ipc/process.hpp>
@@ -9,22 +12,7 @@
 
 namespace abstraction::facade {
 
-inline std::string runtime_endpoint() {
-    if (const char* value = std::getenv("ABSTRACTION_RUNTIME_ENDPOINT")) {
-        if (*value) return value;
-    }
-#ifdef _WIN32
-    return std::string(R"(\\.\pipe\openabstractions-user-)") + ipc::process_user_sid() + "-runtime-v1";
-#else
-    if (const char* value = std::getenv("XDG_RUNTIME_DIR")) {
-        if (*value) return std::string(value) + "/openabstractions-runtime-v1.sock";
-    }
-    const char* temporary = std::getenv("TMPDIR");
-    const char* user = std::getenv("USER");
-    return std::string(temporary && *temporary ? temporary : "/tmp") +
-        "/openabstractions-runtime-v1-" + (user ? user : "") + ".sock";
-#endif
-}
+inline std::string runtime_endpoint() { return ipc::runtime_endpoint(); }
 
 class ResolutionError : public std::runtime_error {
 public:
@@ -91,23 +79,56 @@ inline ServiceReference local_binding(const ResolveRequest& request, const Resol
     return ref;
 }
 
-// Shared FrameTransport performs the call; resolution neither activates a
-// provider nor proves server trust. Transport failures propagate unchanged.
+// Default clients select and retain independent installed-server evidence on
+// their first call. Explicit endpoints accept an explicit server expectation.
 class ResolutionClient {
 public:
-    explicit ResolutionClient(std::string endpoint = runtime_endpoint(),
+    ResolutionClient() : endpoint_(runtime_endpoint()), timeout_(5000), selection_(std::make_shared<Selection>()) {}
+    explicit ResolutionClient(std::string endpoint,
                               std::uint32_t timeout_ms = 5000)
         : endpoint_(std::move(endpoint)), timeout_(timeout_ms) {}
 
+    ResolutionClient WithCancellation(ipc::CancellationToken token) const {
+        auto scoped = *this;
+        scoped.cancellation_ = std::move(token);
+        return scoped;
+    }
+    ResolutionClient WithServerExpectation(std::optional<ipc::ServerExpectation> server) const {
+        auto scoped = *this; scoped.server_ = std::move(server); scoped.selection_.reset(); return scoped;
+    }
+    std::optional<ipc::ServerExpectation> Server() const {
+        if (!selection_) return server_;
+        std::lock_guard<std::mutex> lock(selection_->mutex);
+        return selection_->server;
+    }
+    ipc::CancellationToken Cancellation() const {return cancellation_;}
+    std::uint32_t Timeout() const { return timeout_; }
     ResolveResult Resolve(const ResolveRequest& request) const {
-        ipc::FrameTransport transport(endpoint_, timeout_, 1 << 20);
-        return resolve(request, transport);
+        return Resolve(request, ipc::Clock::now() + std::chrono::milliseconds(timeout_));
     }
     ResolveResult Resolve(const ResolveRequest& request, ipc::Deadline deadline) const {
+        validate_resolve_request(request);
+        auto server = selected_server(deadline);
         ipc::FrameTransport transport(endpoint_, deadline, 1 << 20);
+        transport = transport.WithCancellation(cancellation_).WithServerExpectation(server);
         return resolve(request, transport);
     }
 private:
+    struct Selection {
+        std::mutex mutex;
+        std::optional<ipc::ServerExpectation> server;
+    };
+    std::optional<ipc::ServerExpectation> selected_server(ipc::Deadline deadline) const {
+        if (!selection_) return server_;
+        {
+            std::lock_guard<std::mutex> lock(selection_->mutex);
+            if (selection_->server) return selection_->server;
+        }
+        auto selected = ipc::SelectRuntime(deadline, cancellation_);
+        std::lock_guard<std::mutex> lock(selection_->mutex);
+        if (!selection_->server) selection_->server = std::move(selected);
+        return selection_->server;
+    }
     static ResolveResult resolve(const ResolveRequest& request, ipc::FrameTransport& transport) {
         validate_resolve_request(request);
         ResolverClient<ipc::FrameTransport> client(transport);
@@ -117,5 +138,76 @@ private:
     }
     std::string endpoint_;
     std::uint32_t timeout_;
+    ipc::CancellationToken cancellation_;
+    std::optional<ipc::ServerExpectation> server_;
+    std::shared_ptr<Selection> selection_;
 };
+// Generated service descriptors carry the authoritative wire name. Legacy wire
+// names without a capability/profile split cannot be resolved through this API.
+template<class Service>
+ResolveRequest service_request(std::vector<std::string> guarantees = {}, std::string scope = "any") {
+    const std::string capability(Service::capability), contract(Service::wire_name);
+    if (capability.empty() || contract.compare(0, capability.size()+1, capability+"/") != 0)
+        throw ResolutionError("invalid_service_descriptor");
+    ResolveRequest request{capability, {contract}, std::move(guarantees), std::move(scope)};
+    validate_resolve_request(request);
+    return request;
+}
+
+// Stable heap ownership keeps the generated client's transport reference valid
+// across moves. The generated interface stays usable with any suitable transport.
+template<class Service, class Transport>
+class BoundService {
+    using Client = typename Service::template Client<Transport>;
+    struct State {
+        ServiceReference reference;
+        Transport transport;
+        Client client;
+        State(ServiceReference r, Transport t)
+            : reference(std::move(r)), transport(std::move(t)), client(transport) {}
+    };
+    std::unique_ptr<State> state_;
+public:
+    BoundService(ServiceReference reference, Transport transport)
+        : state_(std::make_unique<State>(std::move(reference), std::move(transport))) {}
+    BoundService(BoundService&&) noexcept = default;
+    BoundService& operator=(BoundService&&) noexcept = default;
+    BoundService(const BoundService&) = delete;
+    BoundService& operator=(const BoundService&) = delete;
+    Client* operator->() { return &state_->client; }
+    const ServiceReference& Reference() const { return state_->reference; }
+};
+
+// An explicitly supplied transport owns its identity/scope guarantees. This
+// common binder checks the same descriptor and reference selection invariants.
+template<class Service, class Transport>
+BoundService<Service, Transport> BindService(const ServiceReference& reference, Transport transport,
+        const std::vector<std::string>& guarantees = {}, const std::string& scope = "any") {
+    auto request = service_request<Service>(guarantees, scope);
+    validate_resolve_result(request, ResolveResult{"resolved", reference});
+    return {reference, std::move(transport)};
+}
+
+template<class Service>
+BoundService<Service, ipc::FrameTransport> ResolveService(
+        const ResolutionClient& resolver, const std::vector<std::string>& guarantees,
+        const std::string& scope, ipc::Deadline deadline) {
+    auto request = service_request<Service>(guarantees, scope);
+    auto reference = local_binding(request, resolver.Resolve(request, deadline));
+    auto transport = ipc::FrameTransport(reference.endpoint, deadline, 2 * 1024 * 1024)
+        .WithCancellation(resolver.Cancellation()).WithServerExpectation(resolver.Server());
+    return {std::move(reference), std::move(transport)};
+}
+
+template<class Service>
+BoundService<Service, ipc::FrameTransport> ResolveService(
+        const ResolutionClient& resolver, const std::vector<std::string>& guarantees = {},
+        const std::string& scope = "any") {
+    auto request = service_request<Service>(guarantees, scope);
+    auto reference = local_binding(request, resolver.Resolve(request));
+    auto transport = ipc::FrameTransport(reference.endpoint, resolver.Timeout(), 2 * 1024 * 1024)
+        .WithCancellation(resolver.Cancellation()).WithServerExpectation(resolver.Server());
+    return {std::move(reference), std::move(transport)};
+}
+
 }

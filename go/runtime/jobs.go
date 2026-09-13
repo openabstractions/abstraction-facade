@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -18,25 +19,47 @@ import (
 	"github.com/openabstractions/abstraction-job/go/acceptanceprovider"
 )
 
-// jobHost composes admission with the shared transport; it does not run workers.
+// jobHost composes admission and optional execution with the shared transport.
 // The semaphore bounds active connections, including incomplete frames. Accepted
 // store mutations finish under provider ownership when callers stop waiting.
 type jobHost struct {
-	listener  listen.Listener
-	provider  *acceptanceprovider.Provider
-	owner     string
-	policy    func(*identity.Peer) bool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-	workers   sync.WaitGroup
-	slots     chan struct{}
-	onError   func(error)
-	onStopped func()
+	listener     listen.Listener
+	provider     *acceptanceprovider.Provider
+	owner        string
+	policy       func(*identity.Peer) bool
+	methodPolicy acceptanceprovider.MethodPolicy
+	ctx          context.Context
+	cancel       context.CancelFunc
+	closeOnce    sync.Once
+	lifecycle    sync.Mutex
+	serving      bool
+	closed       bool
+	rootLease    io.Closer
+	releaseOnce  sync.Once
+	workers      sync.WaitGroup
+	slots        chan struct{}
+	onError      func(error)
+	onStopped    func()
+	execution    bool
 }
 
-func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*identity.Peer) bool) (*jobHost, error) {
-	p, err := acceptanceprovider.Open(root, logicalOwner)
+func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*identity.Peer) bool, executor acceptanceprovider.Executor, managed bool) (*jobHost, error) {
+	lease, err := acceptanceprovider.AcquireHost(root)
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			lease.Close()
+		}
+	}()
+	var p *acceptanceprovider.Provider
+	if managed {
+		p, err = acceptanceprovider.OpenManaged(root, executor)
+	} else {
+		p, err = acceptanceprovider.OpenWithExecutor(root, logicalOwner, executor)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -44,15 +67,16 @@ func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*ident
 	if err != nil {
 		return nil, err
 	}
+	keep = true
 	ctx, cancel := context.WithCancel(context.Background())
-	return &jobHost{listener: l, provider: p, owner: osOwner, policy: policy, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 64)}, nil
+	return &jobHost{rootLease: lease, listener: l, provider: p, owner: osOwner, policy: policy, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 64), execution: executor != nil}, nil
 }
 
-func (h *jobHost) candidate(owner, endpoint string) resolution.Candidate {
+func (h *jobHost) candidate(endpoint string) resolution.Candidate {
 	return resolution.Candidate{Ready: true, Reference: wire.ServiceReference{
-		Provider: owner, Capability: "abstraction.job", Contract: "abstraction.job/acceptance@1",
+		Provider: h.provider.LogicalOwner(), Capability: "abstraction.job", Contract: "abstraction.job/acceptance@1",
 		Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: endpoint,
-		Guarantees: acceptanceprovider.Guarantees(),
+		Guarantees: h.provider.SupportedGuarantees(),
 	}}
 }
 
@@ -95,6 +119,13 @@ func (h *jobHost) authorize(peer *identity.Peer) (string, error) {
 func (h *jobHost) Close() error {
 	var err error
 	h.closeOnce.Do(func() {
+		h.lifecycle.Lock()
+		h.closed = true
+		serving := h.serving
+		h.lifecycle.Unlock()
+		if !serving {
+			defer h.releaseRoot()
+		}
 		h.cancel()
 		err = h.listener.Close()
 		// Remove readiness before any in-flight provider calls are drained.
@@ -105,11 +136,52 @@ func (h *jobHost) Close() error {
 	return err
 }
 
+func (h *jobHost) releaseRoot() {
+	h.releaseOnce.Do(func() {
+		if h.provider != nil {
+			if err := h.provider.CloseInventory(); err != nil && h.onError != nil {
+				h.onError(err)
+			}
+		}
+		if h.rootLease != nil {
+			h.rootLease.Close()
+		}
+	})
+}
+
 func (h *jobHost) Serve(ctx context.Context) error {
+	h.lifecycle.Lock()
+	if h.closed {
+		h.lifecycle.Unlock()
+		return nil
+	}
+	if h.serving {
+		h.lifecycle.Unlock()
+		return errors.New("runtime jobs: host already served")
+	}
+	h.serving = true
+	h.lifecycle.Unlock()
+	defer h.releaseRoot()
 	stop := context.AfterFunc(ctx, func() { h.Close() })
 	defer stop()
 	defer h.workers.Wait()
 	defer h.Close()
+	if h.execution {
+		h.workers.Add(1)
+		go func() {
+			defer h.workers.Done()
+			err := h.provider.Execute(h.ctx)
+			if h.ctx.Err() == nil {
+				if err == nil {
+					err = errors.New("runtime jobs: executor stopped")
+				}
+				if h.onError != nil {
+					h.onError(err)
+				}
+				h.Close()
+			}
+		}()
+	}
 	for {
 		conn, err := h.listener.Accept()
 		if err != nil {
@@ -134,7 +206,7 @@ func (h *jobHost) Serve(ctx context.Context) error {
 			defer conn.Close()
 			request, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 			defer cancel()
-			err := acceptanceprovider.HandleConnection(request, conn, h.provider, h.authorize)
+			err := acceptanceprovider.HandleConnectionWithPolicy(request, conn, h.provider, h.authorize, h.methodPolicy)
 			if err != nil && h.onError != nil && h.ctx.Err() == nil {
 				h.onError(err)
 			}

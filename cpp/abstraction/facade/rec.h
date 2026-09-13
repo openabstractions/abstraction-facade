@@ -142,11 +142,31 @@ public:
     std::size_t offset;
 };
 
+template <typename T>
+inline void enc_list(std::string& out, const std::vector<T>& v, int depth,
+                     void (*enc)(std::string&, const T&, int)) {
+    if (v.empty()) { out += "[]"; return; }
+    out += "[\n";
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        pad(out, depth + 1);
+        enc(out, v[i], depth + 1);
+        if (i + 1 < v.size()) out += ',';
+        out += '\n';
+    }
+    pad(out, depth);
+    out += ']';
+}
+
 inline const std::vector<std::string> kScopeNames = {"any", "local", "remote"};
 inline const std::string kScopeUnknown = "refuse";
 
 inline const std::vector<std::string> kResolutionStatusNames = {"resolved", "unavailable", "forbidden", "incompatible", "unmet_requirements", "not_ready", "invalid_request"};
 inline const std::string kResolutionStatusUnknown = "refuse";
+
+inline const std::vector<std::string> kBootstrapStateNames = {"unknown", "installed", "starting", "running", "unavailable"};
+inline const std::string kBootstrapStateUnknown = "refuse";
+
+inline const std::vector<std::string> kDefaultRuntimeContracts = {"abstraction.logging/sink@1", "abstraction.config/reader@1", "abstraction.job/acceptance@1", "abstraction.job/operations@1", "abstraction.config/editor@1"};
 
 struct ResolveRequest {
     std::string capability;
@@ -168,6 +188,21 @@ struct ServiceReference {
 struct ResolveResult {
     std::string status;
     std::optional<ServiceReference> reference;
+};
+
+struct BootstrapObservation {
+    std::string state;
+    std::string detail;
+};
+
+struct CapabilityObservation {
+    ResolveRequest request;
+    std::optional<ResolveResult> result;
+};
+
+struct RuntimeObservation {
+    BootstrapObservation bootstrap;
+    std::vector<CapabilityObservation> capabilities;
 };
 
 struct OAResolverResolveArguments {
@@ -294,6 +329,65 @@ inline void enc_resolveresult(std::string& out, const ResolveResult& v, int dept
         out += ": ";
         enc_servicereference(out, *v.reference, depth + 1);
     }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_bootstrapobservation(std::string& out, const BootstrapObservation& v, int depth) {
+    if (v.state != "unknown" && v.state != "installed" && v.state != "starting" && v.state != "running" && v.state != "unavailable") { throw Refusal("bad_enum",0); }
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "state");
+    out += ": ";
+    esc(out, v.state);
+    if (!v.detail.empty()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "detail");
+        out += ": ";
+        esc(out, v.detail);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_capabilityobservation(std::string& out, const CapabilityObservation& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "request");
+    out += ": ";
+    enc_resolverequest(out, v.request, depth + 1);
+    if (v.result.has_value()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "result");
+        out += ": ";
+        enc_resolveresult(out, *v.result, depth + 1);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_runtimeobservation(std::string& out, const RuntimeObservation& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "bootstrap");
+    out += ": ";
+    enc_bootstrapobservation(out, v.bootstrap, depth + 1);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "capabilities");
+    out += ": ";
+    enc_list<CapabilityObservation>(out, v.capabilities, depth + 1, enc_capabilityobservation);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -711,9 +805,34 @@ struct Reader {
     }
 };
 
+template <typename T>
+inline std::vector<T> decode_list(Reader& r, T (*elem)(Reader&)) {
+    if (r.at() != '[') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    std::vector<T> out;
+    r.skip_ws();
+    if (r.at() != ']') {
+        for (;;) {
+            r.skip_ws();
+            out.push_back(elem(r));
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != ']') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    return out;
+}
+
 inline ResolveRequest decode_resolverequest(Reader& r);
 inline ServiceReference decode_servicereference(Reader& r);
 inline ResolveResult decode_resolveresult(Reader& r);
+inline BootstrapObservation decode_bootstrapobservation(Reader& r);
+inline CapabilityObservation decode_capabilityobservation(Reader& r);
+inline RuntimeObservation decode_runtimeobservation(Reader& r);
 inline OAResolverResolveArguments decode_oaresolverresolvearguments(Reader& r);
 inline OAServiceFrame decode_oaserviceframe(Reader& r);
 inline OAServiceReply decode_oaservicereply(Reader& r);
@@ -865,6 +984,124 @@ inline ResolveResult decode_resolveresult(Reader& r) {
     --r.depth;
     if ((seen & 1u) != 1u) r.refuse("missing_field");
     if (v.status != "resolved" && v.status != "unavailable" && v.status != "forbidden" && v.status != "incompatible" && v.status != "unmet_requirements" && v.status != "not_ready" && v.status != "invalid_request") { r.refuse("bad_enum"); }
+    return v;
+}
+
+inline BootstrapObservation decode_bootstrapobservation(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    BootstrapObservation v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "state") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.state = r.str();
+            } else if (key == "detail") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.detail = r.str();
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    if (v.state != "unknown" && v.state != "installed" && v.state != "starting" && v.state != "running" && v.state != "unavailable") { r.refuse("bad_enum"); }
+    return v;
+}
+
+inline CapabilityObservation decode_capabilityobservation(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    CapabilityObservation v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "request") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.request = decode_resolverequest(r);
+            } else if (key == "result") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.result = decode_resolveresult(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline RuntimeObservation decode_runtimeobservation(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    RuntimeObservation v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "bootstrap") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.bootstrap = decode_bootstrapobservation(r);
+            } else if (key == "capabilities") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.capabilities = decode_list<CapabilityObservation>(r, decode_capabilityobservation);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
     return v;
 }
 
@@ -1119,6 +1356,7 @@ auto response=transport_.ExchangeFrame(frame);auto payload=service_response(resp
 return result.value;
 }
 };
+struct ResolverService{inline static constexpr std::string_view wire_name="abstraction.facade/resolver@1";inline static constexpr std::string_view capability="abstraction.facade";template<class Transport>using Client=ResolverClient<Transport>;};
 struct ResolverDispatcher:FrameWriter,FrameExchanger{Resolver&handler;explicit ResolverDispatcher(Resolver&h):handler(h){}
 void WriteFrame(std::string_view frame)override{auto v=service_payload(frame);if(v.service!="abstraction.facade/resolver@1")throw DispatchError("unknown_service");
 if(v.method=="Resolve"){

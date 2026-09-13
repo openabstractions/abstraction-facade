@@ -113,12 +113,34 @@ def esc(out, s):
     out += b'"'
 
 
+def enc_list(out, v, depth, enc):
+    if not v:
+        out += b"[]"
+        return
+    out += b"[\n"
+    for i, x in enumerate(v):
+        pad(out, depth + 1)
+        enc(out, x, depth + 1)
+        if i + 1 < len(v):
+            out += b","
+        out += b"\n"
+    pad(out, depth)
+    out += b"]"
+
+
 SCOPE_NAMES = ["any", "local", "remote"]
 SCOPE_UNKNOWN = "refuse"
 
 
 RESOLUTIONSTATUS_NAMES = ["resolved", "unavailable", "forbidden", "incompatible", "unmet_requirements", "not_ready", "invalid_request"]
 RESOLUTIONSTATUS_UNKNOWN = "refuse"
+
+
+BOOTSTRAPSTATE_NAMES = ["unknown", "installed", "starting", "running", "unavailable"]
+BOOTSTRAPSTATE_UNKNOWN = "refuse"
+
+
+DEFAULT_RUNTIME_CONTRACTS = ["abstraction.logging/sink@1", "abstraction.config/reader@1", "abstraction.job/acceptance@1", "abstraction.job/operations@1", "abstraction.config/editor@1"]
 
 
 class ResolveRequest:
@@ -144,6 +166,24 @@ class ResolveResult:
     def __init__(self, **kw):
         self.status = kw.get("status", "")
         self.reference = kw.get("reference", None)
+
+
+class BootstrapObservation:
+    def __init__(self, **kw):
+        self.state = kw.get("state", "")
+        self.detail = kw.get("detail", "")
+
+
+class CapabilityObservation:
+    def __init__(self, **kw):
+        self.request = kw.get("request", ResolveRequest())
+        self.result = kw.get("result", None)
+
+
+class RuntimeObservation:
+    def __init__(self, **kw):
+        self.bootstrap = kw.get("bootstrap", BootstrapObservation())
+        self.capabilities = kw.get("capabilities", [])
 
 
 class OAResolverResolveArguments:
@@ -277,6 +317,64 @@ def enc_resolveresult(out, v, depth):
         esc(out, "reference")
         out += b": "
         enc_servicereference(out, v.reference, depth + 1)
+    out += b"\n"
+    pad(out, depth)
+    out += b"}"
+
+
+def enc_bootstrapobservation(out, v, depth):
+    if type(v.state) is not str: raise Refusal("wrong_type",0)
+    if v.state != "unknown" and v.state != "installed" and v.state != "starting" and v.state != "running" and v.state != "unavailable": raise Refusal("bad_enum",0)
+    out += b"{"
+    out += b"\n"
+    pad(out, depth + 1)
+    esc(out, "state")
+    out += b": "
+    esc(out, v.state)
+    if v.detail:
+        out += b","
+        out += b"\n"
+        pad(out, depth + 1)
+        esc(out, "detail")
+        out += b": "
+        esc(out, v.detail)
+    out += b"\n"
+    pad(out, depth)
+    out += b"}"
+
+
+def enc_capabilityobservation(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    pad(out, depth + 1)
+    esc(out, "request")
+    out += b": "
+    enc_resolverequest(out, v.request, depth + 1)
+    if v.result is not None:
+        out += b","
+        out += b"\n"
+        pad(out, depth + 1)
+        esc(out, "result")
+        out += b": "
+        enc_resolveresult(out, v.result, depth + 1)
+    out += b"\n"
+    pad(out, depth)
+    out += b"}"
+
+
+def enc_runtimeobservation(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    pad(out, depth + 1)
+    esc(out, "bootstrap")
+    out += b": "
+    enc_bootstrapobservation(out, v.bootstrap, depth + 1)
+    out += b","
+    out += b"\n"
+    pad(out, depth + 1)
+    esc(out, "capabilities")
+    out += b": "
+    enc_list(out, v.capabilities, depth + 1, enc_capabilityobservation)
     out += b"\n"
     pad(out, depth)
     out += b"}"
@@ -691,6 +789,28 @@ class _Reader:
         self.depth -= 1
 
 
+def _decode_list(r, elem):
+    if r.at() != _LBRACK:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    out = []
+    r.ws()
+    if r.at() != _RBRACK:
+        while True:
+            r.ws()
+            out.append(elem(r))
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACK:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    return out
+
+
 def _decode_resolverequest(r):
     if r.at() != _LBRACE:
         raise r.refuse("wrong_type")
@@ -858,6 +978,139 @@ def _decode_resolveresult(r):
     if seen & 1 != 1:
         raise r.refuse("missing_field")
     if v.status != "resolved" and v.status != "unavailable" and v.status != "forbidden" and v.status != "incompatible" and v.status != "unmet_requirements" and v.status != "not_ready" and v.status != "invalid_request": raise r.refuse("bad_enum")
+    return v
+
+
+def _decode_bootstrapobservation(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = BootstrapObservation()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "state":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.state = r.string()
+            elif key == "detail":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.detail = r.string()
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    if v.state != "unknown" and v.state != "installed" and v.state != "starting" and v.state != "running" and v.state != "unavailable": raise r.refuse("bad_enum")
+    return v
+
+
+def _decode_capabilityobservation(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = CapabilityObservation()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "request":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.request = _decode_resolverequest(r)
+            elif key == "result":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.result = _decode_resolveresult(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _decode_runtimeobservation(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = RuntimeObservation()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "bootstrap":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.bootstrap = _decode_bootstrapobservation(r)
+            elif key == "capabilities":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.capabilities = _decode_list(r, _decode_capabilityobservation)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
     return v
 
 
@@ -1216,6 +1469,9 @@ _SERVICE_RECORDS = {
     "ResolveRequest": (ResolveRequest, [("capability","string","never"),("contracts","list<string>","never"),("guarantees","list<string>","never"),("scope","string","never"),]),
     "ServiceReference": (ServiceReference, [("provider","string","never"),("capability","string","never"),("contract","string","never"),("guarantees","list<string>","never"),("scope","string","never"),("transport","string","never"),("endpoint","string","never"),]),
     "ResolveResult": (ResolveResult, [("status","string","never"),("reference","ServiceReference","absent"),]),
+    "BootstrapObservation": (BootstrapObservation, [("state","string","never"),("detail","string","absent"),]),
+    "CapabilityObservation": (CapabilityObservation, [("request","ResolveRequest","never"),("result","ResolveResult","absent"),]),
+    "RuntimeObservation": (RuntimeObservation, [("bootstrap","BootstrapObservation","never"),("capabilities","list<CapabilityObservation>","never"),]),
     "OAResolverResolveArguments": (OAResolverResolveArguments, [("request","ResolveRequest","never"),]),
     "OAServiceFrame": (OAServiceFrame, [("version","i32","never"),("service","string","never"),("method","string","never"),("arguments","json","never"),]),
     "OAServiceReply": (OAServiceReply, [("version","i32","never"),("service","string","never"),("method","string","never"),("ok","bool","never"),("payload","json","never"),]),

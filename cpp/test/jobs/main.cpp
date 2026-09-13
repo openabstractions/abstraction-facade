@@ -1,6 +1,11 @@
 #include <abstraction/facade/jobs.hpp>
 #include <type_traits>
 #include <iostream>
+#include <sstream>
+#include <thread>
+#ifdef OA_DOWNLOAD_REQUEST
+#include <abstraction/download/request/rec.h>
+#endif
 int main(int argc,char**argv){
  try{
  namespace f=abstraction::facade;
@@ -20,6 +25,40 @@ int main(int argc,char**argv){
       recovered.receipt->logical_owner!=accepted.receipt->logical_owner||recovered.receipt->accepted_guarantees!=accepted.receipt->accepted_guarantees)return 6;
    std::cout<<f::job_api::encode(recovered);return 0;
  }
+#ifdef OA_DOWNLOAD_REQUEST
+ if(argc==5&&std::string(argv[1])=="--execute") {
+   const auto deadline=abstraction::ipc::Clock::now()+std::chrono::seconds(15);
+   auto jobs=f::ResolveJobOperations(f::ResolutionClient(argv[2]),{"abstraction.job/reconciliation@1"},"local",deadline);
+   const auto history=jobs.GetHistoryWindow();
+   abstraction::download::request::Request request;
+   const std::string url=argv[3];
+   request.sources.push_back({url.rfind("https:",0)==0?"https":"http",url});
+   const auto payload=abstraction::download::request::encode(request);
+   f::job_api::Submission submission;submission.identity={argv[4],history.history_epoch};submission.kind="download";
+   submission.spec.assign(payload.begin(),payload.end());
+   const auto accepted=jobs.Submit(submission);
+   if(accepted.outcome!="accepted"||!accepted.receipt)throw std::runtime_error("request not accepted");
+   for(;;) {
+     auto observed=jobs.ObserveWork(submission.identity);
+     if(observed.outcome!="observed"||!observed.snapshot)throw std::runtime_error("operation unobservable");
+     const auto& snapshot=*observed.snapshot;
+     if(snapshot.receipt.operation_id!=accepted.receipt->operation_id)throw std::runtime_error("operation changed");
+     if(snapshot.state=="complete")break;
+     if(snapshot.state=="failed"||snapshot.state=="cancelled")throw std::runtime_error("operation did not complete");
+     if(abstraction::ipc::Clock::now()>=deadline)throw std::runtime_error("observation budget expired");
+     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+   }
+   std::ostringstream output;
+   const auto copy=jobs.CopyResult(submission.identity,output);
+   if(copy.error)std::rethrow_exception(copy.error);
+   const auto bytes=output.str();
+   if(copy.confirmed!=static_cast<std::int64_t>(bytes.size()))throw std::runtime_error("copy count differs");
+   static const char digits[]="0123456789abcdef";
+   std::cout<<"RESULT ";for(unsigned char byte:bytes)std::cout<<digits[byte>>4]<<digits[byte&15];std::cout<<"\n";
+   if(!std::cout)throw std::runtime_error("result output failed");
+   return 0;
+ }
+#endif
  if(argc!=1)throw std::runtime_error("usage: facade_jobs_consumer [--default-runtime-endpoint | --runtime endpoint --jobs caller-key]");
  const auto expired=abstraction::ipc::Clock::now()-std::chrono::seconds(1);
  auto scoped=f::JobsClient("unused").WithDeadline(expired);

@@ -1,0 +1,8 @@
+{
+  "name": "@openabstractions/facade",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {".": "./index.js", "./protocol": "./js/abstraction/facade/rec.mjs"},
+  "files": ["index.js", "js", "README.md"],
+  "engines": {"node": ">=18"}
+}

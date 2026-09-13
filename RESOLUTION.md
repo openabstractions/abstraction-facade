@@ -2,8 +2,9 @@
 
 The additive `abstraction.facade/resolver@1` interface is defined in
 [facade.thrift](facade.thrift). It selects a candidate binding; it does not
-submit work, establish server trust or transfer ownership. The existing facade
-accessors remain legacy conventional-endpoint clients until explicitly migrated.
+submit work, establish server trust or transfer ownership. The primary Go facade and C++ Machine accessors resolve registered services.
+Explicit capability constructors accept a deliberately supplied endpoint; the Go
+`/legacy` package preserves earlier local-provider integrations.
 
 An application requests a capability, one or more exact acceptable versioned
 contract identities, required guarantees and permitted placement (`local`,

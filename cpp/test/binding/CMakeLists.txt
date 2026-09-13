@@ -22,3 +22,7 @@ set_tests_properties(facade_bootstrap_override PROPERTIES PASS_REGULAR_EXPRESSIO
 add_executable(facade_deadline_no_io deadline_no_io.cpp)
 target_link_libraries(facade_deadline_no_io PRIVATE abstraction::facade_client)
 add_test(NAME facade_deadline_no_io COMMAND facade_deadline_no_io)
+
+add_executable(facade_server_trust server_trust.cpp)
+target_link_libraries(facade_server_trust PRIVATE abstraction::facade_client)
+add_test(NAME facade_server_trust COMMAND facade_server_trust)

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abstraction-facade-client"
+version = "0.0.0"
+description = "Typed service clients over the shared OpenAbstractions IPC transport"
+requires-python = ">=3.10"
+dependencies = ["abstraction-ipc"]
+
+[project.optional-dependencies]
+logging = ["abstraction-logging-protocol"]
+config = ["abstraction-config-protocol"]
+jobs = ["abstraction-job-protocol"]
+storage = ["abstraction-storage-content"]
+all = ["abstraction-storage-content", "abstraction-logging-protocol", "abstraction-config-protocol", "abstraction-job-protocol"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["abstraction.facade*"]
+namespaces = true

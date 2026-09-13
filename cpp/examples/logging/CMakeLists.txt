@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(my_app LANGUAGES CXX)
+find_package(abstraction_facade CONFIG REQUIRED)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE abstraction::facade_client)

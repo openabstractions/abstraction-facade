@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+if(@facade_has_resolution@)
+ include(CMakeFindDependencyMacro)
+ find_dependency(abstraction_ipc CONFIG)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/abstraction_facade_resolutionTargets.cmake")
