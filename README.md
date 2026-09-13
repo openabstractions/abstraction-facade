@@ -108,8 +108,11 @@ built `openabstractions serve runtime` runs that host in the foreground. The
 default host registers logging, configuration and durable jobs. Routing requires
 a registered routing provider.
 
-`ABSTRACTION_RUNTIME_ENDPOINT` selects an explicit bootstrap address for an
-isolated host. Individual capability endpoint overrides do not choose the
+Use `openabstractions start` and `openabstractions status` for an installed runtime.
+Default Go/C++/Python selection verifies the independently registered runtime
+account and program before resolver and provider payloads. A foreground host
+requires explicit endpoint and independent server expectations in the client.
+An endpoint environment variable supplies an address, not trusted installation evidence. Individual capability endpoint overrides do not choose the
 facade's providers. An absent resolver or unavailable capability returns an error.
 The application creates no local provider as a consequence of that error.
 
@@ -136,8 +139,9 @@ The Go `/client` package uses the same resolved APIs. Replace its old `Log`,
 `ResolveRouter`. C++ convenience accessors retain their spelling and now perform
 resolution; they can throw a resolution error before a capability call.
 
-Explicit capability client constructors still accept a deliberately supplied
-endpoint. Legacy provider APIs expose a different ownership model; keep their store and
+Explicit capability client constructors accept a deliberately supplied endpoint
+and independent server expectation. Endpoint-only compatibility constructors
+remain unverified; use them only as an explicit compatibility choice. Legacy provider APIs expose a different ownership model; keep their store and
 lifecycle requirements explicit when maintaining an earlier integration.
 
 [Agent adoption and contribution checks](CONTRIBUTING.md) ·

@@ -1,5 +1,10 @@
 # JavaScript service bindings
 
+The native default example uses endpoint-only compatibility selection. Configure
+independent server expectations for verified local use. It does not establish
+the installed-discovery trust guarantees of the Go/C++/Python defaults.
+
+
 The pure facade package uses generated resolver codecs and a supplied connector.
 It has no native or capability dependency. A connector implements
 `supports(scope, transport)` and `connect(endpoint, waitingOptions)`, returning a

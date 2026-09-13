@@ -56,11 +56,9 @@ token through resolution and the returned capability client. Direct `logging::Lo
 `router::Client`, `JobsClient`, and shared `FrameTransport` also accept the same absolute deadline.
 
 `Machine(explicit_runtime_endpoint)` and `ResolutionClient(endpoint, timeout_ms)`
-allow explicit bootstrap, including isolated tests. The default bootstrap uses
-`ABSTRACTION_RUNTIME_ENDPOINT` when nonempty, otherwise the established
-local pipe/socket convention. On Windows the process-token SID supplies
-`\\.\pipe\openabstractions-user-<canonical SID>-runtime-v1`.
-SID lookup errors propagate. Unix uses the existing runtime-v1 socket convention.
+select a custom address. Supply independent server expectations for trusted
+custom hosts. `ABSTRACTION_RUNTIME_ENDPOINT` and the platform endpoint convention
+supply addresses; neither supplies installation authority.
 Default `Machine` and `ResolutionClient` select independent installed-runtime
 identity on their first call through the shared native selector. Selection uses
 the same deadline and cancellation token as resolution. The owned account/program
@@ -110,9 +108,9 @@ These commands build libraries and an outside consumer. They install no OS servi
 
 Place reviewed public source checkouts beside one another:
 `abstraction-facade`, `abstraction-identity`, `abstraction-job`,
-`abstraction-logging`, `abstraction-config`, and `abstraction-router`.
+`abstraction-logging`, `abstraction-config`, `abstraction-router`, and `abstraction-model`.
 Each is available at `https://github.com/openabstractions/<name>`.
-Record `git rev-parse HEAD` for all six. Select revisions containing the APIs in
+Record `git rev-parse HEAD` for all seven. Select revisions containing the APIs in
 this README and use that same set for deployment; untagged development changes
 may need a coordinated release before those revisions are publicly obtainable.
 CMake uses installed dependencies or these sibling checkouts and fetches nothing.
@@ -153,7 +151,7 @@ installed directly from job/cpp with `ABSTRACTION_JOB_BUILD_LEGACY=OFF`.
 ```cpp
 #include <abstraction/facade/jobs.hpp>
 using namespace abstraction::facade;
-auto jobs = ResolveJobs(ResolutionClient(explicit_runtime_endpoint),
+auto jobs = ResolveJobs(ResolutionClient{},
                         {"abstraction.job/reconciliation@1"});
 auto history = jobs.GetHistoryWindow();
 // Persist the caller-owned key, history epoch and logical owner before sending.
@@ -161,12 +159,18 @@ job_api::Submission submission;
 submission.identity.key = persisted_caller_key;
 submission.identity.history_epoch = history.history_epoch;
 submission.kind = "download";
-submission.spec = {'{', '}'};
+submission.spec = encoded_download_request; // generated Request encoding, described below
 submission.required_guarantees = {"abstraction.job/reconciliation@1"};
 auto result = jobs.Submit(submission);
 // After an ambiguous outcome, reconcile this identity at this same binding.
 auto recovered = jobs.Reconcile(submission.identity);
 ```
+
+For `encoded_download_request`, use the generated download Request encoder and
+link `abstraction::download_request` from `abstraction_download_request`. The
+[complete HTTP consumer](test/jobs/README.md) shows the payload and separate
+package setup. An empty JSON object is not a valid HTTP execution request.
+The default resolver above requires a trusted installed runtime.
 
 The aggregate `Machine::ResolveJobs` forwards to that same binder. `JobsClient`
 implements the generated `RecoverableAcceptance` interface and owns a fixed
