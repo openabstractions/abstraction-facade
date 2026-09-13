@@ -51,10 +51,20 @@ jobs:
           repository: openabstractions/abstraction-router
           path: abstraction-router
           persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-model
+          path: abstraction-model
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          repository: openabstractions/abstraction-download
+          path: abstraction-download
+          persist-credentials: false
       - name: record source revisions
         run: |
           test "$(git -C abstraction-facade rev-parse HEAD)" = "$GITHUB_SHA"
-          for repo in facade identity job logging config router; do
+          for repo in facade identity job logging config router model download; do
             printf 'abstraction-%s %s\n' "$repo" "$(git -C "abstraction-$repo" rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
           done
       - name: install aggregate bindings

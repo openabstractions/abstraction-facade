@@ -108,9 +108,10 @@ These commands build libraries and an outside consumer. They install no OS servi
 
 Place reviewed public source checkouts beside one another:
 `abstraction-facade`, `abstraction-identity`, `abstraction-job`,
-`abstraction-logging`, `abstraction-config`, `abstraction-router`, and `abstraction-model`.
+`abstraction-logging`, `abstraction-config`, `abstraction-router`, `abstraction-model`,
+and `abstraction-download`.
 Each is available at `https://github.com/openabstractions/<name>`.
-Record `git rev-parse HEAD` for all seven. Select revisions containing the APIs in
+Record `git rev-parse HEAD` for all eight. Select revisions containing the APIs in
 this README and use that same set for deployment; untagged development changes
 may need a coordinated release before those revisions are publicly obtainable.
 CMake uses installed dependencies or these sibling checkouts and fetches nothing.
