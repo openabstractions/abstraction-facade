@@ -1,7 +1,7 @@
 // Package abstraction supplies the service-first application entry point.
 // Discover creates a resolver binding; Resolve* methods report availability and
 // typed refusal for each capability. Discovery opens no local store and starts
-// no provider. Existing embedded adopters explicitly import the legacy package.
+// no provider.
 package abstraction
 
 import (

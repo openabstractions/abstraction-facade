@@ -37,6 +37,22 @@ class ClientControls(unittest.TestCase):
         self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _:w.AcceptanceResult(outcome="unknown",receipt=self.receipt))
         with self.assertRaises(JobError):self.jobs.Reconcile(self.id)
 
+    def test_permanent_failure_requires_failed_state_and_unavailable_observation(self):
+        def snapshot(state, classification, cause="digest_mismatch"):
+            return w.OperationSnapshot(receipt=self.receipt, state=state, progress=w.WorkProgress(done=0, total=0),
+                                       cancellation_requested=False,
+                                       failure=w.WorkFailure(classification=classification, message="attempt failed", cause=cause))
+        for state in ("pending", "running", "transferred", "complete"):
+            with self.assertRaises(JobError): self.jobs._snapshot(snapshot(state, "permanent"), self.id, ["promise"])
+        self.jobs._snapshot(snapshot("failed", "permanent"), self.id, ["promise"])
+        self.jobs._snapshot(snapshot("failed", "permanent", "a_future_cause"), self.id, ["promise"])
+        self.jobs._snapshot(snapshot("pending", "retryable", "server_error"), self.id, ["promise"])
+        self.jobs._operations = SimpleNamespace(ObserveWork=lambda _: w.ObservationResult(outcome="unavailable"))
+        self.assertEqual(self.jobs.ObserveWork(self.id).outcome, "unavailable")
+        retry = w.RequestIdentity(key="key", history_epoch="epoch", attempt=1)
+        self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _: w.AcceptanceResult(outcome="accepted", receipt=self.receipt))
+        with self.assertRaises(JobError): self.jobs.Reconcile(retry)
+
     def test_submission_merges_without_mutating(self):
         sent=[]
         self.jobs._acceptance=SimpleNamespace(Submit=lambda s: sent.append(s) or w.AcceptanceResult(outcome="unknown"))

@@ -44,9 +44,13 @@ func main() {
 ```
 
 The same context bounds resolution and this write. A reusable binding accepts a
-fresh context for each later call. `ResolveConfig`, `ResolveRouter`, `ResolveJobs`
-and `ResolveJobOperations` select their respective contracts. Requirements name
-required guarantees and eligible scope. Unmet requirements return typed refusals.
+fresh context for each later call. `ResolveConfig`, `ResolveConfigEditor`,
+`ResolveRouter`, `ResolveJobs`, `ResolveJobOperations`, `ResolveStorage`,
+`ResolveStorageWriter`, `ResolveStorageChanges`, `ResolveAsks`,
+`ResolveAsksOperator` and `ResolveRights` select their respective contracts.
+Requirements name required guarantees and eligible scope. Unmet requirements
+return typed refusals. `RestoreJobs` rebinds a saved `JobsBinding` without
+resolving again.
 
 For a released revision that exposes these methods, create an application module,
 then select that exact facade revision:
@@ -127,12 +131,11 @@ and provenance are diagnostic settings; service storage stays behind service API
 
 ## Migrating earlier callers
 
-The root Go package now exposes service resolution. `Discover` returns `*Machine`
-directly; resolution methods return errors. Earlier `Jobs`, `Download`, `Storage`,
-`Log(program)` and `Bindings` methods belong to the explicit
-`github.com/openabstractions/abstraction-facade/go/legacy` adoption package.
-Selecting that package preserves earlier local-provider behavior and its weaker
-lifecycle. It is a temporary migration choice for existing integrations.
+The root Go package exposes service resolution. `Discover` returns `*Machine`
+directly; resolution methods return errors. The earlier `/legacy` package, with
+its `Jobs`, `Download`, `Storage`, `Log(program)` and `Bindings` methods, was
+removed. Replace `Jobs` and `Download` with `ResolveJobs` and submit a download
+request; replace `Log` with `ResolveLog` or `logging.Default`.
 
 The Go `/client` package uses the same resolved APIs. Replace its old `Log`,
 `Config` and `Router` accessors with `ResolveLog`, `ResolveConfig` and

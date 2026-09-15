@@ -88,11 +88,18 @@ func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *l
 }
 
 func (m *Machine) resolve(ctx context.Context, capability, contract string, need Requirements) (listen.FrameClient, error) {
+	endpoint, _, err := m.resolveReference(ctx, capability, contract, need)
+	return endpoint, err
+}
+
+// resolveReference also returns the selected reference, for bindings whose
+// callers persist the selection for restart.
+func (m *Machine) resolveReference(ctx context.Context, capability, contract string, need Requirements) (listen.FrameClient, wire.ServiceReference, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	resolver, server, err := m.resolverSelection(ctx)
 	if err != nil {
-		return listen.FrameClient{}, err
+		return listen.FrameClient{}, wire.ServiceReference{}, err
 	}
 
 	if need.Scope == "" {
@@ -101,15 +108,16 @@ func (m *Machine) resolve(ctx context.Context, capability, contract string, need
 	request := wire.ResolveRequest{Capability: capability, Contracts: []string{contract}, Guarantees: need.Guarantees, Scope: need.Scope}
 	result, err := resolver.Resolve(ctx, request)
 	if err != nil {
-		return listen.FrameClient{}, err
+		return listen.FrameClient{}, wire.ServiceReference{}, err
 	}
 	if result.Status != wire.ResolutionStatusResolved {
-		return listen.FrameClient{}, &BindingError{Status: result.Status}
+		return listen.FrameClient{}, wire.ServiceReference{}, &BindingError{Status: result.Status}
 	}
 	if result.Reference.Scope != wire.ScopeLocal || result.Reference.Transport != resolution.LocalTransport {
-		return listen.FrameClient{}, &BindingError{Status: "unsupported_transport"}
+		return listen.FrameClient{}, wire.ServiceReference{}, &BindingError{Status: "unsupported_transport"}
 	}
-	return resolution.BindLocal(ctx, *result.Reference, server, m.providerTrust)
+	endpoint, err := resolution.BindLocal(ctx, *result.Reference, server, m.providerTrust)
+	return endpoint, *result.Reference, err
 }
 
 // ResolveLog binds only the selected compatible provider. A later call failure

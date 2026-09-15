@@ -248,6 +248,9 @@ const BootstrapStateUnknownPolicy = "refuse"
 
 var DefaultRuntimeContracts = []string{"abstraction.logging/sink@1", "abstraction.config/reader@1", "abstraction.job/acceptance@1", "abstraction.job/operations@1", "abstraction.config/editor@1"}
 
+// Capability and acceptable contract identities, required guarantees and
+// permitted placement. Contains no caller identity or provider preference.
+// Contract list must be nonempty; guarantees may be empty.
 type ResolveRequest struct {
 	Capability string
 	Contracts  []string
@@ -255,6 +258,9 @@ type ResolveRequest struct {
 	Scope      string
 }
 
+// A candidate service binding, not acceptance or authority. Provider identifies
+// a logical provider, not a PID. Scope is local or remote. Contract is an exact
+// versioned service identity; endpoint is opaque to application code.
 type ServiceReference struct {
 	Provider   string
 	Capability string
@@ -265,21 +271,43 @@ type ServiceReference struct {
 	Endpoint   string
 }
 
+// Reference is present exactly when resolved. Failure status describes the
+// first unsatisfied resolution stage without exposing disallowed provider
+// metadata. Service authentication and acceptance remain necessary after
+// resolution.
 type ResolveResult struct {
 	Status    string
 	Reference *ServiceReference
 }
 
+// Read-only platform registration or supervisor evidence. Unknown means
+// observation is unavailable; unavailable requires actual evidence that the
+// selected registration is absent. Installed and starting require registration
+// or supervisor evidence. Running describes a supervisor process and does not
+// establish capability readiness. A missing endpoint alone establishes none of
+// these states. Detail is diagnostic text, never authority or a recovery
+// instruction.
 type BootstrapObservation struct {
 	State  string
 	Detail string
 }
 
+// One authorized resolver observation. An absent result means unobserved
+// because the query was not completed; it does not imply unavailable. Existing
+// resolution statuses and disclosure rules apply unchanged. A resolved
+// reference remains a candidate binding, not proof of successful provider
+// calls.
 type CapabilityObservation struct {
 	Request ResolveRequest
 	Result  *ResolveResult
 }
 
+// Client-composed point-in-time diagnostics, with no new service or activation
+// operation. Platform evidence is explicit and may be unknown. Capability
+// queries use one caller waiting budget and authority; observations are
+// sequential and not an atomic snapshot. Transport or cancellation errors are
+// reported separately by the language observation API; unanswered entries
+// retain absent results.
 type RuntimeObservation struct {
 	Bootstrap    BootstrapObservation
 	Capabilities []CapabilityObservation

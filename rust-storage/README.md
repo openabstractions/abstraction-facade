@@ -14,6 +14,14 @@ Close explicitly, including after revocation. `gap` requires an explicit reopen;
 there is no retry or provider switching. Bytes are unverified: the digest names
 requested content and callers verify assembled bytes before trusting them.
 
+`resolve_storage_writer(vec![], "local")` returns a `Writer<Binding<C>>` for the
+separate content-writer contract; every call remains subject to the service
+write policy. `begin`, `append`, `commit` and `abort` validate inputs before any
+exchange and check result consistency. `write(request, digest, bytes)` uploads
+at most 64 KiB per append under one composite wait budget. Retain the request
+identity from `new_request_id()` before calling: retrying the same identity
+resumes a live upload or returns its committed result. `write` never aborts.
+
 This crate depends only on the facade core and generated storage protocol. The
 protocol depends on the pure shared frame contract. No local store implementation
 or native library is required to compile the crate. Source version 0.0.0 is

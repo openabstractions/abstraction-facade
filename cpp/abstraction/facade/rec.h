@@ -168,6 +168,9 @@ inline const std::string kBootstrapStateUnknown = "refuse";
 
 inline const std::vector<std::string> kDefaultRuntimeContracts = {"abstraction.logging/sink@1", "abstraction.config/reader@1", "abstraction.job/acceptance@1", "abstraction.job/operations@1", "abstraction.config/editor@1"};
 
+// Capability and acceptable contract identities, required guarantees and
+// permitted placement. Contains no caller identity or provider preference.
+// Contract list must be nonempty; guarantees may be empty.
 struct ResolveRequest {
     std::string capability;
     std::vector<std::string> contracts;
@@ -175,6 +178,9 @@ struct ResolveRequest {
     std::string scope;
 };
 
+// A candidate service binding, not acceptance or authority. Provider identifies
+// a logical provider, not a PID. Scope is local or remote. Contract is an exact
+// versioned service identity; endpoint is opaque to application code.
 struct ServiceReference {
     std::string provider;
     std::string capability;
@@ -185,21 +191,43 @@ struct ServiceReference {
     std::string endpoint;
 };
 
+// Reference is present exactly when resolved. Failure status describes the
+// first unsatisfied resolution stage without exposing disallowed provider
+// metadata. Service authentication and acceptance remain necessary after
+// resolution.
 struct ResolveResult {
     std::string status;
     std::optional<ServiceReference> reference;
 };
 
+// Read-only platform registration or supervisor evidence. Unknown means
+// observation is unavailable; unavailable requires actual evidence that the
+// selected registration is absent. Installed and starting require registration
+// or supervisor evidence. Running describes a supervisor process and does not
+// establish capability readiness. A missing endpoint alone establishes none of
+// these states. Detail is diagnostic text, never authority or a recovery
+// instruction.
 struct BootstrapObservation {
     std::string state;
     std::string detail;
 };
 
+// One authorized resolver observation. An absent result means unobserved
+// because the query was not completed; it does not imply unavailable. Existing
+// resolution statuses and disclosure rules apply unchanged. A resolved
+// reference remains a candidate binding, not proof of successful provider
+// calls.
 struct CapabilityObservation {
     ResolveRequest request;
     std::optional<ResolveResult> result;
 };
 
+// Client-composed point-in-time diagnostics, with no new service or activation
+// operation. Platform evidence is explicit and may be unknown. Capability
+// queries use one caller waiting budget and authority; observations are
+// sequential and not an atomic snapshot. Transport or cancellation errors are
+// reported separately by the language observation API; unanswered entries
+// retain absent results.
 struct RuntimeObservation {
     BootstrapObservation bootstrap;
     std::vector<CapabilityObservation> capabilities;

@@ -29,3 +29,4 @@ Keep the sibling source paths declared by Cargo.toml and run
 `cargo test --offline --manifest-path Cargo.toml`. Pure core and jobs tests require
 no native library or logging package. Native consumers separately install the
 identity C++ static library and set `OA_IPC_PREFIX` to its absolute prefix.
+`OA_IPC_CHECK_ONLY=1 cargo check` type-checks native consumers without it.

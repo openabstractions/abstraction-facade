@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	asks "github.com/openabstractions/abstraction-asks/go"
 	asksservice "github.com/openabstractions/abstraction-asks/go/application"
@@ -28,13 +30,20 @@ import (
 	modelservice "github.com/openabstractions/abstraction-model/go/service"
 	rights "github.com/openabstractions/abstraction-rights/go"
 	rightsservice "github.com/openabstractions/abstraction-rights/go/authorization"
+	router "github.com/openabstractions/abstraction-router/go"
+	routerservice "github.com/openabstractions/abstraction-router/go/service"
 	storage "github.com/openabstractions/abstraction-storage/go"
 	storageservice "github.com/openabstractions/abstraction-storage/go/service"
 )
 
+// ErrNoLogSink is the startup error of a composition with no logging Sink.
+var ErrNoLogSink = errors.New("runtime logging startup: no logging sink configured; abstraction.logging contracts are not_ready")
+
 // Options is installation/provider configuration, not an application API.
-// The caller owns Sink and closes it after Serve returns. A nil Sink leaves
-// logging not_ready while independent providers can still start.
+// The caller owns Sink and closes it after Serve returns. A nil Sink registers
+// the logging sink, reader and observer contracts not_ready, reports
+// ErrNoLogSink through OnError and StartupErrors, and still starts independent
+// providers.
 type Options struct {
 	Endpoint, LogEndpoint, ConfigEndpoint string
 	// ConfigStore selects service-owned atomic state; nil uses the native user
@@ -43,13 +52,44 @@ type Options struct {
 	ConfigStore             casapi.Store
 	ConfigUserKey           string
 	ConfigObservationSource configservice.ObservationSource
+	// ConfigEditPolicy narrows user-rung replacement to authorized callers, for
+	// example ConfigEditPolicyFromRights. Nil keeps same-account Program proof.
+	ConfigEditPolicy configservice.EditPolicy
+	// LogHistoryPolicy narrows history reading and observation, for example
+	// HistoryPolicyFromRights. Nil keeps same-account Program proof.
+	LogHistoryPolicy logservice.HistoryPolicy
 	// ModelRegistry explicitly selects model providers. Nil leaves lookup absent.
 	ModelRegistry *model.Registry
 	ModelEndpoint string
+	// ModelPolicy narrows lookup per registry, for example ModelPolicyFromRights.
+	ModelPolicy modelservice.LookupPolicy
+	// Router explicitly selects a router provider. Nil leaves routing absent.
+	Router         *router.Router
+	RouterEndpoint string
+	// RouterPolicy narrows inventory and routing, for example RouterPolicyFromRights.
+	RouterPolicy routerservice.Policy
 	// Storage exposes content only through the explicitly supplied digest policy.
 	Storage         storage.Store
 	StoragePolicy   storageservice.Policy
 	StorageEndpoint string
+	// StorageWritePolicy adds the writer contract on the storage endpoint. It is
+	// separate from StoragePolicy and requires a Local+Writable provider and a
+	// positive StorageWriteLimit in bytes.
+	StorageWritePolicy storageservice.Policy
+	StorageWriteLimit  int64
+	// StorageWriteRecordPath is the absolute service-owned file of writer request
+	// identities, required with the writer. StorageWriteRecords selects its atomic
+	// state provider; nil uses a bounded CAS file store.
+	StorageWriteRecordPath string
+	StorageWriteRecords    casapi.Store
+	// StorageChangesPolicy adds the change-observation contract on the storage
+	// endpoint; it authorizes each call, and StoragePolicy filters each object.
+	// StorageChangesInterval sets how often a listing provider is polled
+	// (default one second); StorageChangesCapacity bounds the journal
+	// (default storageservice.DefaultChangeCapacity).
+	StorageChangesPolicy   storageservice.Policy
+	StorageChangesInterval time.Duration
+	StorageChangesCapacity int
 	// QuestionBook is a separately owned application-profile question store.
 	QuestionBook     *asks.Book
 	QuestionEndpoint string
@@ -63,6 +103,12 @@ type Options struct {
 	// RightsOperator explicitly authorizes policy administration; nil omits its contract.
 	RightsOperator rightsservice.AuthorizeOperator
 	RightsEndpoint string
+	// RightsActions are registered into RightsPolicy before the decision service
+	// starts, with this host's account and executable as registrant. Registering
+	// an action already in the catalogue writes nothing; a failed registration
+	// leaves the decision service not ready. ResourceRightsActions lists the
+	// actions of the resource services this runtime composes.
+	RightsActions []string
 	// JobRoot enables a private store; ManagedJobs retains its generated owner.
 	JobRoot, JobOwner, JobEndpoint string
 	JobExecutor                    acceptanceprovider.Executor
@@ -86,6 +132,8 @@ type Host struct {
 	jobs                *jobHost
 	model               *modelservice.Host
 	modelIndex          int
+	router              *routerservice.Host
+	routerIndex         int
 	storage             *storageservice.Host
 	storageIndex        int
 	questions           *asksservice.Host
@@ -95,7 +143,16 @@ type Host struct {
 	mu                  sync.Mutex
 	candidates          []resolution.Candidate
 	onError             func(error)
+	startupErrors       []error
 	started             atomic.Bool
+}
+
+// StartupErrors returns the provider startup failures Listen found, in order.
+// They are the errors also passed to Options.OnError, and they are kept when
+// OnError is nil. Each failed provider's contracts stay registered and resolve
+// not_ready.
+func (h *Host) StartupErrors() []error {
+	return append([]error(nil), h.startupErrors...)
 }
 
 // configureEndpoints resolves defaults before any listeners or stores open.
@@ -122,6 +179,12 @@ func configureEndpoints(options Options) (Options, error) {
 	}
 	if options.JobRoot != "" && options.JobEndpoint == "" {
 		options.JobEndpoint, err = bootstrap.Endpoint("job-acceptance-v1")
+		if err != nil {
+			return Options{}, err
+		}
+	}
+	if options.Router != nil && options.RouterEndpoint == "" {
+		options.RouterEndpoint, err = bootstrap.Endpoint("router-v1")
 		if err != nil {
 			return Options{}, err
 		}
@@ -160,7 +223,7 @@ func Listen(options Options) (*Host, error) {
 	if (options.ConfigStore == nil) != (options.ConfigUserKey == "") {
 		return nil, errors.New("runtime: configuration storage requires a provider and private key")
 	}
-	if options.RightsPolicy == nil && (options.RightsEndpoint != "" || options.RightsEnforcer != nil || options.RightsOperator != nil) {
+	if options.RightsPolicy == nil && (options.RightsEndpoint != "" || options.RightsEnforcer != nil || options.RightsOperator != nil || len(options.RightsActions) > 0) {
 		return nil, errors.New("runtime: authorization requires an explicit decision policy")
 	}
 	if options.QuestionBook != nil && !options.QuestionBook.ApplicationProfile() || options.QuestionBook == nil && (options.QuestionEndpoint != "" || options.QuestionOperator != nil) {
@@ -168,6 +231,21 @@ func Listen(options Options) (*Host, error) {
 	}
 	if (options.Storage != nil) != (options.StoragePolicy != nil) || (options.Storage == nil && options.StorageEndpoint != "") {
 		return nil, errors.New("runtime: storage requires an explicit provider and content policy")
+	}
+	if options.StorageWritePolicy != nil || options.StorageWriteLimit != 0 || options.StorageWriteRecordPath != "" || options.StorageWriteRecords != nil {
+		if _, writable := options.Storage.(storageservice.WritableStore); !writable || options.StorageWritePolicy == nil || options.StorageWriteLimit < 1 || !filepath.IsAbs(options.StorageWriteRecordPath) {
+			return nil, errors.New("runtime: storage writes require a writable provider, explicit write policy, positive size limit and absolute record path")
+		}
+	}
+	if (options.StorageChangesPolicy != nil || options.StorageChangesInterval != 0 || options.StorageChangesCapacity != 0) &&
+		(options.Storage == nil || options.StorageChangesPolicy == nil || options.StorageChangesInterval < 0 || options.StorageChangesCapacity < 0) {
+		return nil, errors.New("runtime: storage change observation requires a provider, explicit observe policy and nonnegative bounds")
+	}
+	if options.ModelPolicy != nil && options.ModelRegistry == nil {
+		return nil, errors.New("runtime: model policy requires an explicit model registry")
+	}
+	if options.Router == nil && (options.RouterEndpoint != "" || options.RouterPolicy != nil) {
+		return nil, errors.New("runtime: router configuration requires an explicit router provider")
 	}
 	jobsConfigured := options.JobRoot != "" || options.JobOwner != "" || options.JobEndpoint != "" || options.JobExecutor != nil || options.ManagedJobs
 	if jobsConfigured && (options.JobRoot == "" || (options.JobOwner == "") != options.ManagedJobs) {
@@ -184,14 +262,21 @@ func Listen(options Options) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{onError: options.OnError, modelIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1}
+	h := &Host{onError: options.OnError, modelIndex: -1, routerIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1}
 	var startupErrors []error
-	l, err := logservice.Listen(options.LogEndpoint, options.Sink)
-	if err != nil {
+	var l *logservice.Host
+	if options.Sink == nil {
+		startupErrors = append(startupErrors, ErrNoLogSink)
+	} else if l, err = logservice.Listen(options.LogEndpoint, options.Sink); err != nil {
 		startupErrors = append(startupErrors, fmt.Errorf("runtime logging startup: %w", err))
 	} else {
 		h.logging = l
 		l.OnError = options.OnError
+		if options.LogHistoryPolicy != nil {
+			if err := l.EnableHistoryPolicy(options.LogHistoryPolicy); err != nil {
+				return nil, errors.Join(err, h.Close())
+			}
+		}
 	}
 	var c *configservice.Host
 	if options.ConfigStore == nil {
@@ -205,8 +290,12 @@ func Listen(options Options) (*Host, error) {
 		h.config = c
 		if options.ConfigObservationSource != nil {
 			if err = c.EnableObservation(options.ConfigObservationSource); err != nil {
-				h.Close()
-				return nil, err
+				return nil, errors.Join(err, h.Close())
+			}
+		}
+		if options.ConfigEditPolicy != nil {
+			if err = c.EnableEditPolicy(options.ConfigEditPolicy); err != nil {
+				return nil, errors.Join(err, h.Close())
 			}
 		}
 		c.OnError = options.OnError
@@ -222,6 +311,7 @@ func Listen(options Options) (*Host, error) {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime jobs startup: %w", err))
 		} else {
 			h.jobs.onError = options.OnError
+			h.jobs.provider.SetErrorReporter(options.OnError)
 		}
 	}
 	if options.ModelRegistry != nil {
@@ -230,6 +320,24 @@ func Listen(options Options) (*Host, error) {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime model startup: %w", err))
 		} else {
 			h.model.OnError = options.OnError
+			if options.ModelPolicy != nil {
+				if err := h.model.EnablePolicy(options.ModelPolicy); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+		}
+	}
+	if options.Router != nil {
+		h.router, err = routerservice.Listen(options.RouterEndpoint, options.Router)
+		if err != nil {
+			startupErrors = append(startupErrors, fmt.Errorf("runtime router startup: %w", err))
+		} else {
+			h.router.OnError = options.OnError
+			if options.RouterPolicy != nil {
+				if err := h.router.EnablePolicy(options.RouterPolicy); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
 		}
 	}
 	if options.Storage != nil {
@@ -238,6 +346,27 @@ func Listen(options Options) (*Host, error) {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime storage startup: %w", err))
 		} else {
 			h.storage.OnError = options.OnError
+			if options.StorageWritePolicy != nil {
+				records := options.StorageWriteRecords
+				if records == nil {
+					records = casapi.BoundedFileStore{MaxBytes: storageservice.MaxRecordFileBytes}
+				}
+				if err := h.storage.EnableWriter(options.StorageWritePolicy, options.StorageWriteLimit, records, options.StorageWriteRecordPath); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.StorageChangesPolicy != nil {
+				interval, capacity := options.StorageChangesInterval, options.StorageChangesCapacity
+				if interval == 0 {
+					interval = time.Second
+				}
+				if capacity == 0 {
+					capacity = storageservice.DefaultChangeCapacity
+				}
+				if err := h.storage.EnableChanges(options.StorageChangesPolicy, interval, capacity); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
 		}
 	}
 	if options.QuestionBook != nil {
@@ -248,22 +377,23 @@ func Listen(options Options) (*Host, error) {
 			h.questions.OnError = options.OnError
 			if options.QuestionOperator != nil {
 				if err := h.questions.EnableOperator(options.QuestionOperator); err != nil {
-					h.Close()
-					return nil, err
+					return nil, errors.Join(err, h.Close())
 				}
 			}
 		}
 	}
 	if options.RightsPolicy != nil {
-		h.rights, err = rightsservice.Listen(options.RightsEndpoint, options.RightsPolicy, options.RightsEnforcer)
+		err = registerRightsActions(options.RightsPolicy, options.RightsActions)
+		if err == nil {
+			h.rights, err = rightsservice.Listen(options.RightsEndpoint, options.RightsPolicy, options.RightsEnforcer)
+		}
 		if err != nil {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime rights startup: %w", err))
 		} else {
 			h.rights.OnError = options.OnError
 			if options.RightsOperator != nil {
 				if err := h.rights.EnableOperator(options.RightsOperator); err != nil {
-					h.Close()
-					return nil, err
+					return nil, errors.Join(err, h.Close())
 				}
 			}
 		}
@@ -299,12 +429,15 @@ func Listen(options Options) (*Host, error) {
 		h.configObserverIndex = len(h.candidates)
 		h.candidates = append(h.candidates, observer)
 	}
-	if h.logging != nil && h.logging.HistoryAvailable() {
+	// Without a logging provider the history contracts stay registered not_ready,
+	// like the sink, so a client sees the missing sink instead of an unknown
+	// contract. A provider that offers no history or observation omits them.
+	if h.logging == nil || h.logging.HistoryAvailable() {
 		history := h.candidates[0]
 		history.Reference.Contract = "abstraction.logging/reader@1"
 		h.candidates = append(h.candidates, history)
 	}
-	if h.logging != nil && h.logging.ObservationAvailable() {
+	if h.logging == nil || h.logging.ObservationAvailable() {
 		observer := h.candidates[0]
 		observer.Reference.Contract = "abstraction.logging/observer@1"
 		h.candidates = append(h.candidates, observer)
@@ -320,10 +453,28 @@ func Listen(options Options) (*Host, error) {
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.model", Contract: "abstraction.model/resolver@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.ModelEndpoint, Guarantees: []string{},
 		}})
 	}
+	if options.Router != nil {
+		h.routerIndex = len(h.candidates)
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.router != nil, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.router", Contract: "abstraction.router/router@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RouterEndpoint, Guarantees: []string{},
+		}})
+	}
 	if options.Storage != nil {
 		h.storageIndex = len(h.candidates)
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil, Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.storage", Contract: "abstraction.storage/content-reader@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.StorageEndpoint, Guarantees: []string{},
+		}})
+	}
+	if options.StorageChangesPolicy != nil {
+		// Change observation shares the storage endpoint and its readiness lifetime.
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil && h.storage.ChangesAvailable(), Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.storage", Contract: "abstraction.storage/content-changes@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.StorageEndpoint, Guarantees: []string{},
+		}})
+	}
+	if options.StorageWritePolicy != nil {
+		// The writer shares the storage endpoint and its readiness lifetime.
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil && h.storage.WriterAvailable(), Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.storage", Contract: "abstraction.storage/content-writer@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.StorageEndpoint, Guarantees: []string{},
 		}})
 	}
 	if options.QuestionBook != nil {
@@ -389,6 +540,9 @@ func Listen(options Options) (*Host, error) {
 	if h.model != nil {
 		h.model.OnStopped = func() { h.stopped(h.modelIndex, nil) }
 	}
+	if h.router != nil {
+		h.router.OnStopped = func() { h.stopped(h.routerIndex, nil) }
+	}
 	if l != nil {
 		l.OnStopped = func() { h.stopped(0, nil) }
 	}
@@ -398,6 +552,7 @@ func Listen(options Options) (*Host, error) {
 	if h.jobs != nil {
 		h.jobs.onStopped = func() { h.stopped(2, nil) }
 	}
+	h.startupErrors = startupErrors
 	if h.onError != nil {
 		for _, err := range startupErrors {
 			h.onError(err)
@@ -422,6 +577,9 @@ func (h *Host) Close() error {
 	}
 	if h.model != nil {
 		errs = append(errs, h.model.Close())
+	}
+	if h.router != nil {
+		errs = append(errs, h.router.Close())
 	}
 	if h.storage != nil {
 		errs = append(errs, h.storage.Close())
@@ -499,6 +657,10 @@ func (h *Host) Serve(ctx context.Context) error {
 	if h.model != nil {
 		workers.Add(1)
 		go func() { defer workers.Done(); h.stopped(h.modelIndex, h.model.Serve(ctx)) }()
+	}
+	if h.router != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.routerIndex, h.router.Serve(ctx)) }()
 	}
 	if h.logging != nil {
 		workers.Add(1)

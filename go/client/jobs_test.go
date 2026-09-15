@@ -12,13 +12,14 @@ import (
 
 type jobHandler struct {
 	owner            string
+	resultRetention  int64
 	submitted        api.Submission
 	submits, cancels int
 	result           func(api.RequestIdentity) api.AcceptanceResult
 }
 
 func (h *jobHandler) GetHistoryWindow() (api.HistoryWindow, error) {
-	return api.HistoryWindow{LogicalOwner: h.owner, HistoryEpoch: "epoch", MinimumRetentionMs: 1000}, nil
+	return api.HistoryWindow{LogicalOwner: h.owner, HistoryEpoch: "epoch", MinimumRetentionMs: 1000, ResultRetentionMs: h.resultRetention}, nil
 }
 func (h *jobHandler) Submit(s api.Submission) (api.AcceptanceResult, error) {
 	h.submits++

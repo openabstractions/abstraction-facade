@@ -104,6 +104,10 @@ void job_operations() {
       require(refused==reject);pipe.finish();
     };
     probe(initial,true,false);probe(initial,false,false);
+    {auto fixture=initial;fixture.observation.snapshot->state="failed";fixture.observation.snapshot->failure->classification="permanent";
+     fixture.observation.snapshot->failure->cause="digest_mismatch";probe(fixture,true,false);}
+    {auto fixture=initial;fixture.observation.snapshot->state="failed";fixture.observation.snapshot->failure->classification="permanent";
+     fixture.observation.snapshot->failure->cause="a_future_cause";probe(fixture,true,false);}
     std::vector<std::function<void(OperationsFixture&)>> bad_observation={
       [](auto&f){f.observation.snapshot.reset();},
       [](auto&f){f.observation.outcome="unknown";},
@@ -111,7 +115,9 @@ void job_operations() {
       [](auto&f){f.observation.snapshot->progress.total=-1;},
       [](auto&f){f.observation.snapshot->receipt.identity.key="other";},
       [](auto&f){f.observation.snapshot->receipt.logical_owner="other";},
-      [](auto&f){f.observation.snapshot->receipt.accepted_guarantees.clear();}
+      [](auto&f){f.observation.snapshot->receipt.accepted_guarantees.clear();},
+      [](auto&f){f.observation.snapshot->receipt.identity.attempt=1;},
+      [](auto&f){f.observation.snapshot->failure->classification="permanent";}
     };
     for(auto edit:bad_observation){auto fixture=initial;edit(fixture);probe(fixture,true,true);}
     std::vector<std::function<void(OperationsFixture&)>> bad_chunk={

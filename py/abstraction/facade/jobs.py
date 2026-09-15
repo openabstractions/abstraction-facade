@@ -36,7 +36,8 @@ def guarantees(values, code="invalid_submission"):
     return values
 
 def identity(value):
-    require(isinstance(value, wire.RequestIdentity) and text(value.key) and text(value.history_epoch),
+    require(isinstance(value, wire.RequestIdentity) and text(value.key) and text(value.history_epoch)
+            and isinstance(value.attempt, int) and value.attempt >= 0,
             "invalid_submission", "explicit key and history epoch required")
 
 class Owner:
@@ -97,7 +98,7 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
 
     def GetHistoryWindow(self):
         result = self._acceptance.GetHistoryWindow()
-        require(text(result.history_epoch) and result.minimum_retention_ms > 0,
+        require(text(result.history_epoch) and result.minimum_retention_ms > 0 and result.result_retention_ms >= 0,
                 "invalid_acceptance", "invalid history window")
         self._owner.bind(result.logical_owner)
         return result
@@ -106,6 +107,7 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         identity(requested)
         require(receipt is not None and receipt.identity.key == requested.key
                 and receipt.identity.history_epoch == requested.history_epoch
+                and receipt.identity.attempt == requested.attempt
                 and text(receipt.operation_id) and text(receipt.logical_owner)
                 and receipt.history_retention_ms > 0,
                 "invalid_acceptance", "missing or mismatched receipt")
@@ -118,7 +120,7 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         if result.outcome == "accepted":
             self._receipt(result.receipt, requested, required)
         else:
-            require(result.outcome in ("definitely_not_accepted", "unknown", "key_conflict", "forbidden", "invalid")
+            require(result.outcome in ("definitely_not_accepted", "unknown", "key_conflict", "forbidden", "invalid", "unavailable")
                     and result.receipt is None, "invalid_acceptance", "inconsistent acceptance response")
         return result
 
@@ -149,6 +151,9 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                 "invalid_observation", "inconsistent progress/state")
         require(snapshot.failure is None or snapshot.failure.classification in
                 ("retryable", "permanent", "unknown"), "invalid_observation", "invalid last failure")
+        # JOB-A8: a permanent failure belongs to failed work. Causes are a grant vocabulary.
+        require(snapshot.failure is None or snapshot.failure.classification != "permanent"
+                or snapshot.state == "failed", "invalid_observation", "permanent failure on nonfailed work")
         self._receipt(snapshot.receipt, requested, required, pin=pin)
 
     def ObserveWork(self, requested):
@@ -157,7 +162,7 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         if result.outcome == "observed":
             self._snapshot(result.snapshot, requested, self._required)
         else:
-            require(result.outcome in ("unknown", "forbidden", "invalid", "definitely_not_accepted")
+            require(result.outcome in ("unknown", "forbidden", "invalid", "definitely_not_accepted", "unavailable")
                     and result.snapshot is None, "invalid_observation", "inconsistent observation")
         return result
 

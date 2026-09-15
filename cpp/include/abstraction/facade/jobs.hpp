@@ -12,7 +12,8 @@ namespace job_detail {
 inline void validate_snapshot(const job_api::OperationSnapshot& s) {
     if (!resolution_detail::contains({"pending", "running", "transferred", "complete", "failed", "cancelled"}, s.state) ||
         s.progress.done < 0 || s.progress.total < 0 ||
-        (s.failure && (!resolution_detail::contains({"retryable", "permanent", "unknown"}, s.failure->classification))))
+        (s.failure && (!resolution_detail::contains({"retryable", "permanent", "unknown"}, s.failure->classification))) ||
+        (s.failure && s.failure->classification == "permanent" && s.state != "failed"))
         throw job_api::ServiceError("invalid_observation", "invalid snapshot state or progress");
 }
 }
@@ -64,7 +65,7 @@ public:
     job_api::HistoryWindow GetHistoryWindow() override {
         job_api::RecoverableAcceptanceClient<ipc::FrameTransport> client(transport_);
         auto result = client.GetHistoryWindow();
-        if (result.logical_owner.empty() || result.history_epoch.empty() || result.minimum_retention_ms <= 0)
+        if (result.logical_owner.empty() || result.history_epoch.empty() || result.minimum_retention_ms <= 0 || result.result_retention_ms < 0)
             throw job_api::ServiceError("invalid_acceptance", "invalid history window");
         bind_owner(result.logical_owner);
         return result;
@@ -100,7 +101,7 @@ public:
         job_api::OperationControlClient<ipc::FrameTransport> client(transport_);
         auto result = client.ObserveWork(identity);
         if (result.outcome != "observed") {
-            if (!resolution_detail::contains({"unknown", "forbidden", "invalid", "definitely_not_accepted"}, result.outcome) || result.snapshot)
+            if (!resolution_detail::contains({"unknown", "forbidden", "invalid", "definitely_not_accepted", "unavailable"}, result.outcome) || result.snapshot)
                 throw job_api::ServiceError("invalid_observation", "inconsistent observation outcome");
             return result;
         }
@@ -169,8 +170,8 @@ public:
     }
 private:
     static void validate_identity(const job_api::RequestIdentity& id) {
-        if (id.key.empty() || id.history_epoch.empty())
-            throw job_api::ServiceError("invalid_submission", "explicit key and history epoch required");
+        if (id.key.empty() || id.history_epoch.empty() || id.attempt < 0)
+            throw job_api::ServiceError("invalid_submission", "explicit key, history epoch and nonnegative attempt required");
     }
     void validate_result(const job_api::AcceptanceResult& result, const job_api::RequestIdentity& id,
                                 const std::vector<std::string>& required) {
@@ -180,7 +181,7 @@ private:
         }
         if (!result.receipt) throw job_api::ServiceError("invalid_acceptance", "accepted result lacks receipt");
         const auto& r = *result.receipt;
-        if (r.identity.key != id.key || r.identity.history_epoch != id.history_epoch ||
+        if (r.identity.key != id.key || r.identity.history_epoch != id.history_epoch || r.identity.attempt != id.attempt ||
             r.logical_owner.empty() || r.operation_id.empty() || r.history_retention_ms <= 0 ||
             !resolution_detail::distinct(r.accepted_guarantees) ||
             !resolution_detail::satisfies(r.accepted_guarantees, required))

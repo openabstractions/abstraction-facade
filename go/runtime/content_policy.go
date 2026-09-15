@@ -10,8 +10,9 @@ import (
 
 // ContentPolicyFromRights asks a fixed decision service before each content
 // access. Its host must explicitly trust this process to relay native subjects.
-// The action is a configured catalogue identifier, for example
-// abstraction.storage/content.read. No positive decision is cached.
+// The action is a configured catalogue identifier: abstraction.storage/content.read
+// for StoragePolicy and abstraction.storage/content.write for StorageWritePolicy.
+// No positive decision is cached.
 func ContentPolicyFromRights(decisions *rights.Client, action string) storage.Policy {
 	return func(ctx context.Context, peer *identity.Peer, resource string) error {
 		if decisions == nil || action == "" {

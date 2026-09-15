@@ -104,14 +104,29 @@ func (h *jobHost) authorize(peer *identity.Peer) (string, error) {
 	if err != nil || path == "" || !filepath.IsAbs(path) {
 		return "", errors.New("runtime jobs: proven absolute program path required")
 	}
-	path = filepath.Clean(path)
 	if h.policy != nil && !h.policy(peer) {
 		return "", errors.New("runtime jobs: program refused by policy")
 	}
-	// Versioned and length-delimited by JSON; neither PID nor request claims enter
-	// this namespace. This is observed executable-path identity, not code signing
-	// identity. Moving the executable changes its scope; restarting it does not.
-	data, _ := json.Marshal([]string{"owner-program@1", user.Kind, principal, path})
+	return OwnerProgramScope(user.Kind, principal, path)
+}
+
+// OwnerProgramScope is the caller scope the job host binds for an authenticated
+// account and program. Operators use it to state legacy ownership mappings for
+// acceptanceprovider.MigrateLegacy; it confers no authority by itself.
+// Versioned and length-delimited by JSON; neither PID nor request claims enter
+// this namespace. This is observed executable-path identity, not code signing
+// identity. Moving the executable changes its scope; restarting it does not.
+func OwnerProgramScope(userKind, principal, programPath string) (string, error) {
+	if (userKind != "windows" && userKind != "posix") || principal == "" {
+		return "", errors.New("runtime jobs: account kind and principal required")
+	}
+	if programPath == "" || !filepath.IsAbs(programPath) {
+		return "", errors.New("runtime jobs: proven absolute program path required")
+	}
+	data, err := json.Marshal([]string{"owner-program@1", userKind, principal, filepath.Clean(programPath)})
+	if err != nil {
+		return "", err
+	}
 	digest := sha256.Sum256(data)
 	return "owner-program@1:" + hex.EncodeToString(digest[:]), nil
 }

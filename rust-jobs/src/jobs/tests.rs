@@ -19,6 +19,7 @@ fn wanted() -> wire::RequestIdentity {
     wire::RequestIdentity {
         key: "key".into(),
         history_epoch: "epoch".into(),
+        attempt: 0,
     }
 }
 fn receipt() -> wire::Receipt {
@@ -165,12 +166,39 @@ fn negative_progress_refused_last_retry_preserved() {
         failure: Some(wire::WorkFailure {
             classification: "retryable".into(),
             message: "last attempt".into(),
+            cause: Default::default(),
         }),
         ..Default::default()
     };
     assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
     s.progress.done = -1;
     assert!(c.snapshot(&s, &wanted(), &[]).is_err());
+}
+
+#[test]
+fn permanent_failure_requires_failed_state() {
+    let c = client(vec![]);
+    let mut s = wire::OperationSnapshot {
+        receipt: receipt(),
+        state: "pending".into(),
+        progress: wire::WorkProgress { done: 0, total: 0 },
+        failure: Some(wire::WorkFailure {
+            classification: "permanent".into(),
+            message: "download attempt failed".into(),
+            cause: "digest_mismatch".into(),
+        }),
+        ..Default::default()
+    };
+    assert!(c.snapshot(&s, &wanted(), &c.required).is_err());
+    s.state = "running".into();
+    assert!(c.snapshot(&s, &wanted(), &c.required).is_err());
+    s.state = "failed".into();
+    assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
+    s.failure.as_mut().unwrap().cause = "a_future_cause".into();
+    assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
+    s.failure.as_mut().unwrap().classification = "retryable".into();
+    s.state = "pending".into();
+    assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
 }
 
 #[test]

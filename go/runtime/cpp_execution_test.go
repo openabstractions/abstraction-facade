@@ -51,10 +51,15 @@ func TestCppDurableHTTPExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("C++ execution: %v\n%s", err, stderr.String())
 	}
-	line := strings.TrimSuffix(strings.TrimSuffix(string(output), "\n"), "\r")
-	if !strings.HasPrefix(line, "RESULT ") {
-		t.Fatalf("unexpected result prefix %.100q", line)
+	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(string(output), "\r", ""), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "RESULT ") {
+		t.Fatalf("unexpected output %.200q", output)
 	}
+	// The request declares no size; the total comes from the source's Content-Length.
+	if lines[0] != fmt.Sprintf("PROGRESS %d %d", len(body), len(body)) {
+		t.Fatalf("C++ observed progress %q, want done and total %d", lines[0], len(body))
+	}
+	line := lines[1]
 	got, err := hex.DecodeString(strings.TrimPrefix(line, "RESULT "))
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("result bytes differ: decoded=%d expected=%d err=%v", len(got), len(body), err)

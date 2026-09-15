@@ -214,6 +214,37 @@ recovery. Waiting expiry does not call `CancelWork`. After a caller restart,
 restore the persisted endpoint and logical owner through the existing JobsClient
 constructor instead of resolving an existing operation to another provider.
 
+### Who owns a job
+
+The runtime files each accepted submission under a caller scope: the
+authenticated account (Windows SID or POSIX UID) and the absolute path of the
+calling executable as the operating system reports it. Identity keys, receipts,
+observation and result bytes are visible only inside that scope. Restarting the
+application, rebooting and upgrading the runtime keep the scope. Reinstalling the
+application at the same path keeps it for processes started afterwards. Moving
+the executable, or reinstalling it at a different path, creates a new scope, and
+the earlier work stays reachable from the old path only. Another executable in
+the same account has its own scope. Reconciling an identity the caller's scope
+never accepted returns `definitely_not_accepted` and seals that identity for the
+caller. On Linux the path is `/proc/<pid>/exe` with symlinks resolved, and a
+process whose executable was replaced while it ran is refused until it restarts.
+
+For continuity across reinstall, install to one stable absolute path without a
+version component, including behind symlinks. Before `Submit`, persist the
+identity, the complete submission, the endpoint, the required guarantees and the
+logical owner outside the installation directory. After reinstall, restore with
+the installed runtime's trust and reconcile the saved identity:
+
+```cpp
+ResolutionClient resolver;
+auto jobs = JobsClient(saved.endpoint, 5000, saved.required_guarantees, saved.logical_owner)
+                .WithServerExpectation(resolver.Server());
+auto recovered = jobs.Reconcile(saved.identity);
+```
+
+The runtime has no transfer of work between program scopes. The Go client
+[README](../go/client/README.md) lists the same model event by event.
+
 The same binding offers `ObserveWork`, `ReadResult` and `CopyResult`. Observation
 returns typed state, progress, cancellation intent and last-attempt failure class.
 `CancelWork` acknowledges intent; subsequent observation reports whether

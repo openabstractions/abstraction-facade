@@ -43,7 +43,7 @@ int main(int argc,char**argv){
      if(observed.outcome!="observed"||!observed.snapshot)throw std::runtime_error("operation unobservable");
      const auto& snapshot=*observed.snapshot;
      if(snapshot.receipt.operation_id!=accepted.receipt->operation_id)throw std::runtime_error("operation changed");
-     if(snapshot.state=="complete")break;
+     if(snapshot.state=="complete"){std::cout<<"PROGRESS "<<snapshot.progress.done<<" "<<snapshot.progress.total<<"\n";break;}
      if(snapshot.state=="failed"||snapshot.state=="cancelled")throw std::runtime_error("operation did not complete");
      if(abstraction::ipc::Clock::now()>=deadline)throw std::runtime_error("observation budget expired");
      std::this_thread::sleep_for(std::chrono::milliseconds(20));

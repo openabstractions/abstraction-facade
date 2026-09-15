@@ -29,11 +29,12 @@ fn id(v: &wire::RequestIdentity) -> wire::RequestIdentity {
     wire::RequestIdentity {
         key: v.key.clone(),
         history_epoch: v.history_epoch.clone(),
+        attempt: v.attempt,
     }
 }
 fn identity<E>(v: &wire::RequestIdentity) -> Result<(), Error<E>> {
     require(
-        !v.key.is_empty() && !v.history_epoch.is_empty(),
+        !v.key.is_empty() && !v.history_epoch.is_empty() && v.attempt >= 0,
         "request identity",
     )
 }
@@ -78,6 +79,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
         require(
             r.identity.key == wanted.key
                 && r.identity.history_epoch == wanted.history_epoch
+                && r.identity.attempt == wanted.attempt
                 && !r.operation_id.is_empty()
                 && !r.logical_owner.is_empty()
                 && r.history_retention_ms > 0
@@ -108,6 +110,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
                         | "key_conflict"
                         | "forbidden"
                         | "invalid"
+                        | "unavailable"
                 ) && r.receipt.is_none(),
                 "acceptance outcome",
             )?;
@@ -119,7 +122,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
             .GetHistoryWindow()
             .map_err(Error::Call)?;
         require(
-            !r.history_epoch.is_empty() && r.minimum_retention_ms > 0,
+            !r.history_epoch.is_empty() && r.minimum_retention_ms > 0 && r.result_retention_ms >= 0,
             "history window",
         )?;
         self.pin(&r.logical_owner)?;
@@ -182,7 +185,12 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
                         f.classification.as_str(),
                         "retryable" | "permanent" | "unknown"
                     )
-                }),
+                })
+                // JOB-A8: a permanent failure belongs to failed work.
+                && s
+                    .failure
+                    .as_ref()
+                    .map_or(true, |f| f.classification != "permanent" || s.state == "failed"),
             "observation",
         )?;
         self.receipt(&s.receipt, wanted, required)
@@ -206,7 +214,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
             require(
                 matches!(
                     r.outcome.as_str(),
-                    "unknown" | "forbidden" | "invalid" | "definitely_not_accepted"
+                    "unknown" | "forbidden" | "invalid" | "definitely_not_accepted" | "unavailable"
                 ) && r.snapshot.is_none(),
                 "observation outcome",
             )?;

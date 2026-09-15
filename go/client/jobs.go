@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openabstractions/abstraction-facade/go-core/resolution"
+	wire "github.com/openabstractions/abstraction-facade/go/abstraction/facade"
 	"github.com/openabstractions/abstraction-identity/listen"
 	api "github.com/openabstractions/abstraction-job/go/abstraction/job/acceptance"
 )
@@ -29,10 +31,80 @@ type jobExchanger interface {
 // JobsClient supports concurrent calls and must not be copied after use.
 type JobsClient struct {
 	endpoint  string
+	provider  string
+	contract  string
 	transport jobExchanger
 	required  []string
 	mu        sync.Mutex
 	owner     string
+	// resultRetentionMs is the last history window's declared result retention.
+	resultRetentionMs int64
+}
+
+// JobsBinding is the persistable selection of a resolved job binding. Save it
+// with the request identity before Submit, and restore it with RestoreJobs.
+type JobsBinding struct {
+	Provider           string   `json:"provider"`
+	Contract           string   `json:"contract"`
+	Endpoint           string   `json:"endpoint"`
+	LogicalOwner       string   `json:"logical_owner"`
+	RequiredGuarantees []string `json:"required_guarantees,omitempty"`
+	// ResultRetentionMs is the provider's declared result retention from its
+	// last history window [JOB-A11]; zero declares none. RestoreJobs reads it again.
+	ResultRetentionMs int64 `json:"result_retention_ms,omitempty"`
+}
+
+// Binding returns this client's selection and pinned logical owner. The owner
+// is empty until a history window or valid receipt pins it; Contract is empty
+// for clients built with NewJobs rather than resolution or restoration.
+func (c *JobsClient) Binding() JobsBinding {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return JobsBinding{Provider: c.provider, Contract: c.contract, Endpoint: c.endpoint, LogicalOwner: c.owner, RequiredGuarantees: slices.Clone(c.required), ResultRetentionMs: c.resultRetentionMs}
+}
+
+// RestoreJobs rebinds a saved job selection without asking the resolver again
+// and without resubmitting. The saved endpoint is authenticated as resolved
+// discovery would authenticate it: the Machine's installation expectation
+// (Discover or NewVerified), or its WithProviderTrust policy, applies to the
+// saved reference. A NewUnverified Machine restores endpoint-only compatibility
+// by explicit choice. RestoreJobs obtains one history window, which proves the
+// server identity at connection and refuses a different logical owner.
+func (m *Machine) RestoreJobs(ctx context.Context, saved JobsBinding) (*JobsClient, error) {
+	if saved.Endpoint == "" || saved.LogicalOwner == "" || (saved.Contract != "abstraction.job/acceptance@1" && saved.Contract != "abstraction.job/operations@1") {
+		return nil, jobError("invalid_binding", "saved endpoint, logical owner and job contract required")
+	}
+	_, server, err := m.resolverSelection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ref := wire.ServiceReference{Provider: saved.Provider, Capability: "abstraction.job", Contract: saved.Contract, Guarantees: slices.Clone(saved.RequiredGuarantees), Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: saved.Endpoint}
+	transport, err := resolution.BindLocal(ctx, ref, server, m.providerTrust)
+	if err != nil {
+		return nil, err
+	}
+	c, err := NewJobsWithTransport(transport, JobsOptions{RequiredGuarantees: saved.RequiredGuarantees, ExpectedOwner: saved.LogicalOwner})
+	if err != nil {
+		return nil, err
+	}
+	c.provider, c.contract = saved.Provider, saved.Contract
+	if _, err := c.GetHistoryWindow(ctx); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (m *Machine) resolveJobs(ctx context.Context, contract string, need Requirements) (*JobsClient, error) {
+	endpoint, ref, err := m.resolveReference(ctx, "abstraction.job", contract, need)
+	if err != nil {
+		return nil, err
+	}
+	c, err := NewJobsWithTransport(endpoint, JobsOptions{RequiredGuarantees: need.Guarantees})
+	if err != nil {
+		return nil, err
+	}
+	c.provider, c.contract = ref.Provider, ref.Contract
+	return c, nil
 }
 
 // NewJobs restores endpoint-only compatibility and a persisted logical owner.
@@ -64,11 +136,7 @@ func (c *JobsClient) Endpoint() string { return c.endpoint }
 // ResolveJobs binds once. Call failures and unknown acceptance never trigger
 // another resolution or weaker requirements.
 func (m *Machine) ResolveJobs(ctx context.Context, need Requirements) (*JobsClient, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.job", "abstraction.job/acceptance@1", need)
-	if err != nil {
-		return nil, err
-	}
-	return NewJobsWithTransport(endpoint, JobsOptions{RequiredGuarantees: need.Guarantees})
+	return m.resolveJobs(ctx, "abstraction.job/acceptance@1", need)
 }
 
 type jobCall struct {
@@ -87,8 +155,8 @@ func (c *JobsClient) wire(ctx context.Context) *api.RecoverableAcceptanceClient 
 }
 func jobError(code, message string) error { return &api.ServiceError{Code: code, Message: message} }
 func jobIdentity(id api.RequestIdentity) error {
-	if id.Key == "" || id.HistoryEpoch == "" {
-		return jobError("invalid_submission", "explicit key and history epoch required")
+	if id.Key == "" || id.HistoryEpoch == "" || id.Attempt < 0 {
+		return jobError("invalid_submission", "explicit key, history epoch and nonnegative attempt required")
 	}
 	return nil
 }
@@ -106,12 +174,15 @@ func (c *JobsClient) GetHistoryWindow(ctx context.Context) (api.HistoryWindow, e
 	if err != nil {
 		return api.HistoryWindow{}, err
 	}
-	if result.HistoryEpoch == "" || result.MinimumRetentionMs <= 0 {
+	if result.HistoryEpoch == "" || result.MinimumRetentionMs <= 0 || result.ResultRetentionMs < 0 {
 		return api.HistoryWindow{}, jobError("invalid_acceptance", "invalid history window")
 	}
 	if err := c.bindOwner(result.LogicalOwner); err != nil {
 		return api.HistoryWindow{}, err
 	}
+	c.mu.Lock()
+	c.resultRetentionMs = result.ResultRetentionMs
+	c.mu.Unlock()
 	return result, nil
 }
 func (c *JobsClient) validateResult(result api.AcceptanceResult, id api.RequestIdentity, required []string) error {
@@ -197,7 +268,7 @@ func (c *JobsClient) ObserveWork(ctx context.Context, id api.RequestIdentity) (a
 func (c *JobsClient) validateObservation(result api.ObservationResult, id api.RequestIdentity) error {
 	invalid := func() error { return jobError("invalid_observation", "inconsistent operation observation") }
 	if result.Outcome != "observed" {
-		if !slices.Contains([]string{"unknown", "forbidden", "invalid", "definitely_not_accepted"}, result.Outcome) || result.Snapshot != nil {
+		if !slices.Contains([]string{"unknown", "forbidden", "invalid", "definitely_not_accepted", "unavailable"}, result.Outcome) || result.Snapshot != nil {
 			return invalid()
 		}
 		return nil
@@ -207,6 +278,11 @@ func (c *JobsClient) validateObservation(result api.ObservationResult, id api.Re
 		return invalid()
 	}
 	if s.Failure != nil && (!slices.Contains([]string{"retryable", "permanent", "unknown"}, s.Failure.Classification)) {
+		return invalid()
+	}
+	// A permanent failure belongs to failed work [JOB-A8]. Causes are a grant
+	// vocabulary, so an unrecognized cause is accepted and read as other.
+	if s.Failure != nil && s.Failure.Classification == "permanent" && s.State != "failed" {
 		return invalid()
 	}
 	return c.validateResult(api.AcceptanceResult{Outcome: "accepted", Receipt: &s.Receipt}, id, c.required)
@@ -254,11 +330,7 @@ func (c *JobsClient) validateRead(result api.ResultRead, id api.RequestIdentity,
 // ResolveJobOperations requires observation/result support during new discovery.
 // Already accepted work remains bound to its retained endpoint and owner.
 func (m *Machine) ResolveJobOperations(ctx context.Context, need Requirements) (*JobsClient, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.job", "abstraction.job/operations@1", need)
-	if err != nil {
-		return nil, err
-	}
-	return NewJobsWithTransport(endpoint, JobsOptions{RequiredGuarantees: need.Guarantees})
+	return m.resolveJobs(ctx, "abstraction.job/operations@1", need)
 }
 
 // CopyResult copies a complete result with one bounded chunk in memory. It pins

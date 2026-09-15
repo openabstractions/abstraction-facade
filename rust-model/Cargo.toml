@@ -1,0 +1,8 @@
+[package]
+name="abstraction-facade-model"
+version="0.0.0"
+edition="2021"
+[dependencies]
+abstraction-facade-service={path="../rust"}
+abstraction-model-api={path="../../abstraction-model/rust"}
+abstraction-download-request-api={path="../../abstraction-download/rust"}
