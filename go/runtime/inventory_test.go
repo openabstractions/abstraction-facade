@@ -30,7 +30,7 @@ func TestResolvedInventoryPagesAndDrainedClose(t *testing.T) {
 	}
 	for i := 0; i < 3; i++ {
 		r, err := jobs.Submit(ctx, api.Submission{Identity: api.RequestIdentity{Key: fmt.Sprint(i), HistoryEpoch: w.HistoryEpoch}, Kind: "download", Spec: []byte(`{"source":"test"}`)})
-		if err != nil || r.Outcome != "accepted" {
+		if err != nil || r.Outcome.String() != "accepted" {
 			t.Fatalf("submit %+v %v", r, err)
 		}
 	}
@@ -43,14 +43,14 @@ func TestResolvedInventoryPagesAndDrainedClose(t *testing.T) {
 	firstCursor := ""
 	for i := 0; i < 20; i++ {
 		p, err := inventory.ListWork(ctx, cursor, 1)
-		if err != nil || p.Outcome != "page" {
+		if err != nil || p.Outcome.String() != "page" {
 			t.Fatalf("page %+v %v", p, err)
 		}
 		for _, s := range p.Snapshots {
-			if seen[s.Receipt.OperationId] {
+			if seen[s.Receipt.OperationID] {
 				t.Fatal("duplicate operation")
 			}
-			seen[s.Receipt.OperationId] = true
+			seen[s.Receipt.OperationID] = true
 		}
 		if firstCursor == "" {
 			firstCursor = p.Next
@@ -64,7 +64,7 @@ func TestResolvedInventoryPagesAndDrainedClose(t *testing.T) {
 		t.Fatalf("inventory lost operations: %d", len(seen))
 	}
 	gap, err := inventory.ListWork(ctx, firstCursor, 1)
-	if err != nil || gap.Outcome != "gap" {
+	if err != nil || gap.Outcome.String() != "gap" {
 		t.Fatalf("old cursor %+v %v", gap, err)
 	}
 	canceled, abort := context.WithCancel(ctx)
@@ -77,7 +77,7 @@ func TestResolvedInventoryPagesAndDrainedClose(t *testing.T) {
 	}
 	stop()
 	p, err := h.jobs.provider.BindInventory("test").ListWork("", 1)
-	if err != nil || p.Outcome != "unavailable" {
+	if err != nil || p.Outcome.String() != "unavailable" {
 		t.Fatalf("inventory survived drained host %+v %v", p, err)
 	}
 }

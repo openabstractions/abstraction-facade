@@ -2,11 +2,11 @@ package runtime
 
 import (
 	"context"
-	"errors"
+
+	asksservice "github.com/openabstractions/abstraction-asks/go/application"
 	identity "github.com/openabstractions/abstraction-identity"
 	logservice "github.com/openabstractions/abstraction-logging/go/service"
 	modelservice "github.com/openabstractions/abstraction-model/go/service"
-	rights "github.com/openabstractions/abstraction-rights/go/client"
 	routerservice "github.com/openabstractions/abstraction-router/go/service"
 )
 
@@ -18,49 +18,46 @@ const (
 	ModelLookupAction = "abstraction.model/lookup"
 )
 
-// requireDecision asks a fixed decision service. It returns nil for a permit,
-// the decision error for an evaluated refusal, and unavailable joined with the
-// cause for decision-service failures and unusable catalogue decisions.
-func requireDecision(ctx context.Context, decisions *rights.Client, peer *identity.Peer, action, resource string, unavailable error) error {
-	if decisions == nil {
-		return unavailable
+// The rights rule of an application Ask (ASK-R1).
+const (
+	QuestionAskAction   = "abstraction.asks/question.ask"
+	QuestionAskResource = "account"
+)
+
+// AskPolicyFromRights decides each application Ask on QuestionAskResource. The
+// question key does not change the rule. No permit is cached.
+func AskPolicyFromRights(decisions Decider) asksservice.AskPolicy {
+	return func(ctx context.Context, peer *identity.Peer, _ string) error {
+		return requireDecision(ctx, decisions, peer, QuestionAskAction, QuestionAskResource, asksservice.ErrAskPolicyUnavailable)
 	}
-	err := decisions.Require(ctx, peer, action, resource)
-	if err == nil {
-		return nil
-	}
-	var decision *rights.DecisionError
-	if errors.As(err, &decision) {
-		switch decision.Outcome {
-		case "denied", "not_granted", "forbidden":
-			return err
-		}
-	}
-	return errors.Join(unavailable, err)
 }
 
-// HistoryPolicyFromRights asks the decision service before each history read,
-// observation and post-wait recheck. Its host must explicitly trust this process
-// to relay native subjects. No permit is cached.
-func HistoryPolicyFromRights(decisions *rights.Client) logservice.HistoryPolicy {
+// HistoryPolicyFromRights decides before each history read, observation and
+// post-wait recheck. No permit is cached.
+func HistoryPolicyFromRights(decisions Decider) logservice.HistoryPolicy {
 	return func(ctx context.Context, peer *identity.Peer) error {
 		return requireDecision(ctx, decisions, peer, LogHistoryAction, LogHistoryResource, logservice.ErrHistoryPolicyUnavailable)
 	}
 }
 
-// ModelPolicyFromRights asks the decision service before each lookup, using the
-// requested registry as the resource. No permit is cached.
-func ModelPolicyFromRights(decisions *rights.Client) modelservice.LookupPolicy {
+// ModelPolicyFromRights decides before each lookup, using the requested
+// registry as the resource. No permit is cached.
+func ModelPolicyFromRights(decisions Decider) modelservice.LookupPolicy {
 	return func(ctx context.Context, peer *identity.Peer, registry string) error {
 		return requireDecision(ctx, decisions, peer, ModelLookupAction, registry, modelservice.ErrPolicyUnavailable)
 	}
 }
 
-// RouterPolicyFromRights asks the decision service before each router
-// operation: inventory reads use routerservice.ActionInventory on
-// routerservice.ResourceInventory, and routing uses routerservice.ActionRoute on
-// the requested model. No permit is cached.
-func RouterPolicyFromRights(decisions *rights.Client) routerservice.Policy {
+// RoutesResource is the one resource of routing
+// (research/rights-defaults/DECISION.md §1). The per-host switch is inference
+// complete on host:<name>.
+const RoutesResource = routerservice.ResourceRoutes
+
+// RouterPolicyFromRights decides before each router operation: inventory reads
+// use routerservice.ActionInventory on routerservice.ResourceInventory, and
+// routing uses routerservice.ActionRoute on routerservice.ResourceRoutes. No
+// permit is cached.
+func RouterPolicyFromRights(decisions Decider) routerservice.Policy {
 	return func(ctx context.Context, peer *identity.Peer, action, resource string) error {
 		return requireDecision(ctx, decisions, peer, action, resource, routerservice.ErrPolicyUnavailable)
 	}

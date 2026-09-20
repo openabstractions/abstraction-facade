@@ -11,3 +11,9 @@ func Endpoint(service string) (string, error) { return core.Endpoint(service) }
 func ObserveInstalled(ctx context.Context) wire.BootstrapObservation {
 	return core.ObserveInstalled(ctx)
 }
+
+// ProfileView is how this process sees the account's profile folders.
+type ProfileView = core.ProfileView
+
+// CurrentProfileView probes this process's profile view once.
+func CurrentProfileView() (ProfileView, error) { return core.CurrentProfileView() }

@@ -54,48 +54,61 @@ static void closed(oa_ipc_connection* h){delete reinterpret_cast<Fake*>(h);}
 #undef oa_ipc_read
 #undef oa_ipc_close
 using namespace abstraction;
-template<class F>void refused(F f){int before=opens;try{f();}catch(const ipc::FrameError&e){if(e.status==ipc::Status::untrusted&&opens==before+1)return;throw;}throw std::runtime_error("guard lost");}
+template<class F>void refused(F f){int before=opens;try{f();}catch(const ipc::FrameError&e){if(e.status==ipc::Status::Untrusted&&opens==before+1)return;throw;}throw std::runtime_error("guard lost");}
+// On a platform the runtime declares unsupported (macOS today), a default client
+// refuses before it selects an installation; platform_refusal.cpp covers the
+// error itself. Explicit endpoints with explicit server evidence stay usable.
+static void unsupported_platform_trust(){
+ default_endpoint=true;
+ const auto request=facade::service_request<facade::ResolverService>();
+ try{facade::resolve_service<facade::ResolverService>(facade::ResolutionClient{},{},abstraction::facade::Scope::Any,ipc::Clock::now()+std::chrono::milliseconds(200));throw std::runtime_error("default client resolved on an unsupported platform");}
+ catch(const facade::ResolutionError&e){if(e.status!=facade::kRuntimeUnavailable||e.platform!=facade::unsupported_platform()||selections!=0||opens!=0)throw;}
+ facade::ResolutionClient{}.with_server_expectation(ipc::ServerExpectation{2,"123","/installed/runtime"}).resolve(request);
+ if(selections!=0||opens!=1)throw std::runtime_error("explicit server evidence selected an installation");
+}
 int main(){
+ if(!facade::unsupported_platform().empty()){unsupported_platform_trust();}else{
  default_endpoint=true;
  const auto request=facade::service_request<facade::ResolverService>();
  facade::ResolutionClient automatic;
  auto deadline0=ipc::Clock::now()+std::chrono::milliseconds(200);
- auto automatic_binding=facade::ResolveService<facade::ResolverService>(automatic,{},"any",deadline0);
+ auto automatic_binding=facade::resolve_service<facade::ResolverService>(automatic,{},abstraction::facade::Scope::Any,deadline0);
  if(selections!=1||releases!=1||last_open_budget>180)throw std::runtime_error("selection reset budget");
- refused([&]{automatic_binding->Resolve(request);});
- automatic.Resolve(request);if(selections!=1)throw std::runtime_error("selection pin changed");
+ refused([&]{automatic_binding->resolve(request);});
+ automatic.resolve(request);if(selections!=1)throw std::runtime_error("selection pin changed");
  facade::Machine machine;
  const auto machine_selections=selections;
  response_capability="abstraction.logging";response_contract="abstraction.logging/sink@1";
- auto logger=machine.ResolveLog();refused([&]{logger.Log(1,"private");});
+ auto logger=machine.resolve_log();refused([&]{logger.log(1,"private");});
  response_capability="abstraction.config";response_contract="abstraction.config/reader@1";
- auto configuration=machine.ResolveConfig();refused([&]{configuration.ReadWithOverrides({});});
+ auto configuration=machine.resolve_config();refused([&]{configuration.read_with_overrides({});});
  response_capability="abstraction.job";response_contract="abstraction.job/acceptance@1";
- auto jobs=machine.ResolveJobs();refused([&]{jobs.GetHistoryWindow();});
+ auto jobs=machine.resolve_jobs();refused([&]{jobs.get_history_window();});
  if(selections!=machine_selections+1)throw std::runtime_error("default Machine lost pinned selection");
  response_capability="abstraction.facade";response_contract="abstraction.facade/resolver@1";
  int before=opens;
- try{facade::ResolutionClient{}.Resolve(request,ipc::Clock::now());throw std::runtime_error("expired selection admitted");}
- catch(const ipc::FrameError&e){if(e.status!=ipc::Status::timeout||opens!=before)throw;}
+ try{facade::ResolutionClient{}.resolve(request,ipc::Clock::now());throw std::runtime_error("expired selection admitted");}
+ catch(const ipc::FrameError&e){if(e.status!=ipc::Status::Timeout||opens!=before)throw;}
  selection_status=OA_IPC_UNTRUSTED;
- try{facade::ResolutionClient{}.Resolve(request);throw std::runtime_error("missing installation admitted");}
- catch(const ipc::FrameError&e){if(e.status!=ipc::Status::untrusted||opens!=before)throw;}
+ try{facade::ResolutionClient{}.resolve(request);throw std::runtime_error("missing installation admitted");}
+ catch(const ipc::FrameError&e){if(e.status!=ipc::Status::Untrusted||opens!=before)throw;}
  selection_status=OA_IPC_CANCELLED;
  ipc::CancellationSource cancellation;
- try{facade::ResolutionClient{}.WithCancellation(cancellation.Token()).Resolve(request);throw std::runtime_error("cancellation ignored");}
- catch(const ipc::FrameError&e){if(e.status!=ipc::Status::cancelled||!selected_token||opens!=before)throw;}
+ try{facade::ResolutionClient{}.with_cancellation(cancellation.token()).resolve(request);throw std::runtime_error("cancellation ignored");}
+ catch(const ipc::FrameError&e){if(e.status!=ipc::Status::Cancelled||!selected_token||opens!=before)throw;}
  // Explicit independent evidence remains usable despite unavailable installation.
- facade::ResolutionClient{}.WithServerExpectation(ipc::ServerExpectation{2,"123","/installed/runtime"}).Resolve(request);
+ facade::ResolutionClient{}.with_server_expectation(ipc::ServerExpectation{2,"123","/installed/runtime"}).resolve(request);
+ }
  selection_status=OA_IPC_OK;default_endpoint=false;opens=0;
  const ipc::ServerExpectation s{2,"123","/installed/runtime"};
- facade::ResolutionClient resolver("resolver");resolver=resolver.WithServerExpectation(s);
- auto bound=facade::ResolveService<facade::ResolverService>(resolver);
- const auto q=facade::service_request<facade::ResolverService>();refused([&]{bound->Resolve(q);});if(opens!=2)return 1;
+ facade::ResolutionClient resolver("resolver");resolver=resolver.with_server_expectation(s);
+ auto bound=facade::resolve_service<facade::ResolverService>(resolver);
+ const auto q=facade::service_request<facade::ResolverService>();refused([&]{bound->resolve(q);});if(opens!=2)return 1;
  auto deadline=ipc::Clock::now()+std::chrono::seconds(1);
- refused([&]{logging::Logger("provider").WithServerExpectation(s).Log(1,"private");});
- refused([&]{config::Client("provider").WithServerExpectation(s).ReadWithOverrides({});});
- refused([&]{config::Editor("provider").WithServerExpectation(s).ReadUser();});
- refused([&]{router::Client("provider").WithServerExpectation(s).Models();});
- refused([&]{facade::JobsClient("provider").WithServerExpectation(s).WithDeadline(deadline).GetHistoryWindow();});
- refused([&]{facade::JobInventoryClient("provider").WithServerExpectation(s).WithDeadline(deadline).ListWork("",1);});
+ refused([&]{logging::Logger("provider").with_server_expectation(s).log(1,"private");});
+ refused([&]{config::Client("provider").with_server_expectation(s).read_with_overrides({});});
+ refused([&]{config::Editor("provider").with_server_expectation(s).read_user();});
+ refused([&]{router::Client("provider").with_server_expectation(s).models();});
+ refused([&]{facade::JobsClient("provider").with_server_expectation(s).with_deadline(deadline).get_history_window();});
+ refused([&]{facade::JobInventoryClient("provider").with_server_expectation(s).with_deadline(deadline).list_work("",1);});
 }

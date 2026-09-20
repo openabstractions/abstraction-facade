@@ -82,7 +82,7 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		denied, err := content.Open(ctx, digest)
-		if err != nil || denied.Outcome != "forbidden" || provider.finds.Load() != 0 {
+		if err != nil || denied.Outcome.String() != "forbidden" || provider.finds.Load() != 0 {
 			t.Fatal(denied, err)
 		}
 		var subject rightsclient.Subject
@@ -96,26 +96,26 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		hidden, err := operator.ListPolicyContext(ctx, "", 1)
-		if err != nil || hidden.Outcome != "forbidden" {
+		if err != nil || hidden.Outcome.String() != "forbidden" {
 			t.Fatal(hidden, err)
 		}
 		rule := rightsclient.PolicyRule{Subject: subject, Action: action, Resource: digest, Permit: true}
 		refused, err := operator.SetRuleContext(ctx, "unobserved", rule)
-		if err != nil || refused.Outcome != "forbidden" {
+		if err != nil || refused.Outcome.String() != "forbidden" {
 			t.Fatal(refused, err)
 		}
 		allow.Store(true)
 		page, err := operator.ListPolicyContext(ctx, "", 64)
-		if err != nil || page.Outcome != "page" || len(page.Catalog) != 1 || page.Catalog[0] != action || len(page.Rules) != 0 {
+		if err != nil || page.Outcome.String() != "page" || len(page.Catalog) != 1 || page.Catalog[0] != action || len(page.Rules) != 0 {
 			t.Fatal(page, err)
 		}
 		initial := page.Revision
 		grant, err := operator.SetRuleContext(ctx, initial, rule)
-		if err != nil || grant.Outcome != "applied" || grant.Current == nil || !grant.Current.Permit {
+		if err != nil || grant.Outcome.String() != "applied" || grant.Current == nil || !grant.Current.Permit {
 			t.Fatal(grant, err)
 		}
 		retry, err := operator.SetRuleContext(ctx, initial, rule)
-		if err != nil || retry.Outcome != "conflict" || retry.Revision != grant.Revision {
+		if err != nil || retry.Outcome.String() != "conflict" || retry.Revision != grant.Revision {
 			t.Fatal(retry, err)
 		}
 		opened, err := content.Open(ctx, digest)
@@ -130,7 +130,7 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 				t.Fatal(chunk, err)
 			}
 			got.Write(chunk.Chunk.Data)
-			if chunk.Chunk.Eof {
+			if chunk.Chunk.EOF {
 				break
 			}
 		}
@@ -140,7 +140,7 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 		rule.Resource = "other"
 		rule.Permit = false
 		second, err := operator.SetRuleContext(ctx, grant.Revision, rule)
-		if err != nil || second.Outcome != "applied" {
+		if err != nil || second.Outcome.String() != "applied" {
 			t.Fatal(second, err)
 		}
 		page, err = operator.ListPolicyContext(ctx, "", 1)
@@ -150,33 +150,33 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 		oldCursor := page.Next
 		allow.Store(false)
 		refused, err = operator.RevokeRuleContext(ctx, page.Revision, subject, action, digest)
-		if err != nil || refused.Outcome != "forbidden" {
+		if err != nil || refused.Outcome.String() != "forbidden" {
 			t.Fatal(refused, err)
 		}
 		allow.Store(true)
 		outage.Store(true)
 		unavailable, err := operator.RevokeRuleContext(ctx, page.Revision, subject, action, digest)
-		if err != nil || unavailable.Outcome != "unavailable" {
+		if err != nil || unavailable.Outcome.String() != "unavailable" {
 			t.Fatal(unavailable, err)
 		}
 		outage.Store(false)
-		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome != "data" {
+		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome.String() != "data" {
 			t.Fatal("refused edit changed grant", chunk, err)
 		}
 		revoked, err := operator.RevokeRuleContext(ctx, page.Revision, subject, action, digest)
-		if err != nil || revoked.Outcome != "applied" || revoked.Current != nil {
+		if err != nil || revoked.Outcome.String() != "applied" || revoked.Current != nil {
 			t.Fatal(revoked, err)
 		}
-		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome != "forbidden" {
+		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome.String() != "forbidden" {
 			t.Fatal("revoked grant still enforced", chunk, err)
 		}
 		gap, err := operator.ListPolicyContext(ctx, oldCursor, 1)
-		if err != nil || gap.Outcome != "gap" {
+		if err != nil || gap.Outcome.String() != "gap" {
 			t.Fatal(gap, err)
 		}
 		rule.Resource = "third"
 		added, err := operator.SetRuleContext(ctx, revoked.Revision, rule)
-		if err != nil || added.Outcome != "applied" {
+		if err != nil || added.Outcome.String() != "applied" {
 			t.Fatal(added, err)
 		}
 		page, err = operator.ListPolicyContext(ctx, "", 1)
@@ -196,17 +196,17 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 			case <-time.After(time.Millisecond):
 			}
 		}
-		var binding *client.BindingError
+		var binding *client.ResolutionError
 		if !errors.As(err, &binding) || binding.Status != "not_ready" {
 			t.Fatal(err)
 		}
 		if _, err = m.ResolveRights(ctx, client.Requirements{}); !errors.As(err, &binding) || binding.Status != "not_ready" {
 			t.Fatal("shared decision readiness", err)
 		}
-		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome != "unavailable" {
+		if chunk, err := content.Read(ctx, resource, 0, 1); err != nil || chunk.Outcome.String() != "unavailable" {
 			t.Fatal("decision outage hidden", chunk, err)
 		}
-		if closed, err := content.Close(ctx, resource); err != nil || closed.Outcome != "closed" {
+		if closed, err := content.Close(ctx, resource); err != nil || closed.Outcome.String() != "closed" {
 			t.Fatal(closed, err)
 		}
 		if _, err = m.ResolveConfig(ctx, client.Requirements{}); err != nil {
@@ -225,7 +225,7 @@ func TestResolvedRightsOperatorEnforcesStorageAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	gap, err := operator.ListPolicyContext(ctx, cursor, 1)
-	if err != nil || gap.Outcome != "gap" {
+	if err != nil || gap.Outcome.String() != "gap" {
 		t.Fatal("restart gap hidden", gap, err)
 	}
 	page, err := operator.ListPolicyContext(ctx, "", 64)
@@ -261,7 +261,7 @@ func TestRuntimeRightsOperatorRequiresExplicitPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision, err := decisions.DecideContext(ctx, "abstraction.storage/content.read", "x"); err != nil || decision.Outcome != "not_granted" {
+	if decision, err := decisions.DecideContext(ctx, "abstraction.storage/content.read", "x"); err != nil || decision.Outcome.String() != "not_granted" {
 		t.Fatal(decision, err)
 	}
 }

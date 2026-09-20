@@ -103,7 +103,7 @@ func TestRejectMisleadingReference(t *testing.T) {
 	cases := []wire.ResolveResult{
 		{Status: wire.ResolutionStatusResolved},
 		{Status: wire.ResolutionStatusForbidden, Reference: &candidate.Reference},
-		{Status: "invented"},
+		{Status: wire.ResolutionStatus(99)},
 	}
 	for _, field := range []string{"capability", "contract", "guarantees", "scope", "endpoint", "nul_endpoint"} {
 		ref := clone(candidate.Reference)

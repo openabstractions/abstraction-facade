@@ -6,12 +6,12 @@ namespace abstraction::facade {
 namespace job_detail {
 inline void validate_inventory(const job_api::InventoryPage& page, const std::string& cursor, std::int64_t limit) {
     if (page.outcome != "page") {
-        if (!resolution_detail::contains({"gap", "forbidden", "invalid", "unavailable"}, page.outcome) ||
+        if (!resolution_detail::contains({"gap", "forbidden", "invalid", "unavailable"}, std::string(wire_name(page.outcome))) ||
             !page.snapshots.empty() || !page.next.empty() || page.complete)
             throw job_api::ServiceError("invalid_inventory", "inconsistent refusal page");
         return;
     }
-    if (limit < 1 || limit > 64 || page.snapshots.size() > static_cast<std::size_t>(limit) || page.next.size() > 128 || !job_api::valid_utf8(page.next) ||
+    if (limit < 1 || limit > 64 || page.snapshots.size() > static_cast<std::size_t>(limit) || page.next.size() > 128 || !job_api::detail::valid_utf8(page.next) ||
         (page.complete ? !page.next.empty() : (page.next.empty() || page.next == cursor)))
         throw job_api::ServiceError("invalid_inventory", "invalid page bounds or cursor progress");
     std::set<std::string> operations;
@@ -34,26 +34,26 @@ inline void validate_inventory(const job_api::InventoryPage& page, const std::st
 class JobInventoryClient : public job_api::JobInventory {
 public:
     explicit JobInventoryClient(std::string endpoint, std::uint32_t timeout_ms = 5000)
-        : endpoint_(std::move(endpoint)), transport_(endpoint_, timeout_ms, JobsClient::MaxFrameBytes), owner_(std::make_shared<Owner>()) {}
+        : endpoint_(std::move(endpoint)), transport_(endpoint_, timeout_ms, JobsClient::kMaxFrameBytes), owner_(std::make_shared<Owner>()) {}
     JobInventoryClient(std::string endpoint, ipc::Deadline deadline)
-        : endpoint_(std::move(endpoint)), transport_(endpoint_, deadline, JobsClient::MaxFrameBytes), owner_(std::make_shared<Owner>()) {}
-    JobInventoryClient WithDeadline(ipc::Deadline deadline) const {
+        : endpoint_(std::move(endpoint)), transport_(endpoint_, deadline, JobsClient::kMaxFrameBytes), owner_(std::make_shared<Owner>()) {}
+    JobInventoryClient with_deadline(ipc::Deadline deadline) const {
         auto copy = *this;
-        copy.transport_ = ipc::FrameTransport(endpoint_, deadline, JobsClient::MaxFrameBytes).WithCancellation(cancellation_).WithServerExpectation(server_);
+        copy.transport_ = ipc::FrameTransport(endpoint_, deadline, JobsClient::kMaxFrameBytes).with_cancellation(cancellation_).with_server_expectation(server_);
         return copy;
     }
-    JobInventoryClient WithServerExpectation(std::optional<ipc::ServerExpectation> server) const {auto copy=*this;copy.server_=std::move(server);copy.transport_=transport_.WithServerExpectation(copy.server_);return copy;}
- JobInventoryClient WithCancellation(ipc::CancellationToken token) const {
+    JobInventoryClient with_server_expectation(std::optional<ipc::ServerExpectation> server) const {auto copy=*this;copy.server_=std::move(server);copy.transport_=transport_.with_server_expectation(copy.server_);return copy;}
+ JobInventoryClient with_cancellation(ipc::CancellationToken token) const {
         auto copy = *this;
         copy.cancellation_ = std::move(token);
-        copy.transport_ = transport_.WithCancellation(copy.cancellation_);
+        copy.transport_ = transport_.with_cancellation(copy.cancellation_);
         return copy;
     }
-    job_api::InventoryPage ListWork(const std::string& cursor, const std::int64_t& limit) override {
-        if (limit < 1 || limit > 64 || cursor.size() > 128 || !job_api::valid_utf8(cursor))
+    job_api::InventoryPage list_work(const std::string& cursor, const std::int64_t& limit) override {
+        if (limit < 1 || limit > 64 || cursor.size() > 128 || !job_api::detail::valid_utf8(cursor))
             throw job_api::ServiceError("invalid_request", "inventory limit must be 1..64");
         job_api::JobInventoryClient<ipc::FrameTransport> client(transport_);
-        auto page = client.ListWork(cursor, limit);
+        auto page = client.list_work(cursor, limit);
         job_detail::validate_inventory(page, cursor, limit);
         if (!page.snapshots.empty()) {
             std::lock_guard<std::mutex> lock(owner_->mutex);
@@ -72,22 +72,22 @@ private:
     struct Owner { std::mutex mutex; std::string value; };
     std::shared_ptr<Owner> owner_;
 };
-inline JobInventoryClient ResolveJobInventory(const ResolutionClient& resolver,
-        std::vector<std::string> guarantees = {}, std::string scope = "any") {
+inline JobInventoryClient resolve_job_inventory(const ResolutionClient& resolver,
+        std::vector<std::string> guarantees = {}, Scope scope = Scope::Any) {
     ResolveRequest request;
     request.capability = "abstraction.job";
     request.contracts = {"abstraction.job/inventory@1"};
-    request.guarantees = std::move(guarantees); request.scope = std::move(scope);
-    auto binding = local_binding(request, resolver.Resolve(request));
-    return JobInventoryClient(binding.endpoint).WithCancellation(resolver.Cancellation()).WithServerExpectation(resolver.Server());
+    request.guarantees = std::move(guarantees); request.scope = scope;
+    auto binding = resolver.bind_local(request);
+    return JobInventoryClient(binding.endpoint).with_cancellation(resolver.cancellation()).with_server_expectation(resolver.server());
 }
-inline JobInventoryClient ResolveJobInventory(const ResolutionClient& resolver,
-        std::vector<std::string> guarantees, std::string scope, ipc::Deadline deadline) {
+inline JobInventoryClient resolve_job_inventory(const ResolutionClient& resolver,
+        std::vector<std::string> guarantees, Scope scope, ipc::Deadline deadline) {
     ResolveRequest request;
     request.capability = "abstraction.job";
     request.contracts = {"abstraction.job/inventory@1"};
-    request.guarantees = std::move(guarantees); request.scope = std::move(scope);
-    auto binding = local_binding(request, resolver.Resolve(request, deadline));
-    return JobInventoryClient(binding.endpoint, deadline).WithCancellation(resolver.Cancellation()).WithServerExpectation(resolver.Server());
+    request.guarantees = std::move(guarantees); request.scope = scope;
+    auto binding = resolver.bind_local(request, deadline);
+    return JobInventoryClient(binding.endpoint, deadline).with_cancellation(resolver.cancellation()).with_server_expectation(resolver.server());
 }
 }

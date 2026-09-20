@@ -61,7 +61,7 @@ func TestResolvedConfigEditorSharesServiceOwnership(t *testing.T) {
 	until := time.Now().Add(time.Second)
 	for {
 		_, err = machine.ResolveConfigEditor(ctx, client.Requirements{})
-		var refusal *client.BindingError
+		var refusal *client.ResolutionError
 		if errors.As(err, &refusal) && refusal.Status == "not_ready" {
 			break
 		}

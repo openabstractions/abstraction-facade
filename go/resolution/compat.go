@@ -16,6 +16,14 @@ type Resolver = core.Resolver
 type Host = core.Host
 type PeerPolicy = core.PeerPolicy
 type Client = core.Client
+type Error = core.Error
+type ErrorStatus = core.ErrorStatus
+
+const (
+	RuntimeUnavailable   = core.RuntimeUnavailable
+	InvalidResolution    = core.InvalidResolution
+	UnsupportedTransport = core.UnsupportedTransport
+)
 
 const LocalTransport = core.LocalTransport
 

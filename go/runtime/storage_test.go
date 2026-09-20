@@ -78,37 +78,37 @@ func TestResolvedStorageAuthorizationAndLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	unavailable, err := c.Open(ctx, digest)
-	if err != nil || unavailable.Outcome != "unavailable" || provider.finds.Load() != 0 {
+	if err != nil || unavailable.Outcome.String() != "unavailable" || provider.finds.Load() != 0 {
 		t.Fatalf("policy unavailable %+v %v lookups=%d", unavailable, err, provider.finds.Load())
 	}
 	policyOnline.Store(true)
 	denied, err := c.Open(ctx, digest)
-	if err != nil || denied.Outcome != "forbidden" || provider.finds.Load() != 0 {
+	if err != nil || denied.Outcome.String() != "forbidden" || provider.finds.Load() != 0 {
 		t.Fatalf("denied=%+v err=%v lookups=%d", denied, err, provider.finds.Load())
 	}
 	allowed.Store(true)
 	opened, err := c.Open(ctx, digest)
-	if err != nil || opened.Outcome != "opened" || opened.Resource == nil {
+	if err != nil || opened.Outcome.String() != "opened" || opened.Resource == nil {
 		t.Fatalf("open %+v %v", opened, err)
 	}
 	resource := *opened.Resource
 	policyOnline.Store(false)
 	blocked, err := c.Read(ctx, resource, 0, 1)
-	if err != nil || blocked.Outcome != "unavailable" {
+	if err != nil || blocked.Outcome.String() != "unavailable" {
 		t.Fatalf("policy outage %+v %v", blocked, err)
 	}
 	policyOnline.Store(true)
-	if resource.Verification != "unverified" || resource.Digest != digest {
+	if resource.Verification.String() != "unverified" || resource.Digest != digest {
 		t.Fatalf("resource %+v", resource)
 	}
 	var got bytes.Buffer
 	for {
 		page, err := c.Read(ctx, resource, int64(got.Len()), 65536)
-		if err != nil || page.Outcome != "data" || page.Chunk == nil {
+		if err != nil || page.Outcome.String() != "data" || page.Chunk == nil {
 			t.Fatalf("read %+v %v", page, err)
 		}
 		got.Write(page.Chunk.Data)
-		if page.Chunk.Eof {
+		if page.Chunk.EOF {
 			break
 		}
 	}
@@ -117,16 +117,16 @@ func TestResolvedStorageAuthorizationAndLifetime(t *testing.T) {
 	}
 	allowed.Store(false)
 	page, err := c.Read(ctx, resource, 0, 1)
-	if err != nil || page.Outcome != "forbidden" {
+	if err != nil || page.Outcome.String() != "forbidden" {
 		t.Fatalf("revoked %+v %v", page, err)
 	}
 	closed, err := c.Close(ctx, resource)
-	if err != nil || closed.Outcome != "closed" {
+	if err != nil || closed.Outcome.String() != "closed" {
 		t.Fatalf("release after revocation %+v %v", closed, err)
 	}
 	allowed.Store(true)
 	page, err = c.Read(ctx, resource, 0, 1)
-	if err != nil || page.Outcome != "gap" {
+	if err != nil || page.Outcome.String() != "gap" {
 		t.Fatalf("closed resource %+v %v", page, err)
 	}
 	h.storage.Close()
@@ -141,7 +141,7 @@ func TestResolvedStorageAuthorizationAndLifetime(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	var refusal *client.BindingError
+	var refusal *client.ResolutionError
 	if !errors.As(err, &refusal) || refusal.Status != "not_ready" {
 		t.Fatalf("stopped storage %v", err)
 	}

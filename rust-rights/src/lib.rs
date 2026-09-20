@@ -125,7 +125,7 @@ impl<T: wire::FrameTransport + Clone> Decisions<T> {
     }
     pub fn decide(&self, action: &str, resource: &str) -> Result<wire::Decision, Error<T::Error>> {
         let d = wire::AuthorizationClient::new(self.transport.clone())
-            .Decide(action.into(), resource.into())
+            .decide(action.into(), resource.into())
             .map_err(Error::Call)?;
         check_decision::<T::Error>(&d)?;
         Ok(d)
@@ -137,7 +137,7 @@ impl<T: wire::FrameTransport + Clone> Decisions<T> {
         resource: &str,
     ) -> Result<wire::Decision, Error<T::Error>> {
         let d = wire::AuthorizationClient::new(self.transport.clone())
-            .DecideFor(subject, action.into(), resource.into())
+            .decide_for(subject, action.into(), resource.into())
             .map_err(Error::Call)?;
         check_decision::<T::Error>(&d)?;
         Ok(d)
@@ -156,7 +156,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
     pub fn list_policy(&self, cursor: &str, limit: i64) -> Result<wire::PolicyPage, Error<T::Error>> {
         require(cursor.len() <= 256 && (1..=64).contains(&limit), "policy range")?;
         let p = wire::AuthorizationOperatorClient::new(self.transport.clone())
-            .ListPolicy(cursor.into(), limit)
+            .list_policy(cursor.into(), limit)
             .map_err(Error::Call)?;
         check_page::<T::Error>(&p, cursor, limit)?;
         Ok(p)
@@ -166,7 +166,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
         let target = wire::Subject { account: r.subject.account.clone(), program: r.subject.program.clone() };
         let (action, resource, permit) = (r.action.clone(), r.resource.clone(), r.permit);
         let e = wire::AuthorizationOperatorClient::new(self.transport.clone())
-            .SetRule(expected_revision.into(), r)
+            .set_rule(expected_revision.into(), r)
             .map_err(Error::Call)?;
         check_edit::<T::Error>(&e, &target, &action, &resource, Some(permit))?;
         Ok(e)
@@ -184,7 +184,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
         )?;
         let copy = wire::Subject { account: target.account.clone(), program: target.program.clone() };
         let e = wire::AuthorizationOperatorClient::new(self.transport.clone())
-            .RevokeRule(expected_revision.into(), target, action.into(), resource.into())
+            .revoke_rule(expected_revision.into(), target, action.into(), resource.into())
             .map_err(Error::Call)?;
         check_edit::<T::Error>(&e, &copy, action, resource, None)?;
         Ok(e)
@@ -195,27 +195,27 @@ pub trait RightsMachine<C: Connector> {
     fn resolve_rights(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Decisions<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     /// Every call remains subject to the host's operator authorization.
     fn resolve_rights_operator(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Operator<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> RightsMachine<C> for Machine<C> {
     fn resolve_rights(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Decisions<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Decisions::new(self.resolve_service("abstraction.rights/authorization@1", g, s)?))
     }
     fn resolve_rights_operator(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Operator<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Operator::new(self.resolve_service("abstraction.rights/operator@1", g, s)?))
     }
@@ -236,17 +236,17 @@ mod tests {
     }
     #[test]
     fn decisions_carry_revisions_only_when_evaluated() {
-        let d = |outcome: &str, revision: &str| wire::Decision { outcome: outcome.into(), policy_revision: revision.into() };
-        assert!(check_decision::<()>(&d("permitted", "r1")).is_ok());
-        assert!(check_decision::<()>(&d("denied", "")).is_err());
-        assert!(check_decision::<()>(&d("unavailable", "")).is_ok());
-        assert!(check_decision::<()>(&d("forbidden", "r1")).is_err());
-        assert!(check_decision::<()>(&d("granted", "r1")).is_err());
+        use wire::DecisionOutcome::{Denied, Forbidden, Permitted, Unavailable};
+        let d = |outcome, revision: &str| wire::Decision { outcome, policy_revision: revision.into() };
+        assert!(check_decision::<()>(&d(Permitted, "r1")).is_ok());
+        assert!(check_decision::<()>(&d(Denied, "")).is_err());
+        assert!(check_decision::<()>(&d(Unavailable, "")).is_ok());
+        assert!(check_decision::<()>(&d(Forbidden, "r1")).is_err());
     }
     #[test]
     fn pages_and_edits_keep_their_shapes() {
         let mut page = wire::PolicyPage {
-            outcome: "page".into(),
+            outcome: wire::PolicyPageOutcome::Page,
             revision: "r1".into(),
             catalog: vec!["fixture.read".into()],
             rules: vec![policy_rule(true)],
@@ -259,21 +259,29 @@ mod tests {
         page.rules.pop();
         page.rules[0].action = "fixture.other".into();
         assert!(check_page::<()>(&page, "", 16).is_err(), "uncatalogued action");
-        let refusal = wire::PolicyPage { outcome: "forbidden".into(), ..Default::default() };
+        let refused = |outcome, revision: &str| wire::PolicyPage {
+            outcome,
+            revision: revision.into(),
+            catalog: vec![],
+            rules: vec![],
+            next: String::new(),
+            complete: false,
+        };
+        let refusal = refused(wire::PolicyPageOutcome::Forbidden, "");
         assert!(check_page::<()>(&refusal, "", 16).is_ok());
-        let leaked = wire::PolicyPage { outcome: "unavailable".into(), revision: "r1".into(), ..Default::default() };
+        let leaked = refused(wire::PolicyPageOutcome::Unavailable, "r1");
         assert!(check_page::<()>(&leaked, "", 16).is_err());
 
         let t = target();
-        let applied = wire::PolicyEdit { outcome: "applied".into(), revision: "r2".into(), current: Some(policy_rule(true)) };
+        let applied = wire::PolicyEdit { outcome: wire::PolicyEditOutcome::Applied, revision: "r2".into(), current: Some(policy_rule(true)) };
         assert!(check_edit::<()>(&applied, &t, "fixture.read", "r", Some(true)).is_ok());
         assert!(check_edit::<()>(&applied, &t, "fixture.read", "r", Some(false)).is_err());
         assert!(check_edit::<()>(&applied, &t, "fixture.read", "other", Some(true)).is_err());
-        let revoked = wire::PolicyEdit { outcome: "applied".into(), revision: "r3".into(), current: None };
+        let revoked = wire::PolicyEdit { outcome: wire::PolicyEditOutcome::Applied, revision: "r3".into(), current: None };
         assert!(check_edit::<()>(&revoked, &t, "fixture.read", "r", None).is_ok());
-        let conflict = wire::PolicyEdit { outcome: "conflict".into(), revision: "r2".into(), current: Some(policy_rule(false)) };
+        let conflict = wire::PolicyEdit { outcome: wire::PolicyEditOutcome::Conflict, revision: "r2".into(), current: Some(policy_rule(false)) };
         assert!(check_edit::<()>(&conflict, &t, "fixture.read", "r", Some(true)).is_ok());
-        let refused = wire::PolicyEdit { outcome: "forbidden".into(), revision: "r2".into(), current: None };
+        let refused = wire::PolicyEdit { outcome: wire::PolicyEditOutcome::Forbidden, revision: "r2".into(), current: None };
         assert!(check_edit::<()>(&refused, &t, "fixture.read", "r", Some(true)).is_err());
     }
 }

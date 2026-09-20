@@ -74,9 +74,9 @@ func (m *Machine) RestoreJobs(ctx context.Context, saved JobsBinding) (*JobsClie
 	if saved.Endpoint == "" || saved.LogicalOwner == "" || (saved.Contract != "abstraction.job/acceptance@1" && saved.Contract != "abstraction.job/operations@1") {
 		return nil, jobError("invalid_binding", "saved endpoint, logical owner and job contract required")
 	}
-	_, server, err := m.resolverSelection(ctx)
+	_, server, lookedFor, err := m.resolverSelection(ctx)
 	if err != nil {
-		return nil, err
+		return nil, resolution.Unreachable(ctx, err, "abstraction.job", saved.Contract, lookedFor)
 	}
 	ref := wire.ServiceReference{Provider: saved.Provider, Capability: "abstraction.job", Contract: saved.Contract, Guarantees: slices.Clone(saved.RequiredGuarantees), Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: saved.Endpoint}
 	transport, err := resolution.BindLocal(ctx, ref, server, m.providerTrust)
@@ -153,7 +153,9 @@ func (c jobCall) ExchangeFrame(frame []byte) ([]byte, error) {
 func (c *JobsClient) wire(ctx context.Context) *api.RecoverableAcceptanceClient {
 	return api.NewRecoverableAcceptanceClient(jobCall{ctx, c.transport})
 }
-func jobError(code, message string) error { return &api.ServiceError{Code: code, Message: message} }
+func jobError(code api.ServiceErrorCode, message string) error {
+	return &api.ServiceError{Code: code, Message: message}
+}
 func jobIdentity(id api.RequestIdentity) error {
 	if id.Key == "" || id.HistoryEpoch == "" || id.Attempt < 0 {
 		return jobError("invalid_submission", "explicit key, history epoch and nonnegative attempt required")
@@ -195,7 +197,7 @@ func (c *JobsClient) validateResult(result api.AcceptanceResult, id api.RequestI
 	if err := api.ValidateResult(result, id, owner); err != nil {
 		return jobError("invalid_acceptance", err.Error())
 	}
-	if result.Outcome != "accepted" {
+	if result.Outcome != api.AcceptanceOutcomeAccepted {
 		return nil
 	}
 	for _, g := range required {
@@ -267,25 +269,25 @@ func (c *JobsClient) ObserveWork(ctx context.Context, id api.RequestIdentity) (a
 }
 func (c *JobsClient) validateObservation(result api.ObservationResult, id api.RequestIdentity) error {
 	invalid := func() error { return jobError("invalid_observation", "inconsistent operation observation") }
-	if result.Outcome != "observed" {
-		if !slices.Contains([]string{"unknown", "forbidden", "invalid", "definitely_not_accepted", "unavailable"}, result.Outcome) || result.Snapshot != nil {
+	if result.Outcome != api.ObservationOutcomeObserved {
+		if !result.Outcome.Known() || result.Snapshot != nil {
 			return invalid()
 		}
 		return nil
 	}
 	s := result.Snapshot
-	if s == nil || !slices.Contains([]string{"pending", "running", "transferred", "complete", "failed", "cancelled"}, s.State) || s.Progress.Done < 0 || s.Progress.Total < 0 {
+	if s == nil || !s.State.Known() || s.Progress.Done < 0 || s.Progress.Total < 0 {
 		return invalid()
 	}
-	if s.Failure != nil && (!slices.Contains([]string{"retryable", "permanent", "unknown"}, s.Failure.Classification)) {
+	if s.Failure != nil && !s.Failure.Classification.Known() {
 		return invalid()
 	}
 	// A permanent failure belongs to failed work [JOB-A8]. Causes are a grant
 	// vocabulary, so an unrecognized cause is accepted and read as other.
-	if s.Failure != nil && s.Failure.Classification == "permanent" && s.State != "failed" {
+	if s.Failure != nil && s.Failure.Classification == api.FailureClassPermanent && s.State != api.WorkStateFailed {
 		return invalid()
 	}
-	return c.validateResult(api.AcceptanceResult{Outcome: "accepted", Receipt: &s.Receipt}, id, c.required)
+	return c.validateResult(api.AcceptanceResult{Outcome: api.AcceptanceOutcomeAccepted, Receipt: &s.Receipt}, id, c.required)
 }
 
 // ReadResult reads at most maxBytes (1..65536) from a completed service-owned
@@ -310,8 +312,8 @@ func (c *JobsClient) ReadResult(ctx context.Context, id api.RequestIdentity, off
 }
 func (c *JobsClient) validateRead(result api.ResultRead, id api.RequestIdentity, offset, maxBytes int64) error {
 	invalid := func() error { return jobError("invalid_result", "inconsistent result chunk") }
-	if result.Outcome != "data" {
-		if !slices.Contains([]string{"not_ready", "unavailable", "unsupported", "unknown", "forbidden", "invalid"}, result.Outcome) || result.Chunk != nil {
+	if result.Outcome != api.ResultOutcomeData {
+		if !result.Outcome.Known() || result.Chunk != nil {
 			return invalid()
 		}
 		return nil
@@ -321,10 +323,10 @@ func (c *JobsClient) validateRead(result api.ResultRead, id api.RequestIdentity,
 		return invalid()
 	}
 	n := int64(len(chunk.Data))
-	if n > maxBytes || n > 65536 || n > chunk.Total-offset || chunk.Eof != (n == chunk.Total-offset) || n == 0 && !chunk.Eof {
+	if n > maxBytes || n > 65536 || n > chunk.Total-offset || chunk.EOF != (n == chunk.Total-offset) || n == 0 && !chunk.EOF {
 		return invalid()
 	}
-	return c.validateResult(api.AcceptanceResult{Outcome: "accepted", Receipt: &chunk.Receipt}, id, c.required)
+	return c.validateResult(api.AcceptanceResult{Outcome: api.AcceptanceOutcomeAccepted, Receipt: &chunk.Receipt}, id, c.required)
 }
 
 // ResolveJobOperations requires observation/result support during new discovery.
@@ -347,14 +349,14 @@ func (c *JobsClient) CopyResult(ctx context.Context, id api.RequestIdentity, dst
 		if err != nil {
 			return written, err
 		}
-		if result.Outcome != "data" {
-			return written, jobError(result.Outcome, "result copy unavailable")
+		if result.Outcome != api.ResultOutcomeData {
+			return written, jobError(api.ServiceErrorCode(result.Outcome.String()), "result copy unavailable")
 		}
 		chunk := result.Chunk
 		if operation == "" {
-			operation = chunk.Receipt.OperationId
+			operation = chunk.Receipt.OperationID
 			total = chunk.Total
-		} else if operation != chunk.Receipt.OperationId || total != chunk.Total {
+		} else if operation != chunk.Receipt.OperationID || total != chunk.Total {
 			return written, jobError("invalid_result", "result identity or total changed during copy")
 		}
 		if err := ctx.Err(); err != nil {
@@ -373,7 +375,7 @@ func (c *JobsClient) CopyResult(ctx context.Context, id api.RequestIdentity, dst
 				return written, io.ErrShortWrite
 			}
 		}
-		if chunk.Eof {
+		if chunk.EOF {
 			return written, nil
 		}
 	}

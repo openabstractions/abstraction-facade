@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	wire "github.com/openabstractions/abstraction-facade/go-core/go/abstraction/facade"
 )
 
 func TestStatusHelperProcess(t *testing.T) {
@@ -36,7 +38,7 @@ func TestCancelledObservationDoesNotProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	got := ObserveInstalled(ctx)
-	if got.State != "unknown" || !strings.Contains(got.Detail, "canceled") {
+	if got.State != wire.BootstrapStateUnknown || !strings.Contains(got.Detail, "canceled") {
 		t.Fatal(got)
 	}
 }

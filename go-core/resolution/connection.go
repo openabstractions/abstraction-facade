@@ -22,6 +22,17 @@ func HandleConnection(ctx context.Context, conn listen.Conn, catalog *Catalog, p
 		return err
 	}
 	defer call.Close()
+	// The caller echo and the endpoint description need no peer policy. The
+	// description's resolver refuses every reference and is never called.
+	if name, err := wire.ServiceName(call.Frame); err == nil && (name == CallerService || name == wire.EndpointContract) {
+		reply, err := wire.ServeEndpoint(call.Frame, "openabstractions", "",
+			&wire.ResolverDispatcher{Handler: catalog.ForCaller(func(wire.ServiceReference) bool { return false })},
+			&wire.CallerDispatcher{Handler: callerEcho{call}})
+		if err != nil {
+			return err
+		}
+		return call.Reply(reply)
+	}
 	peer, err := call.Peer()
 	if err != nil {
 		return err
@@ -50,7 +61,7 @@ func NewClient(endpoint string, timeout time.Duration) *Client {
 
 // NewUnverifiedClient explicitly selects endpoint-only compatibility.
 func NewUnverifiedClient(endpoint string, timeout time.Duration) *Client {
-	return &Client{transport: listen.FrameClient{Endpoint: endpoint, Timeout: timeout, MaxFrame: 1 << 20}}
+	return &Client{transport: listen.FrameClient{Endpoint: endpoint, Timeout: timeout, MaxFrame: 1 << 20, Sessions: true}}
 }
 
 // NewVerifiedClient requires independent server trust evidence. It validates
@@ -61,7 +72,7 @@ func NewVerifiedClient(endpoint string, timeout time.Duration, server listen.Ser
 		process := *server.Process
 		server.Process = &process
 	}
-	return &Client{transport: listen.FrameClient{Endpoint: endpoint, Timeout: timeout, MaxFrame: 1 << 20, Server: &server}}
+	return &Client{transport: listen.FrameClient{Endpoint: endpoint, Timeout: timeout, MaxFrame: 1 << 20, Server: &server, Sessions: true}}
 }
 
 type contextTransport struct {
@@ -87,7 +98,7 @@ func (c *Client) Resolve(ctx context.Context, request wire.ResolveRequest) (wire
 // ValidateResult checks cross-field meaning as well as generated wire shape.
 // A resolver cannot send a weaker reference disguised as a successful selection.
 func ValidateResult(request wire.ResolveRequest, result wire.ResolveResult) error {
-	if !slices.Contains(wire.ResolutionStatusNames, result.Status) {
+	if !result.Status.Known() {
 		return invalidResult("unknown result status")
 	}
 	if result.Status != wire.ResolutionStatusResolved {

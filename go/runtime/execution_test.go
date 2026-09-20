@@ -75,7 +75,7 @@ func TestExecutionSurvivesCallerBudgetAndHostRestart(t *testing.T) {
 	recovery, cancelRecovery := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancelRecovery()
 	result, err := jobs.Reconcile(recovery, submission.Identity)
-	if err != nil || result.Receipt == nil || result.Receipt.OperationId != accepted.Receipt.OperationId {
+	if err != nil || result.Receipt == nil || result.Receipt.OperationID != accepted.Receipt.OperationID {
 		t.Fatalf("owner changed: %+v %v", result, err)
 	}
 	// Private inspection is fixture evidence. SDK calls above never see these paths.
@@ -84,7 +84,7 @@ func TestExecutionSurvivesCallerBudgetAndHostRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	for {
-		record, err := store.Load(result.Receipt.OperationId)
+		record, err := store.Load(result.Receipt.OperationID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +100,7 @@ func TestExecutionSurvivesCallerBudgetAndHostRestart(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	got, err := os.ReadFile(filepath.Join(o.JobRoot, "results", result.Receipt.OperationId))
+	got, err := os.ReadFile(filepath.Join(o.JobRoot, "results", result.Receipt.OperationID))
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("result: %v, %d bytes", err, len(got))
 	}
@@ -109,7 +109,7 @@ func TestExecutionSurvivesCallerBudgetAndHostRestart(t *testing.T) {
 		t.Fatalf("duplicate work: %d, %v", len(all), err)
 	}
 	again, err := jobs.Submit(recovery, submission)
-	if err != nil || again.Receipt == nil || again.Receipt.OperationId != result.Receipt.OperationId {
+	if err != nil || again.Receipt == nil || again.Receipt.OperationID != result.Receipt.OperationID {
 		t.Fatalf("duplicate receipt: %+v %v", again, err)
 	}
 }

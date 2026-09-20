@@ -42,7 +42,7 @@ func TestBindingDoesNotSubstituteTransport(t *testing.T) {
 	go func() { done <- h.Serve(ctx) }()
 	defer func() { cancel(); h.Close(); <-done }()
 	_, err = New(endpoint).ResolveLog(ctx, Requirements{})
-	var binding *BindingError
+	var binding *ResolutionError
 	if !errors.As(err, &binding) || binding.Status != "unsupported_transport" {
 		t.Fatalf("remote substituted: %v", err)
 	}

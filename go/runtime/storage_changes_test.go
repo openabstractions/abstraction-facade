@@ -48,13 +48,13 @@ func awaitChange(ctx context.Context, t *testing.T, changes *storageclient.Chang
 	var seen []storageclient.Change
 	for {
 		page, err := changes.Observe(ctx, cursor, 16, 2000)
-		if err != nil || page.Outcome != "page" {
+		if err != nil || page.Outcome.String() != "page" {
 			t.Fatalf("observe from %q: %+v %v", cursor, page, err)
 		}
 		seen = append(seen, page.Changes...)
 		cursor = page.Next
 		for _, c := range page.Changes {
-			if c.Kind == kind && c.Digest == digest {
+			if c.Kind.String() == kind && c.Digest == digest {
 				return cursor, seen
 			}
 		}
@@ -127,10 +127,10 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 	}
 
 	// Refused before an observe grant, for both Observe and List.
-	if page, err := changes.Observe(ctx, "", 16, 0); err != nil || page.Outcome != "forbidden" {
+	if page, err := changes.Observe(ctx, "", 16, 0); err != nil || page.Outcome.String() != "forbidden" {
 		t.Fatalf("ungranted observe %+v %v", page, err)
 	}
-	if page, err := changes.List(ctx, "", 16); err != nil || page.Outcome != "forbidden" {
+	if page, err := changes.List(ctx, "", 16); err != nil || page.Outcome.String() != "forbidden" {
 		t.Fatalf("ungranted list %+v %v", page, err)
 	}
 	var subject rightsclient.Subject
@@ -157,7 +157,7 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 	if err != nil || !objectDigests(objects)[preexisting] || len(objects) != 1 {
 		t.Fatalf("initial snapshot %+v %q %v", objects, cursor, err)
 	}
-	if page, err := changes.Observe(ctx, cursor, 16, 0); err != nil || page.Outcome != "page" || len(page.Changes) != 0 || !page.AtEnd {
+	if page, err := changes.Observe(ctx, cursor, 16, 0); err != nil || page.Outcome.String() != "page" || len(page.Changes) != 0 || !page.AtEnd {
 		t.Fatalf("present objects were journaled: %+v %v", page, err)
 	}
 
@@ -173,11 +173,11 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 	}()
 	time.Sleep(100 * time.Millisecond)
 	request, _ := storageclient.NewRequestID()
-	if stored, err := writer.Write(ctx, request, committed, bytes.NewReader(body), int64(len(body))); err != nil || stored.Evidence != "hashed" {
+	if stored, err := writer.Write(ctx, request, committed, bytes.NewReader(body), int64(len(body))); err != nil || stored.Evidence.String() != "hashed" {
 		t.Fatalf("write %+v %v", stored, err)
 	}
 	woke := <-waiting
-	if woke.err != nil || woke.page.Outcome != "page" || len(woke.page.Changes) != 1 || woke.page.Changes[0].Kind != "added" || woke.page.Changes[0].Digest != committed || woke.page.Changes[0].Size != int64(len(body)) {
+	if woke.err != nil || woke.page.Outcome.String() != "page" || len(woke.page.Changes) != 1 || woke.page.Changes[0].Kind.String() != "added" || woke.page.Changes[0].Digest != committed || woke.page.Changes[0].Size != int64(len(body)) {
 		t.Fatalf("commit notification %+v %v", woke.page, woke.err)
 	}
 	cursor = woke.page.Next
@@ -204,7 +204,7 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 			t.Fatalf("unreadable entry disclosed: %+v", seen)
 		}
 	}
-	if page, err := changes.Observe(ctx, cursor, 16, 0); err != nil || page.Outcome != "page" || len(page.Changes) != 0 || !page.AtEnd {
+	if page, err := changes.Observe(ctx, cursor, 16, 0); err != nil || page.Outcome.String() != "page" || len(page.Changes) != 0 || !page.AtEnd {
 		t.Fatalf("cursor did not advance past the skipped entry: %+v %v", page, err)
 	}
 	if objects, _, err := changes.Snapshot(ctx, 16); err != nil || objectDigests(objects)[hidden] || !objectDigests(objects)[visible] {
@@ -232,7 +232,7 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if page, err := changes.Observe(ctx, slow, 16, 0); err != nil || page.Outcome != "gap" || len(page.Changes) != 0 || page.Next != slow {
+	if page, err := changes.Observe(ctx, slow, 16, 0); err != nil || page.Outcome.String() != "gap" || len(page.Changes) != 0 || page.Next != slow {
 		t.Fatalf("slow subscriber %+v %v", page, err)
 	}
 	objects, recovered, err := changes.Snapshot(ctx, 3)
@@ -245,7 +245,7 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 			t.Fatalf("recovery snapshot lacks %s: %+v", d, objects)
 		}
 	}
-	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome != "page" || !page.AtEnd {
+	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome.String() != "page" || !page.AtEnd {
 		t.Fatalf("observe after recovery %+v %v", page, err)
 	}
 
@@ -253,10 +253,10 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 	if err := policy.Revoke(subject, observeAction, "abstraction.storage/changes"); err != nil {
 		t.Fatal(err)
 	}
-	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome != "forbidden" || page.Next != recovered {
+	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome.String() != "forbidden" || page.Next != recovered {
 		t.Fatalf("revoked observe %+v %v", page, err)
 	}
-	if page, err := changes.List(ctx, "", 16); err != nil || page.Outcome != "forbidden" {
+	if page, err := changes.List(ctx, "", 16); err != nil || page.Outcome.String() != "forbidden" {
 		t.Fatalf("revoked list %+v %v", page, err)
 	}
 	grant(observeAction, "abstraction.storage/changes")
@@ -269,14 +269,14 @@ func TestResolvedStorageChangesEnforcedByRights(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome != "gap" {
+	if page, err := changes.Observe(ctx, recovered, 16, 0); err != nil || page.Outcome.String() != "gap" {
 		t.Fatalf("pre-restart cursor %+v %v", page, err)
 	}
 	objects, restarted, err := changes.Snapshot(ctx, 16)
 	if err != nil || !objectDigests(objects)[committed] || !objectDigests(objects)[preexisting] {
 		t.Fatalf("snapshot after restart %+v %v", objects, err)
 	}
-	if page, err := changes.Observe(ctx, restarted, 16, 0); err != nil || page.Outcome != "page" || len(page.Changes) != 0 {
+	if page, err := changes.Observe(ctx, restarted, 16, 0); err != nil || page.Outcome.String() != "page" || len(page.Changes) != 0 {
 		t.Fatalf("restart journaled present objects %+v %v", page, err)
 	}
 }

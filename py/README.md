@@ -17,25 +17,39 @@ for providers in other executables. Catalogue labels carry no identity authority
 import time
 from abstraction.ipc import Library
 from abstraction.facade.client import Machine
-from abstraction.logging.rec import Record
+from abstraction.logging import Record
 
 machine = Machine(deadline=time.monotonic() + 2)
-sink = machine.resolve_log(scope="local")
-sink.Write(Record(schema=1, time="2026-09-12T12:00:00.000000Z", level=1,
+sink = machine.resolve_log(scope=Scope.LOCAL)
+sink.write(Record(schema=1, time="2026-09-12T12:00:00.000000Z", level=1,
                   msg="connected", attrs={"component": "example"}))
 ```
 
 `resolve_log` checks the returned capability, exact contract, requested guarantees,
-scope, endpoint and transport before binding. `ResolutionError.status` retains a
-typed refusal. Only local `oa-framed-local@1` references are supported. A selected
+scope, endpoint and transport before binding. Every resolve call that yields no
+service raises `ResolutionError`. Its `status` is the resolver's refusal, a
+validation refusal, or `runtime_unavailable` when no runtime could be selected or
+reached. `capability`, `contract` and `looked_for` (the installed runtime or the
+explicit endpoint) name the request, and `__cause__` holds the transport error.
+The caller's own cancellation remains a `FrameError`. There is no fallback
+provider. Only local `oa-framed-local@1` references are supported. A selected
 client keeps its endpoint and waiting policy; failed calls are not reselected or
-replayed. Write completion confirms local transport submission, not durable log
+replayed. write completion confirms local transport submission, not durable log
 storage. Provider errors on a one-way call remain service-side diagnostics.
 
 The caller can pass a shared cancellation signal. A fixed deadline includes time
 between resolution and use; create another Machine for a later budget. Default
 bindings use fresh per-call timeouts. The consumer supplies no identity claims;
 the production receiving boundary establishes caller evidence.
+
+`machine.resolve_applications()` binds the experimental local application
+directory using the same verified transport. Its generated client provides
+`observe`, `announce`, `withdraw` and explicit `activate` calls. The operator
+must register the application and grant the relevant actions first. Announcements
+are attributed to the calling executable, account and session. An interpreter
+process is identified at that executable's granularity. Use a sufficient per-call
+timeout, such as `Machine(timeout=35)`, when waiting for a bounded activation.
+See [the application profile](../APPLICATIONS.md) for authority and lease rules.
 
 ## Install a coordinated source checkout
 
@@ -75,7 +89,7 @@ application code does not follow provenance paths to perform storage work.
 
 Durable work uses `resolve_jobs`, `resolve_job_operations` and the separate
 `resolve_job_inventory` binding. See the job Python README for caller-retained
-recovery information, validated receipts, CopyResult partial failures and
+recovery information, validated receipts, copy_result partial failures and
 with_waiting policy. These clients never rediscover accepted work automatically.
 `Jobs.restore_installed(endpoint, owner, ...)` verifies retained work against the
 current installed runtime and its persisted logical owner. Explicit restoration

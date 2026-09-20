@@ -47,17 +47,17 @@ impl<T: wire::FrameTransport + Clone> Router<T> {
         wire::RouterClient::new(self.transport.clone())
     }
     pub fn models(&self, fresh: bool) -> Result<wire::ModelsSnapshot, Error<T::Error>> {
-        self.client().Models(fresh).map_err(Error::Call)
+        self.client().models(fresh).map_err(Error::Call)
     }
     pub fn hosts(&self, fresh: bool) -> Result<wire::HostsSnapshot, Error<T::Error>> {
-        self.client().Hosts(fresh).map_err(Error::Call)
+        self.client().hosts(fresh).map_err(Error::Call)
     }
     /// Chooses a permitted host without loading a model. Absent allowance
     /// permits all servable hosts; an empty allowance permits none.
     pub fn pick(&self, request: wire::PickRequest) -> Result<wire::PickResult, Error<T::Error>> {
         require(!request.model.is_empty(), "model required")?;
         let asked = request.model.clone();
-        let r = self.client().Pick(request).map_err(Error::Call)?;
+        let r = self.client().pick(request).map_err(Error::Call)?;
         require(r.decision.asked == asked, "decision for another model")?;
         Ok(r)
     }
@@ -68,14 +68,14 @@ pub trait RouterMachine<C: Connector> {
     fn resolve_router(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Router<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> RouterMachine<C> for Machine<C> {
     fn resolve_router(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Router<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Router::new(self.resolve_service("abstraction.router/router@1", g, s)?))
     }

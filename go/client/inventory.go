@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"github.com/openabstractions/abstraction-identity/listen"
-	"slices"
 	"unicode/utf8"
 
 	api "github.com/openabstractions/abstraction-job/go/abstraction/job/acceptance"
@@ -51,8 +50,8 @@ func (c *InventoryClient) ListWork(ctx context.Context, cursor string, limit int
 
 func (c *InventoryClient) validate(p api.InventoryPage, cursor string, limit int64) error {
 	invalid := func() error { return jobError("invalid_inventory", "inconsistent inventory page") }
-	if p.Outcome != "page" {
-		if !slices.Contains([]string{"gap", "forbidden", "invalid", "unavailable"}, p.Outcome) || len(p.Snapshots) != 0 || p.Next != "" || p.Complete {
+	if p.Outcome != api.InventoryOutcomePage {
+		if !p.Outcome.Known() || len(p.Snapshots) != 0 || p.Next != "" || p.Complete {
 			return invalid()
 		}
 		return nil
@@ -68,13 +67,13 @@ func (c *InventoryClient) validate(p api.InventoryPage, cursor string, limit int
 		if err := jobIdentity(s.Receipt.Identity); err != nil {
 			return invalid()
 		}
-		if err := check.validateObservation(api.ObservationResult{Outcome: "observed", Snapshot: s}, s.Receipt.Identity); err != nil {
+		if err := check.validateObservation(api.ObservationResult{Outcome: api.ObservationOutcomeObserved, Snapshot: s}, s.Receipt.Identity); err != nil {
 			return invalid()
 		}
-		if seen[s.Receipt.OperationId] {
+		if seen[s.Receipt.OperationID] {
 			return invalid()
 		}
-		seen[s.Receipt.OperationId] = true
+		seen[s.Receipt.OperationID] = true
 	}
 	if check.owner != "" {
 		return c.binding.bindOwner(check.owner)

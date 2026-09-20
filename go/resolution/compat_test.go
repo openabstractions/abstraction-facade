@@ -9,7 +9,7 @@ import (
 )
 
 func TestCompatibilityRetainsTypeIdentity(t *testing.T) {
-	var request canonical.ResolveRequest = wire.ResolveRequest{Capability: "absent", Contracts: []string{"absent/v1"}, Scope: "local"}
+	var request canonical.ResolveRequest = wire.ResolveRequest{Capability: "absent", Contracts: []string{"absent/v1"}, Scope: wire.ScopeLocal}
 	catalog, err := old.New(nil)
 	if err != nil {
 		t.Fatal(err)

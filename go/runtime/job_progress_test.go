@@ -60,7 +60,7 @@ func TestResolvedJobsObserveProgressTotal(t *testing.T) {
 		id := api.RequestIdentity{Key: key, HistoryEpoch: history.HistoryEpoch}
 		spec := request.Encode(&request.Request{Artifact: request.Artifact{Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(body)), Size: size},
 			Sources: []request.Source{{Scheme: "http", Locator: server.URL + path}}})
-		if v, err := jobs.Submit(ctx, api.Submission{Identity: id, Kind: "download", Spec: spec}); err != nil || v.Outcome != "accepted" {
+		if v, err := jobs.Submit(ctx, api.Submission{Identity: id, Kind: "download", Spec: spec}); err != nil || v.Outcome.String() != "accepted" {
 			t.Fatalf("submit %s: %+v %v", key, v, err)
 		}
 		return id
@@ -86,17 +86,17 @@ func TestResolvedJobsObserveProgressTotal(t *testing.T) {
 
 	declared := submit("declared-size", "/held", int64(len(body)))
 	until("declared total while held", func() bool { return snapshot(declared).Progress.Total == int64(len(body)) })
-	if s := snapshot(declared); s.State == "complete" {
+	if s := snapshot(declared); s.State.String() == "complete" {
 		t.Fatalf("held work completed: %+v", s)
 	}
 	// One service runner works one operation at a time; let the held one finish.
 	release <- struct{}{}
-	until("declared completion", func() bool { return snapshot(declared).State == "complete" })
+	until("declared completion", func() bool { return snapshot(declared).State.String() == "complete" })
 	if s := snapshot(declared); s.Progress.Total != int64(len(body)) || s.Progress.Done != int64(len(body)) {
 		t.Fatalf("declared snapshot: %+v", s)
 	}
 	undeclared := submit("content-length", "/open", 0)
-	until("undeclared completion", func() bool { return snapshot(undeclared).State == "complete" })
+	until("undeclared completion", func() bool { return snapshot(undeclared).State.String() == "complete" })
 	if s := snapshot(undeclared); s.Progress.Total != int64(len(body)) || s.Progress.Done != int64(len(body)) {
 		t.Fatalf("undeclared snapshot: %+v", s)
 	}

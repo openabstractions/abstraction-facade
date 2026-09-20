@@ -9,6 +9,6 @@ import (
 )
 
 func observeInstalled(context.Context) wire.BootstrapObservation {
-	return statusEvidence("unknown", "installation observation unsupported on this platform")
+	return statusEvidence(wire.BootstrapStateUnknown, "installation observation unsupported on this platform")
 }
 func hideStatusCommand(*exec.Cmd) {}

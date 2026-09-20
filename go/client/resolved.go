@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	config "github.com/openabstractions/abstraction-config/go/client"
@@ -13,16 +14,37 @@ import (
 	router "github.com/openabstractions/abstraction-router/go/client"
 )
 
-// Requirements are demands, never fallback preferences. Empty scope means any.
+// Scope selects where a capability may execute.
+type Scope = wire.Scope
+
+const (
+	ScopeAny    = wire.ScopeAny
+	ScopeLocal  = wire.ScopeLocal
+	ScopeRemote = wire.ScopeRemote
+)
+
+// ScopeValues returns the supported execution scopes.
+func ScopeValues() []Scope { return wire.ScopeValues() }
+
+// Requirements are demands, never fallback preferences. The zero scope means any.
 type Requirements struct {
 	Guarantees []string
-	Scope      string
+	Scope      Scope
 }
 
-// BindingError preserves the resolver's typed refusal for callers.
-type BindingError struct{ Status string }
+// ResolutionError is a resolve call that produced no usable service; see
+// resolution.Error. Use errors.As to read its Status, capability, contract,
+// what was looked for and, through Unwrap, the selection or transport cause.
+type ResolutionError = resolution.Error
 
-func (e *BindingError) Error() string { return "facade binding: " + e.Status }
+// ResolutionErrorStatus says why resolution produced no usable service.
+type ResolutionErrorStatus = resolution.ErrorStatus
+
+const (
+	RuntimeUnavailable   = resolution.RuntimeUnavailable
+	InvalidResolution    = resolution.InvalidResolution
+	UnsupportedTransport = resolution.UnsupportedTransport
+)
 
 // New preserves endpoint-only compatibility for deliberately supplied providers.
 // Deprecated: use NewVerified, Discover, or explicitly named NewUnverified.
@@ -54,16 +76,17 @@ func (m *Machine) WithProviderTrust(policy resolution.ProviderTrust) *Machine {
 }
 
 func (m *Machine) resolver(ctx context.Context) (*resolution.Client, error) {
-	resolver, _, err := m.resolverSelection(ctx)
+	resolver, _, _, err := m.resolverSelection(ctx)
 	return resolver, err
 }
 
-func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *listen.ServerExpectation, error) {
+// resolverSelection also names what it looked for, so a failure can say it.
+func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *listen.ServerExpectation, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	if m.server != nil {
-		return resolution.NewVerifiedClient(m.endpoint, 2*time.Second, *m.server), m.server, nil
+		return resolution.NewVerifiedClient(m.endpoint, 2*time.Second, *m.server), m.server, "the explicit endpoint " + m.endpoint, nil
 	}
 	if m.unverified {
 		endpoint := m.endpoint
@@ -71,10 +94,11 @@ func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *l
 			var err error
 			endpoint, err = resolution.CheckedDefaultEndpoint()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, "the installed runtime", err
 			}
+			return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, "the installed runtime at " + endpoint, nil
 		}
-		return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, nil
+		return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, "the explicit endpoint " + endpoint, nil
 	}
 	selectInstalled := m.selectInstalled
 	if selectInstalled == nil {
@@ -82,9 +106,9 @@ func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *l
 	}
 	selected, err := selectInstalled(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "the installed runtime", err
 	}
-	return resolution.NewVerifiedClient(selected.Endpoint, 2*time.Second, selected.Server), &selected.Server, nil
+	return resolution.NewVerifiedClient(selected.Endpoint, 2*time.Second, selected.Server), &selected.Server, "the installed runtime at " + selected.Endpoint, nil
 }
 
 func (m *Machine) resolve(ctx context.Context, capability, contract string, need Requirements) (listen.FrameClient, error) {
@@ -94,27 +118,41 @@ func (m *Machine) resolve(ctx context.Context, capability, contract string, need
 
 // resolveReference also returns the selected reference, for bindings whose
 // callers persist the selection for restart.
-func (m *Machine) resolveReference(ctx context.Context, capability, contract string, need Requirements) (listen.FrameClient, wire.ServiceReference, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	resolver, server, err := m.resolverSelection(ctx)
-	if err != nil {
+//
+// Every outcome that yields no service is a *ResolutionError: no runtime
+// selected or reached (RuntimeUnavailable), the resolver's refusal, an invalid
+// answer, or a reference this binding cannot use. The caller's cancellation,
+// and a context already done on entry, stay the context error.
+func (m *Machine) resolveReference(caller context.Context, capability, contract string, need Requirements) (listen.FrameClient, wire.ServiceReference, error) {
+	if err := caller.Err(); err != nil {
 		return listen.FrameClient{}, wire.ServiceReference{}, err
 	}
+	ctx, cancel := context.WithTimeout(caller, 2*time.Second)
+	defer cancel()
+	resolver, server, lookedFor, err := m.resolverSelection(ctx)
+	if err != nil {
+		return listen.FrameClient{}, wire.ServiceReference{}, resolution.Unreachable(caller, err, capability, contract, lookedFor)
+	}
 
-	if need.Scope == "" {
+	if need.Scope == 0 {
 		need.Scope = wire.ScopeAny
 	}
 	request := wire.ResolveRequest{Capability: capability, Contracts: []string{contract}, Guarantees: need.Guarantees, Scope: need.Scope}
-	result, err := resolver.Resolve(ctx, request)
-	if err != nil {
+	result, ctx, cancelActivated, err := m.resolveActivating(caller, ctx, resolver, server, request, capability, contract, lookedFor)
+	defer cancelActivated()
+	var activation *ResolutionError
+	if errors.As(err, &activation) && activation.Status == UpgradeInProgress {
 		return listen.FrameClient{}, wire.ServiceReference{}, err
 	}
-	if result.Status != wire.ResolutionStatusResolved {
-		return listen.FrameClient{}, wire.ServiceReference{}, &BindingError{Status: result.Status}
+	if err != nil {
+		return listen.FrameClient{}, wire.ServiceReference{}, resolution.Unreachable(caller, err, capability, contract, lookedFor)
 	}
-	if result.Reference.Scope != wire.ScopeLocal || result.Reference.Transport != resolution.LocalTransport {
-		return listen.FrameClient{}, wire.ServiceReference{}, &BindingError{Status: "unsupported_transport"}
+	if result.Status != wire.ResolutionStatusResolved {
+		return listen.FrameClient{}, wire.ServiceReference{}, &ResolutionError{Status: ResolutionErrorStatus(result.Status.String()), Capability: capability, Contract: contract, LookedFor: lookedFor}
+	}
+	if (result.Reference.Scope != wire.ScopeLocal && result.Reference.Scope != wire.ScopeRemote) || result.Reference.Transport != resolution.LocalTransport {
+		return listen.FrameClient{}, wire.ServiceReference{}, &ResolutionError{Status: UnsupportedTransport, Capability: capability, Contract: contract, LookedFor: lookedFor,
+			Scope: result.Reference.Scope, Transport: result.Reference.Transport}
 	}
 	endpoint, err := resolution.BindLocal(ctx, *result.Reference, server, m.providerTrust)
 	return endpoint, *result.Reference, err

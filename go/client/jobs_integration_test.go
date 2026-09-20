@@ -72,7 +72,7 @@ func TestResolvedGoJobsSurviveServiceRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	required := []string{acceptanceprovider.GuaranteeServiceRestart}
-	c, err := client.New(options.Endpoint).ResolveJobs(ctx, client.Requirements{Guarantees: required, Scope: "local"})
+	c, err := client.New(options.Endpoint).ResolveJobs(ctx, client.Requirements{Guarantees: required, Scope: client.ScopeLocal})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestResolvedGoJobsSurviveServiceRestart(t *testing.T) {
 	}
 	id := api.RequestIdentity{Key: "persisted-before-send", HistoryEpoch: window.HistoryEpoch}
 	accepted, err := c.Submit(ctx, api.Submission{Identity: id, Kind: "download", Spec: []byte(`{"source":"test"}`)})
-	if err != nil || accepted.Outcome != "accepted" {
+	if err != nil || accepted.Outcome != api.AcceptanceOutcomeAccepted {
 		t.Fatalf("acceptance: %+v %v", accepted, err)
 	}
 	stop()
@@ -93,16 +93,16 @@ func TestResolvedGoJobsSurviveServiceRestart(t *testing.T) {
 	}
 	for _, binding := range []*client.JobsClient{c, recovered} {
 		result, err := binding.Reconcile(ctx, id)
-		if err != nil || result.Receipt == nil || result.Receipt.OperationId != accepted.Receipt.OperationId {
+		if err != nil || result.Receipt == nil || result.Receipt.OperationID != accepted.Receipt.OperationID {
 			t.Fatalf("restart recovery: %+v %v", result, err)
 		}
 	}
 	result, err := recovered.CancelWork(ctx, id)
-	if err != nil || result.Outcome != "requested" {
+	if err != nil || result.Outcome != api.CancellationOutcomeRequested {
 		t.Fatalf("explicit cancellation: %+v %v", result, err)
 	}
 	_, err = client.New(options.Endpoint).ResolveJobs(ctx, client.Requirements{Guarantees: []string{"unprovided"}})
-	var refusal *client.BindingError
+	var refusal *client.ResolutionError
 	if !errors.As(err, &refusal) || refusal.Status != "unmet_requirements" {
 		t.Fatalf("weakened requirements: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestResolvedGoJobsAbsenceIsTyped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, err := client.New(o.Endpoint).ResolveJobs(ctx, client.Requirements{})
-	var refusal *client.BindingError
+	var refusal *client.ResolutionError
 	if !errors.As(err, &refusal) || refusal.Status != "unavailable" {
 		t.Fatalf("absence: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	jobapi "github.com/openabstractions/abstraction-job/go/abstraction/job/acceptance"
 	rightspolicy "github.com/openabstractions/abstraction-rights/go"
 	routerservice "github.com/openabstractions/abstraction-router/go/service"
 )
@@ -18,13 +19,13 @@ const (
 
 // ResourceRightsActions lists every action a resource service composed by this
 // runtime enforces, sorted. A host registers them into its decision policy
-// through Options.RightsActions. The storage, job, config, logging, model and
-// router definitions are in the 0.1.7 publication closure and do not declare
-// these names; after 0.1.7 each definition declares its own and this list
-// composes them.
+// through Options.RightsActions. The job definition declares its own
+// (resource_actions, JOB-A14); the storage, config, logging, model and router
+// definitions do not yet, and their names are listed here.
 func ResourceRightsActions() []string {
 	actions := []string{ContentReadAction, ContentWriteAction, ContentObserveAction, ConfigEditAction,
 		LogHistoryAction, ModelLookupAction, routerservice.ActionInventory, routerservice.ActionRoute}
+	actions = append(actions, jobapi.ResourceActions...)
 	actions = append(actions, slices.Collect(maps.Values(JobRightsActions))...)
 	slices.Sort(actions)
 	return slices.Compact(actions)

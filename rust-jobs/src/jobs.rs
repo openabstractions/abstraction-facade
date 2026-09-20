@@ -119,7 +119,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
     }
     pub fn history_window(&self) -> Result<wire::HistoryWindow, Error<T::Error>> {
         let r = wire::RecoverableAcceptanceClient::new(self.transport.clone())
-            .GetHistoryWindow()
+            .get_history_window()
             .map_err(Error::Call)?;
         require(
             !r.history_epoch.is_empty() && r.minimum_retention_ms > 0 && r.result_retention_ms >= 0,
@@ -145,7 +145,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
         let wanted = id(&submission.identity);
         let required = submission.required_guarantees.clone();
         let r = wire::RecoverableAcceptanceClient::new(self.transport.clone())
-            .Submit(submission)
+            .submit(submission)
             .map_err(Error::Call)?;
         self.acceptance(r, &wanted, &required)
     }
@@ -155,7 +155,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
     ) -> Result<wire::AcceptanceResult, Error<T::Error>> {
         identity(wanted)?;
         let r = wire::RecoverableAcceptanceClient::new(self.transport.clone())
-            .Reconcile(id(wanted))
+            .reconcile(id(wanted))
             .map_err(Error::Call)?;
         self.acceptance(r, wanted, &self.required)
     }
@@ -165,7 +165,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
     ) -> Result<wire::CancellationResult, Error<T::Error>> {
         identity(wanted)?;
         wire::RecoverableAcceptanceClient::new(self.transport.clone())
-            .CancelWork(id(wanted))
+            .cancel_work(id(wanted))
             .map_err(Error::Call)
     }
     fn snapshot(
@@ -180,7 +180,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
                 "pending" | "running" | "transferred" | "complete" | "failed" | "cancelled"
             ) && s.progress.done >= 0
                 && s.progress.total >= 0
-                && s.failure.as_ref().map_or(true, |f| {
+                && s.failure.as_ref().is_none_or(|f| {
                     matches!(
                         f.classification.as_str(),
                         "retryable" | "permanent" | "unknown"
@@ -190,7 +190,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
                 && s
                     .failure
                     .as_ref()
-                    .map_or(true, |f| f.classification != "permanent" || s.state == "failed"),
+                    .is_none_or(|f| f.classification != "permanent" || s.state == "failed"),
             "observation",
         )?;
         self.receipt(&s.receipt, wanted, required)
@@ -201,7 +201,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
     ) -> Result<wire::ObservationResult, Error<T::Error>> {
         identity(wanted)?;
         let r = wire::OperationControlClient::new(self.transport.clone())
-            .ObserveWork(id(wanted))
+            .observe_work(id(wanted))
             .map_err(Error::Call)?;
         if r.outcome == "observed" {
             let s = r
@@ -233,7 +233,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
             "result range",
         )?;
         let r = wire::OperationControlClient::new(self.transport.clone())
-            .ReadResult(id(wanted), offset, max_bytes)
+            .read_result(id(wanted), offset, max_bytes)
             .map_err(Error::Call)?;
         if r.outcome == "data" {
             let c = r.chunk.as_ref().ok_or(Error::Invalid("missing chunk"))?;
@@ -293,7 +293,7 @@ impl<T: wire::FrameTransport + Clone> Jobs<T> {
         let result = (|| loop {
             let r = self.read_result(wanted, confirmed as i64, 65536)?;
             if r.outcome != "data" {
-                return Err(Error::Outcome(r.outcome));
+                return Err(Error::Outcome(r.outcome.to_string()));
             }
             let c = r.chunk.unwrap();
             let signature = (c.receipt.operation_id, c.total);
@@ -333,7 +333,7 @@ impl<T: wire::FrameTransport + Clone> Inventory<T> {
             "inventory request",
         )?;
         let p = wire::JobInventoryClient::new(self.0.transport.clone())
-            .ListWork(cursor.into(), limit)
+            .list_work(cursor.into(), limit)
             .map_err(Error::Call)?;
         if p.outcome != "page" {
             require(
@@ -363,7 +363,7 @@ impl<T: wire::FrameTransport + Clone> Inventory<T> {
             self.0.snapshot(s, &s.receipt.identity, &[])?;
             require(
                 seen.insert(&s.receipt.operation_id)
-                    && owner.map_or(true, |o| o == &s.receipt.logical_owner),
+                    && owner.is_none_or(|o| o == &s.receipt.logical_owner),
                 "inventory receipts",
             )?;
             owner = Some(&s.receipt.logical_owner);

@@ -5,18 +5,18 @@ from abstraction.ipc import FrameTransport, FrameError, TIMEOUT, CANCELLED
 import unittest
 from types import SimpleNamespace
 from abstraction.facade.jobs import Jobs, Inventory, JobError, ResultCopyError
-from abstraction.job.acceptance import rec as w
+from abstraction.job.acceptance import _codec as w
 
 class ResultTransport:
     """Immediate deterministic transport implementing composite-call scoping."""
     def __init__(self, read): self.read = read
     def call_scope(self): return ResultTransport(self.read)
     def exchange_frame(self, frame):
-        request = w._service_decode(w._decode_oaserviceframe, frame)
-        args = w._service_decode(w._decode_oaoperationcontrolreadresultarguments, request.arguments, 1)
-        result = w.OAOperationControlReadResultResult(value=self.read(args.identity, args.offset, args.max_bytes))
-        payload = w._service_encode(w.enc_oaoperationcontrolreadresultresult, result, 1)
-        return w._service_encode(w.enc_oaservicereply, w.OAServiceReply(version=1, service=request.service, method=request.method, ok=True, payload=payload), 0)
+        request = w._service_decode(w._read_oa_service_frame, frame)
+        args = w._service_decode(w._read_oa_operation_control_read_result_arguments, request.arguments, 1)
+        result = w._OperationControlReadResultResult(value=self.read(args.identity, args.offset, args.max_bytes))
+        payload = w._service_encode(w._write_oa_operation_control_read_result_result, result, 1)
+        return w._service_encode(w._write_oa_service_reply, w._ServiceReply(version=1, service=request.service, method=request.method, ok=True, payload=payload), 0)
 
 class ClientControls(unittest.TestCase):
     def setUp(self):
@@ -30,12 +30,12 @@ class ClientControls(unittest.TestCase):
                              ("accepted_guarantees",[]),("accepted_guarantees",["promise","promise"]),("history_retention_ms",0),
                              ("identity",w.RequestIdentity(key="other",history_epoch="epoch"))]:
             receipt = w.Receipt(**vars(self.receipt));setattr(receipt,field,value)
-            self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _:w.AcceptanceResult(outcome="accepted",receipt=receipt))
-            with self.assertRaises(JobError): self.jobs.Reconcile(self.id)
-        self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _:w.AcceptanceResult(outcome="unknown"))
-        self.assertEqual(self.jobs.Reconcile(self.id).outcome,"unknown")
-        self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _:w.AcceptanceResult(outcome="unknown",receipt=self.receipt))
-        with self.assertRaises(JobError):self.jobs.Reconcile(self.id)
+            self.jobs._acceptance = SimpleNamespace(reconcile=lambda _:w.AcceptanceResult(outcome="accepted",receipt=receipt))
+            with self.assertRaises(JobError): self.jobs.reconcile(self.id)
+        self.jobs._acceptance = SimpleNamespace(reconcile=lambda _:w.AcceptanceResult(outcome="unknown"))
+        self.assertEqual(self.jobs.reconcile(self.id).outcome,"unknown")
+        self.jobs._acceptance = SimpleNamespace(reconcile=lambda _:w.AcceptanceResult(outcome="unknown",receipt=self.receipt))
+        with self.assertRaises(JobError):self.jobs.reconcile(self.id)
 
     def test_permanent_failure_requires_failed_state_and_unavailable_observation(self):
         def snapshot(state, classification, cause="digest_mismatch"):
@@ -47,19 +47,20 @@ class ClientControls(unittest.TestCase):
         self.jobs._snapshot(snapshot("failed", "permanent"), self.id, ["promise"])
         self.jobs._snapshot(snapshot("failed", "permanent", "a_future_cause"), self.id, ["promise"])
         self.jobs._snapshot(snapshot("pending", "retryable", "server_error"), self.id, ["promise"])
-        self.jobs._operations = SimpleNamespace(ObserveWork=lambda _: w.ObservationResult(outcome="unavailable"))
-        self.assertEqual(self.jobs.ObserveWork(self.id).outcome, "unavailable")
+        self.jobs._operations = SimpleNamespace(observe_work=lambda _: w.ObservationResult(outcome="unavailable"))
+        self.assertEqual(self.jobs.observe_work(self.id).outcome, "unavailable")
         retry = w.RequestIdentity(key="key", history_epoch="epoch", attempt=1)
-        self.jobs._acceptance = SimpleNamespace(Reconcile=lambda _: w.AcceptanceResult(outcome="accepted", receipt=self.receipt))
-        with self.assertRaises(JobError): self.jobs.Reconcile(retry)
+        self.jobs._acceptance = SimpleNamespace(reconcile=lambda _: w.AcceptanceResult(outcome="accepted", receipt=self.receipt))
+        with self.assertRaises(JobError): self.jobs.reconcile(retry)
 
     def test_submission_merges_without_mutating(self):
         sent=[]
-        self.jobs._acceptance=SimpleNamespace(Submit=lambda s: sent.append(s) or w.AcceptanceResult(outcome="unknown"))
-        submission=w.Submission(identity=self.id,kind="download",spec=b"request")
-        self.jobs.Submit(submission)
+        self.jobs._acceptance=SimpleNamespace(submit=lambda s: sent.append(s) or w.AcceptanceResult(outcome="unknown"))
+        submission=w.Submission(identity=self.id,kind="download",spec=b"request",label="host · model.bin")
+        self.jobs.submit(submission)
         self.assertEqual(submission.required_guarantees,[])
         self.assertEqual(sent[0].required_guarantees,["promise"])
+        self.assertEqual(sent[0].label,"host · model.bin")
 
     def set_reader(self, read):
         self.jobs = Jobs(ResultTransport(read), expected_owner="owner", required_guarantees=["promise"])
@@ -77,26 +78,26 @@ class ClientControls(unittest.TestCase):
 
     def test_copy_changes_and_short_writes(self):
         self.chunks();out=io.BytesIO()
-        self.assertEqual(self.jobs.CopyResult(self.id,out),4);self.assertEqual(out.getvalue(),b"abcd")
+        self.assertEqual(self.jobs.copy_result(self.id,out),4);self.assertEqual(out.getvalue(),b"abcd")
         for change in ("owner","operation","total"):
             self.chunks(change)
-            with self.assertRaises(ResultCopyError) as error:self.jobs.CopyResult(self.id,io.BytesIO())
+            with self.assertRaises(ResultCopyError) as error:self.jobs.copy_result(self.id,io.BytesIO())
             self.assertEqual(error.exception.confirmed,2)
         self.chunks()
-        with self.assertRaises(ResultCopyError) as error:self.jobs.CopyResult(self.id,SimpleNamespace(write=lambda _:1))
+        with self.assertRaises(ResultCopyError) as error:self.jobs.copy_result(self.id,SimpleNamespace(write=lambda _:1))
         self.assertEqual(error.exception.confirmed,1)
         self.assertEqual(error.exception.code,"short_write")
         self.set_reader(lambda *a:w.ResultRead(outcome="not_ready"))
-        with self.assertRaises(ResultCopyError) as error:self.jobs.CopyResult(self.id,io.BytesIO())
+        with self.assertRaises(ResultCopyError) as error:self.jobs.copy_result(self.id,io.BytesIO())
         self.assertEqual(error.exception.code,"not_ready")
 
     def test_empty_result_and_stalled_chunk(self):
         chunk=w.ResultChunk(receipt=self.receipt,total=0,data=b"",eof=True)
         self.set_reader(lambda *a:w.ResultRead(outcome="data",chunk=chunk))
-        self.assertEqual(self.jobs.CopyResult(self.id,io.BytesIO()),0)
+        self.assertEqual(self.jobs.copy_result(self.id,io.BytesIO()),0)
         chunk.total=1;chunk.eof=False
-        with self.assertRaises(JobError):self.jobs.ReadResult(self.id,0,1)
-        with self.assertRaises(JobError):self.jobs.ReadResult(self.id,0,65537)
+        with self.assertRaises(JobError):self.jobs.read_result(self.id,0,1)
+        with self.assertRaises(JobError):self.jobs.read_result(self.id,0,65537)
 
     def test_copy_one_budget_and_fresh_subsequent_call(self):
         self.chunks()
@@ -117,7 +118,7 @@ class ClientControls(unittest.TestCase):
             for start in (100.0, 200.0):
                 clock[0] = start
                 out = io.BytesIO()
-                with self.assertRaises(ResultCopyError) as caught: jobs.CopyResult(self.id, out)
+                with self.assertRaises(ResultCopyError) as caught: jobs.copy_result(self.id, out)
                 self.assertEqual(caught.exception.confirmed, 2)
                 self.assertEqual(caught.exception.cause.status, TIMEOUT)
                 self.assertEqual(out.getvalue(), b"ab")
@@ -131,7 +132,7 @@ class ClientControls(unittest.TestCase):
         class Frames:
             def exchange_frame(self, frame): raise AssertionError("must not exchange")
         with self.assertRaises(ResultCopyError) as caught:
-            Jobs(Frames()).CopyResult(self.id, io.BytesIO())
+            Jobs(Frames()).copy_result(self.id, io.BytesIO())
         self.assertEqual(caught.exception.code, "unsupported_waiting")
         self.assertEqual(caught.exception.confirmed, 0)
 
@@ -140,19 +141,19 @@ class ClientControls(unittest.TestCase):
         class Reply:
             def exchange_frame(_, frame):
                 request=json.loads(frame)
-                result=w.OAJobInventoryListWorkResult(value=page)
-                payload=w._service_encode(w.enc_oajobinventorylistworkresult,result,1)
-                return w._service_encode(w.enc_oaservicereply,w.OAServiceReply(version=1,service=request['service'],method=request['method'],ok=True,payload=payload),0)
+                result=w._JobInventoryListWorkResult(value=page)
+                payload=w._service_encode(w._write_oa_job_inventory_list_work_result,result,1)
+                return w._service_encode(w._write_oa_service_reply,w._ServiceReply(version=1,service=request['service'],method=request['method'],ok=True,payload=payload),0)
         inventory=Inventory(Reply(),required_guarantees=["new-provider-promise"])
         self.assertFalse(hasattr(inventory,"Submit"))
         snapshot=w.OperationSnapshot(receipt=self.receipt,state="pending",progress=w.WorkProgress(done=5,total=1))
         page=w.InventoryPage(outcome="page",snapshots=[snapshot,snapshot],next="next")
-        with self.assertRaises(JobError):inventory.ListWork("",2)
+        with self.assertRaises(JobError):inventory.list_work("",2)
         self.assertEqual(inventory.owner,"")
         page.snapshots=[snapshot]
-        self.assertEqual(len(inventory.ListWork("",2).snapshots),1)
+        self.assertEqual(len(inventory.list_work("",2).snapshots),1)
         self.assertEqual(inventory.owner,"owner")
         page.next="same"
-        with self.assertRaises(JobError):inventory.ListWork("same",2)
+        with self.assertRaises(JobError):inventory.list_work("same",2)
 
 if __name__ == "__main__":unittest.main()

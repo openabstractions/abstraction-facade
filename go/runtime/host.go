@@ -52,6 +52,9 @@ type Options struct {
 	ConfigStore             casapi.Store
 	ConfigUserKey           string
 	ConfigObservationSource configservice.ObservationSource
+	// ConfigWithoutMachine leaves the administrator's machine rung unread, file
+	// and directory, for a runtime isolated from the installation.
+	ConfigWithoutMachine bool
 	// ConfigEditPolicy narrows user-rung replacement to authorized callers, for
 	// example ConfigEditPolicyFromRights. Nil keeps same-account Program proof.
 	ConfigEditPolicy configservice.EditPolicy
@@ -96,6 +99,9 @@ type Options struct {
 	// QuestionOperator explicitly authorizes the human-answering integration.
 	// Nil keeps operator methods unavailable to application clients.
 	QuestionOperator asksservice.AuthorizeOperator
+	// QuestionAskPolicy decides each application Ask, for example
+	// AskPolicyFromRights. Nil keeps same-account Program proof.
+	QuestionAskPolicy asksservice.AskPolicy
 	// RightsPolicy is an explicit decision provider. Enforcer authorization is
 	// required to evaluate another receiving service's attributed subject.
 	RightsPolicy   *rights.DecisionPolicy
@@ -109,6 +115,25 @@ type Options struct {
 	// leaves the decision service not ready. ResourceRightsActions lists the
 	// actions of the resource services this runtime composes.
 	RightsActions []string
+	// Credentials explicitly adds a credentials host; nil omits its contracts.
+	Credentials         CredentialsService
+	CredentialsEndpoint string
+	// ModelCredentials lets a model Ref name a credential the lookup applies for
+	// the bound caller; nil refuses such a Ref as unsupported_mapping.
+	ModelCredentials modelservice.CredentialApplier
+	// Inference explicitly adds an inference host; nil omits its contract.
+	Inference               InferenceService
+	InferenceEndpoint       string
+	InferenceRemoteEndpoint string
+	// Providers adds the declared providers' candidates after the runtime's
+	// own; nil adds none.
+	Providers DeclaredProviders
+	// Registry explicitly adds the provider registry profile; nil omits it.
+	Registry         RegistryService
+	RegistryEndpoint string
+	// Applications supplies the experimental application directory profile.
+	Applications         ApplicationsService
+	ApplicationsEndpoint string
 	// JobRoot enables a private store; ManagedJobs retains its generated owner.
 	JobRoot, JobOwner, JobEndpoint string
 	JobExecutor                    acceptanceprovider.Executor
@@ -140,6 +165,17 @@ type Host struct {
 	questionIndex       int
 	rights              *rightsservice.Host
 	rightsIndex         int
+	rightsOperatorIndex int
+	rightsPolicy        *rights.DecisionPolicy
+	credentials         CredentialsService
+	credentialsIndex    int
+	inference           InferenceService
+	inferenceIndex      int
+	providers           DeclaredProviders
+	registry            RegistryService
+	registryIndex       int
+	applications        ApplicationsService
+	applicationsIndex   int
 	mu                  sync.Mutex
 	candidates          []resolution.Candidate
 	onError             func(error)
@@ -223,10 +259,22 @@ func Listen(options Options) (*Host, error) {
 	if (options.ConfigStore == nil) != (options.ConfigUserKey == "") {
 		return nil, errors.New("runtime: configuration storage requires a provider and private key")
 	}
+	if err := validateCredentials(options); err != nil {
+		return nil, err
+	}
+	if err := validateApplications(options); err != nil {
+		return nil, err
+	}
+	if err := validateRegistry(options); err != nil {
+		return nil, err
+	}
+	if err := validateInference(options); err != nil {
+		return nil, err
+	}
 	if options.RightsPolicy == nil && (options.RightsEndpoint != "" || options.RightsEnforcer != nil || options.RightsOperator != nil || len(options.RightsActions) > 0) {
 		return nil, errors.New("runtime: authorization requires an explicit decision policy")
 	}
-	if options.QuestionBook != nil && !options.QuestionBook.ApplicationProfile() || options.QuestionBook == nil && (options.QuestionEndpoint != "" || options.QuestionOperator != nil) {
+	if options.QuestionBook != nil && !options.QuestionBook.ApplicationProfile() || options.QuestionBook == nil && (options.QuestionEndpoint != "" || options.QuestionOperator != nil || options.QuestionAskPolicy != nil) {
 		return nil, errors.New("runtime: questions require a separate application-profile book")
 	}
 	if (options.Storage != nil) != (options.StoragePolicy != nil) || (options.Storage == nil && options.StorageEndpoint != "") {
@@ -262,7 +310,7 @@ func Listen(options Options) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{onError: options.OnError, modelIndex: -1, routerIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1}
+	h := &Host{onError: options.OnError, modelIndex: -1, routerIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1, rightsOperatorIndex: -1}
 	var startupErrors []error
 	var l *logservice.Host
 	if options.Sink == nil {
@@ -288,6 +336,11 @@ func Listen(options Options) (*Host, error) {
 		startupErrors = append(startupErrors, fmt.Errorf("runtime config startup: %w", err))
 	} else {
 		h.config = c
+		if options.ConfigWithoutMachine {
+			if err = c.OmitMachineRung(); err != nil {
+				return nil, errors.Join(err, h.Close())
+			}
+		}
 		if options.ConfigObservationSource != nil {
 			if err = c.EnableObservation(options.ConfigObservationSource); err != nil {
 				return nil, errors.Join(err, h.Close())
@@ -322,6 +375,11 @@ func Listen(options Options) (*Host, error) {
 			h.model.OnError = options.OnError
 			if options.ModelPolicy != nil {
 				if err := h.model.EnablePolicy(options.ModelPolicy); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.ModelCredentials != nil {
+				if err := h.model.EnableCredentials(options.ModelCredentials); err != nil {
 					return nil, errors.Join(err, h.Close())
 				}
 			}
@@ -377,6 +435,11 @@ func Listen(options Options) (*Host, error) {
 			h.questions.OnError = options.OnError
 			if options.QuestionOperator != nil {
 				if err := h.questions.EnableOperator(options.QuestionOperator); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.QuestionAskPolicy != nil {
+				if err := h.questions.EnableAskPolicy(options.QuestionAskPolicy); err != nil {
 					return nil, errors.Join(err, h.Close())
 				}
 			}
@@ -446,6 +509,13 @@ func Listen(options Options) (*Host, error) {
 		inventory := h.jobs.candidate(options.JobEndpoint)
 		inventory.Reference.Contract = "abstraction.job/inventory@1"
 		h.candidates = append(h.candidates, inventory)
+		// The operator profile is served only when a method policy decides each
+		// of its calls; without one it would forbid every call (JOB-A13).
+		if options.JobMethodPolicy != nil {
+			operator := h.jobs.candidate(options.JobEndpoint)
+			operator.Reference.Contract = "abstraction.job/operator@1"
+			h.candidates = append(h.candidates, operator)
+		}
 	}
 	if options.ModelRegistry != nil {
 		h.modelIndex = len(h.candidates)
@@ -488,18 +558,28 @@ func Listen(options Options) (*Host, error) {
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{},
 		}})
 	}
+	// A decision point whose state cannot be read is not ready; Serve keeps
+	// following the state (watchRightsState).
+	rightsReady := h.rights != nil && options.RightsPolicy.CheckState(context.Background()) == nil
 	if options.RightsPolicy != nil {
+		h.rightsPolicy = options.RightsPolicy
 		h.rightsIndex = len(h.candidates)
-		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.rights != nil, Reference: wire.ServiceReference{
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: rightsReady, Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.rights", Contract: "abstraction.rights/authorization@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RightsEndpoint, Guarantees: []string{},
 		}})
 	}
 	if options.RightsOperator != nil {
-		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.rights != nil && h.rights.OperatorAvailable(), Reference: wire.ServiceReference{
+		h.rightsOperatorIndex = len(h.candidates)
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: rightsReady && h.rights.OperatorAvailable(), Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.rights", Contract: "abstraction.rights/operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RightsEndpoint, Guarantees: []string{},
 		}})
 	}
-	catalog, err := resolution.New(h.candidates)
+	h.addCredentialCandidates(options)
+	h.addInferenceCandidate(options)
+	h.addRegistryCandidate(options)
+	h.addApplicationsCandidate(options)
+	h.providers = options.Providers
+	catalog, err := h.catalogue()
 	if err != nil {
 		h.Close()
 		return nil, err
@@ -523,6 +603,9 @@ func Listen(options Options) (*Host, error) {
 		return nil, err
 	}
 	h.resolver.OnError = options.OnError
+	if h.providers != nil {
+		h.providers.Watch(h.refreshProviders)
+	}
 	if h.configObserverIndex >= 0 {
 		h.config.OnObservationStopped = h.refreshConfigObservation
 		h.config.PrepareObservation()
@@ -590,6 +673,21 @@ func (h *Host) Close() error {
 	if h.rights != nil {
 		errs = append(errs, h.rights.Close())
 	}
+	if h.credentials != nil {
+		errs = append(errs, h.credentials.Close())
+	}
+	if h.inference != nil {
+		errs = append(errs, h.inference.Close())
+	}
+	if h.providers != nil {
+		errs = append(errs, h.providers.Close())
+	}
+	if h.applications != nil {
+		errs = append(errs, h.applications.Close())
+	}
+	if h.registry != nil {
+		errs = append(errs, h.registry.Close())
+	}
 	return errors.Join(errs...)
 }
 
@@ -598,11 +696,11 @@ func (h *Host) stopped(index int, err error) {
 	// Contracts served by one endpoint share its readiness lifetime.
 	endpoint := h.candidates[index].Reference.Endpoint
 	for i := range h.candidates {
-		if h.candidates[i].Reference.Endpoint == endpoint {
+		if h.candidates[i].Reference.Endpoint == endpoint || index == h.inferenceIndex && h.candidates[i].Reference.Capability == "abstraction.inference" {
 			h.candidates[i].Ready = false
 		}
 	}
-	catalog, updateErr := resolution.New(h.candidates)
+	catalog, updateErr := h.catalogue()
 	if updateErr == nil {
 		updateErr = h.resolver.Update(catalog)
 	}
@@ -622,7 +720,7 @@ func (h *Host) refreshConfigObservation() {
 	// Read live provider state while holding the catalog update lock. A failure
 	// racing startup can never be overwritten by an earlier readiness snapshot.
 	h.candidates[h.configObserverIndex].Ready = h.config.ObservationAvailable()
-	catalog, err := resolution.New(h.candidates)
+	catalog, err := h.catalogue()
 	if err == nil {
 		err = h.resolver.Update(catalog)
 	}
@@ -642,9 +740,35 @@ func (h *Host) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var workers sync.WaitGroup
-	if h.rights != nil {
+	if h.credentials != nil {
 		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.credentialsIndex, h.credentials.Serve(ctx)) }()
+	}
+	if h.inference != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.inferenceIndex, h.inference.Serve(ctx)) }()
+	}
+	if h.applications != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.applicationsIndex, h.applications.Serve(ctx)) }()
+	}
+	if h.registry != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.registryIndex, h.registry.Serve(ctx)) }()
+	}
+	if h.providers != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			if err := h.providers.Serve(ctx); err != nil && h.onError != nil {
+				h.onError(err)
+			}
+		}()
+	}
+	if h.rights != nil {
+		workers.Add(2)
 		go func() { defer workers.Done(); h.stopped(h.rightsIndex, h.rights.Serve(ctx)) }()
+		go func() { defer workers.Done(); h.watchRightsState(ctx) }()
 	}
 	if h.questions != nil {
 		workers.Add(1)

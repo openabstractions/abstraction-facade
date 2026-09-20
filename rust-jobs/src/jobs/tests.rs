@@ -55,9 +55,9 @@ fn receipt_owner_identity_guarantees_and_combinations() {
         assert!(c
             .acceptance(
                 wire::AcceptanceResult {
-                    outcome: "accepted".into(),
+                    outcome: wire::AcceptanceOutcome::Accepted,
                     receipt: Some(r),
-                    ..Default::default()
+                    reason: String::new(),
                 },
                 &wanted(),
                 &c.required
@@ -69,9 +69,9 @@ fn receipt_owner_identity_guarantees_and_combinations() {
     assert!(c
         .acceptance(
             wire::AcceptanceResult {
-                outcome: "unknown".into(),
+                outcome: wire::AcceptanceOutcome::Unknown,
                 receipt: Some(receipt()),
-                ..Default::default()
+                reason: String::new(),
             },
             &wanted(),
             &[]
@@ -80,8 +80,9 @@ fn receipt_owner_identity_guarantees_and_combinations() {
     assert_eq!(
         c.acceptance(
             wire::AcceptanceResult {
-                outcome: "unknown".into(),
-                ..Default::default()
+                outcome: wire::AcceptanceOutcome::Unknown,
+                receipt: None,
+                reason: String::new(),
             },
             &wanted(),
             &[]
@@ -161,14 +162,17 @@ fn negative_progress_refused_last_retry_preserved() {
     let c = client(vec![]);
     let mut s = wire::OperationSnapshot {
         receipt: receipt(),
-        state: "pending".into(),
+        state: wire::WorkState::Pending,
         progress: wire::WorkProgress { done: 2, total: 1 },
         failure: Some(wire::WorkFailure {
-            classification: "retryable".into(),
+            classification: wire::FailureClass::Retryable,
             message: "last attempt".into(),
             cause: Default::default(),
         }),
-        ..Default::default()
+        cancellation_requested: false,
+        label: String::new(),
+        label_derived: false,
+        waiting: String::new(),
     };
     assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
     s.progress.done = -1;
@@ -180,24 +184,27 @@ fn permanent_failure_requires_failed_state() {
     let c = client(vec![]);
     let mut s = wire::OperationSnapshot {
         receipt: receipt(),
-        state: "pending".into(),
+        state: wire::WorkState::Pending,
         progress: wire::WorkProgress { done: 0, total: 0 },
         failure: Some(wire::WorkFailure {
-            classification: "permanent".into(),
+            classification: wire::FailureClass::Permanent,
             message: "download attempt failed".into(),
             cause: "digest_mismatch".into(),
         }),
-        ..Default::default()
+        cancellation_requested: false,
+        label: String::new(),
+        label_derived: false,
+        waiting: String::new(),
     };
     assert!(c.snapshot(&s, &wanted(), &c.required).is_err());
-    s.state = "running".into();
+    s.state = wire::WorkState::Running;
     assert!(c.snapshot(&s, &wanted(), &c.required).is_err());
-    s.state = "failed".into();
+    s.state = wire::WorkState::Failed;
     assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
     s.failure.as_mut().unwrap().cause = "a_future_cause".into();
     assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
-    s.failure.as_mut().unwrap().classification = "retryable".into();
-    s.state = "pending".into();
+    s.failure.as_mut().unwrap().classification = wire::FailureClass::Retryable;
+    s.state = wire::WorkState::Pending;
     assert!(c.snapshot(&s, &wanted(), &c.required).is_ok());
 }
 
@@ -254,7 +261,7 @@ struct TestConnector;
 impl super::super::Connector for TestConnector {
     type Transport = Replies;
     type Cancellation = ();
-    fn supports(&self, _: &str, _: &str) -> bool {
+    fn supports(&self, _: abstraction_facade_service::wire::Scope, _: &str) -> bool {
         true
     }
     fn connect(
@@ -265,6 +272,9 @@ impl super::super::Connector for TestConnector {
         _: usize,
     ) -> Result<Replies, ()> {
         Ok(Replies(Rc::new(RefCell::new(VecDeque::new()))))
+    }
+    fn runtime_endpoint(&self) -> Result<String, ()> {
+        Err(())
     }
 }
 

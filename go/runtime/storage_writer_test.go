@@ -97,14 +97,14 @@ func TestResolvedStorageWriterIdentitySurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := writer.Write(ctx, committedID, digest, bytes.NewReader(body), int64(len(body)))
-	if err != nil || first.Evidence != "hashed" {
+	if err != nil || first.Evidence.String() != "hashed" {
 		t.Fatalf("first lifetime write %+v %v", first, err)
 	}
 	begun, err := writer.Begin(ctx, unfinishedID, laterDigest, int64(len(later)))
-	if err != nil || begun.Outcome != "started" {
+	if err != nil || begun.Outcome.String() != "started" {
 		t.Fatalf("unfinished begin %+v %v", begun, err)
 	}
-	if a, err := writer.Append(ctx, *begun.Upload, 0, later[:1000]); err != nil || a.Outcome != "accepted" {
+	if a, err := writer.Append(ctx, *begun.Upload, 0, later[:1000]); err != nil || a.Outcome.String() != "accepted" {
 		t.Fatalf("unfinished append %+v %v", a, err)
 	}
 	stop()
@@ -129,7 +129,7 @@ func TestResolvedStorageWriterIdentitySurvivesRestart(t *testing.T) {
 	places := provider.places.Load()
 	for _, id := range []string{committedID, unfinishedID} {
 		refused, err := writer.Begin(ctx, id, otherDigest, int64(len(other)))
-		if err != nil || refused.Outcome != "conflict" {
+		if err != nil || refused.Outcome.String() != "conflict" {
 			t.Fatalf("%s accepted different content after restart: %+v %v", id, refused, err)
 		}
 	}
@@ -141,7 +141,7 @@ func TestResolvedStorageWriterIdentitySurvivesRestart(t *testing.T) {
 		t.Fatalf("committed identity after restart %+v %v", duplicate, err)
 	}
 	resumed, err := writer.Write(ctx, unfinishedID, laterDigest, bytes.NewReader(later), int64(len(later)))
-	if err != nil || resumed.Evidence != "hashed" {
+	if err != nil || resumed.Evidence.String() != "hashed" {
 		t.Fatalf("unfinished identity after restart %+v %v", resumed, err)
 	}
 	if got := readAll(ctx, t, reader, laterDigest); !bytes.Equal(got, later) {
@@ -162,11 +162,11 @@ func readAll(ctx context.Context, t *testing.T, reader *storageclient.Client, di
 			t.Fatalf("read %+v %v", page, err)
 		}
 		got.Write(page.Chunk.Data)
-		if page.Chunk.Eof {
+		if page.Chunk.EOF {
 			break
 		}
 	}
-	if closed, err := reader.Close(ctx, *opened.Resource); err != nil || closed.Outcome != "closed" {
+	if closed, err := reader.Close(ctx, *opened.Resource); err != nil || closed.Outcome.String() != "closed" {
 		t.Fatalf("close %+v %v", closed, err)
 	}
 	return got.Bytes()
@@ -239,7 +239,7 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 	}
 
 	denied, err := writer.Begin(ctx, request, digest, int64(len(body)))
-	if err != nil || denied.Outcome != "forbidden" || provider.finds.Load() != 0 || provider.places.Load() != 0 {
+	if err != nil || denied.Outcome.String() != "forbidden" || provider.finds.Load() != 0 || provider.places.Load() != 0 {
 		t.Fatalf("unauthorized writer %+v %v finds=%d places=%d", denied, err, provider.finds.Load(), provider.places.Load())
 	}
 	var subject rightsclient.Subject
@@ -252,7 +252,7 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 		t.Fatal(err)
 	}
 	readOnly, err := writer.Begin(ctx, request, digest, int64(len(body)))
-	if err != nil || readOnly.Outcome != "forbidden" || provider.places.Load() != 0 {
+	if err != nil || readOnly.Outcome.String() != "forbidden" || provider.places.Load() != 0 {
 		t.Fatalf("read grant admitted write %+v %v", readOnly, err)
 	}
 	if err := policy.Set(subject, writeAction, digest, true); err != nil {
@@ -260,23 +260,23 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 	}
 
 	begun, err := writer.Begin(ctx, request, digest, int64(len(body)))
-	if err != nil || begun.Outcome != "started" || begun.Limit != limit {
+	if err != nil || begun.Outcome.String() != "started" || begun.Limit != limit {
 		t.Fatalf("authorized begin %+v %v", begun, err)
 	}
 	upload := *begun.Upload
-	if a, err := writer.Append(ctx, upload, 0, body[:65536]); err != nil || a.Outcome != "accepted" {
+	if a, err := writer.Append(ctx, upload, 0, body[:65536]); err != nil || a.Outcome.String() != "accepted" {
 		t.Fatalf("append %+v %v", a, err)
 	}
-	if partial, err := reader.Open(ctx, digest); err != nil || partial.Outcome != "not_found" {
+	if partial, err := reader.Open(ctx, digest); err != nil || partial.Outcome.String() != "not_found" {
 		t.Fatalf("partial upload visible %+v %v", partial, err)
 	}
 	// A lost Begin/Append reply is reconciled through the same identity.
 	resumed, err := writer.Begin(ctx, request, digest, int64(len(body)))
-	if err != nil || resumed.Outcome != "started" || resumed.Upload.Handle != upload.Handle || resumed.Upload.Received != 65536 {
+	if err != nil || resumed.Outcome.String() != "started" || resumed.Upload.Handle != upload.Handle || resumed.Upload.Received != 65536 {
 		t.Fatalf("resume %+v %v", resumed, err)
 	}
 	stored, err := writer.Write(ctx, request, digest, bytes.NewReader(body), int64(len(body)))
-	if err != nil || stored.Evidence != "hashed" || stored.Size != int64(len(body)) {
+	if err != nil || stored.Evidence.String() != "hashed" || stored.Size != int64(len(body)) {
 		t.Fatalf("write %+v %v", stored, err)
 	}
 	if got := readAll(ctx, t, reader, digest); !bytes.Equal(got, body) {
@@ -304,7 +304,7 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 		t.Fatal(err)
 	}
 	big, err := writer.Begin(ctx, oversized, otherDigest, limit+1)
-	if err != nil || big.Outcome != "too_large" || big.Limit != limit || provider.places.Load() != placed {
+	if err != nil || big.Outcome.String() != "too_large" || big.Limit != limit || provider.places.Load() != placed {
 		t.Fatalf("oversized %+v %v", big, err)
 	}
 	interrupted, err := storageclient.NewRequestID()
@@ -312,50 +312,50 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 		t.Fatal(err)
 	}
 	short, err := writer.Begin(ctx, interrupted, otherDigest, int64(len(other)))
-	if err != nil || short.Outcome != "started" {
+	if err != nil || short.Outcome.String() != "started" {
 		t.Fatalf("interrupted begin %+v %v", short, err)
 	}
-	if a, err := writer.Append(ctx, *short.Upload, 0, other[:10]); err != nil || a.Outcome != "accepted" {
+	if a, err := writer.Append(ctx, *short.Upload, 0, other[:10]); err != nil || a.Outcome.String() != "accepted" {
 		t.Fatalf("interrupted append %+v %v", a, err)
 	}
-	if over, err := writer.Append(ctx, *short.Upload, 10, append(other[10:], 'x')); err != nil || over.Outcome != "too_large" || over.Received != 10 {
+	if over, err := writer.Append(ctx, *short.Upload, 10, append(other[10:], 'x')); err != nil || over.Outcome.String() != "too_large" || over.Received != 10 {
 		t.Fatalf("append beyond declared size %+v %v", over, err)
 	}
 	if err := policy.Set(subject, readAction, otherDigest, true); err != nil {
 		t.Fatal(err)
 	}
-	if hidden, err := reader.Open(ctx, otherDigest); err != nil || hidden.Outcome != "not_found" {
+	if hidden, err := reader.Open(ctx, otherDigest); err != nil || hidden.Outcome.String() != "not_found" {
 		t.Fatalf("interrupted upload visible %+v %v", hidden, err)
 	}
 	if err := policy.Revoke(subject, writeAction, otherDigest); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := writer.Append(ctx, *short.Upload, 10, other[10:]); err != nil || a.Outcome != "forbidden" {
+	if a, err := writer.Append(ctx, *short.Upload, 10, other[10:]); err != nil || a.Outcome.String() != "forbidden" {
 		t.Fatalf("revoked append %+v %v", a, err)
 	}
 	if info, err := os.Stat(staged(otherDigest)); err != nil || info.Size() != 10 {
 		t.Fatalf("revoked append changed staging: %v", err)
 	}
-	if c, err := writer.Commit(ctx, *short.Upload); err != nil || c.Outcome != "forbidden" {
+	if c, err := writer.Commit(ctx, *short.Upload); err != nil || c.Outcome.String() != "forbidden" {
 		t.Fatalf("revoked commit %+v %v", c, err)
 	}
-	if hidden, err := reader.Open(ctx, otherDigest); err != nil || hidden.Outcome != "not_found" {
+	if hidden, err := reader.Open(ctx, otherDigest); err != nil || hidden.Outcome.String() != "not_found" {
 		t.Fatalf("revoked commit visible %+v %v", hidden, err)
 	}
-	if a, err := writer.Abort(ctx, *short.Upload); err != nil || a.Outcome != "aborted" {
+	if a, err := writer.Abort(ctx, *short.Upload); err != nil || a.Outcome.String() != "aborted" {
 		t.Fatalf("abort after revocation %+v %v", a, err)
 	}
 	if _, err := os.Stat(staged(otherDigest)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("aborted staging remains: %v", err)
 	}
 	revokedBegin, err := writer.Begin(ctx, interrupted, otherDigest, int64(len(other)))
-	if err != nil || revokedBegin.Outcome != "forbidden" || provider.places.Load() != placed+1 {
+	if err != nil || revokedBegin.Outcome.String() != "forbidden" || provider.places.Load() != placed+1 {
 		t.Fatalf("revoked writer %+v %v places=%d", revokedBegin, err, provider.places.Load()-placed)
 	}
 
 	h.rights.Close()
 	outage, err := writer.Begin(ctx, oversized, otherDigest, int64(len(other)))
-	if err != nil || outage.Outcome != "unavailable" {
+	if err != nil || outage.Outcome.String() != "unavailable" {
 		t.Fatalf("policy outage %+v %v", outage, err)
 	}
 	h.storage.Close()
@@ -370,7 +370,7 @@ func TestResolvedStorageWriterEnforcedByRights(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	var refusal *client.BindingError
+	var refusal *client.ResolutionError
 	if !errors.As(err, &refusal) || refusal.Status != "not_ready" {
 		t.Fatalf("stopped writer %v", err)
 	}

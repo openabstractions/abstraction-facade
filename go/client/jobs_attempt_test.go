@@ -11,7 +11,7 @@ import (
 func serviceCode(err error) string {
 	var se *api.ServiceError
 	if errors.As(err, &se) {
-		return se.Code
+		return string(se.Code)
 	}
 	return ""
 }
@@ -36,21 +36,22 @@ func TestJobsClientValidatesAttemptsAndTerminalFailure(t *testing.T) {
 	if err := fresh().validateResult(receipt(retry), retry, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := fresh().validateResult(api.AcceptanceResult{Outcome: "unavailable", Reason: "policy decision unavailable"}, retry, nil); err != nil {
+	if err := fresh().validateResult(api.AcceptanceResult{Outcome: api.AcceptanceOutcomeUnavailable, Reason: "policy decision unavailable"}, retry, nil); err != nil {
 		t.Fatalf("unavailable outcome: %v", err)
 	}
-	observed := func(state, class string) api.ObservationResult {
-		return api.ObservationResult{Outcome: "observed", Snapshot: &api.OperationSnapshot{Receipt: *receipt(retry).Receipt, State: state, Failure: &api.WorkFailure{Classification: class, Message: "download attempt failed", Cause: "a_future_cause"}}}
+	observed := func(state api.WorkState, class api.FailureClass) api.ObservationResult {
+		return api.ObservationResult{Outcome: api.ObservationOutcomeObserved, Snapshot: &api.OperationSnapshot{Receipt: *receipt(retry).Receipt, State: state, Failure: &api.WorkFailure{Classification: class, Message: "download attempt failed", Cause: "a_future_cause"}}}
 	}
 	for _, c := range []struct {
-		state, class string
-		valid        bool
+		state api.WorkState
+		class api.FailureClass
+		valid bool
 	}{
-		{"failed", "permanent", true},
-		{"pending", "permanent", false},
-		{"running", "permanent", false},
-		{"pending", "retryable", true},
-		{"failed", "unknown", true},
+		{api.WorkStateFailed, api.FailureClassPermanent, true},
+		{api.WorkStatePending, api.FailureClassPermanent, false},
+		{api.WorkStateRunning, api.FailureClassPermanent, false},
+		{api.WorkStatePending, api.FailureClassRetryable, true},
+		{api.WorkStateFailed, api.FailureClassUnknown, true},
 	} {
 		err := fresh().validateObservation(observed(c.state, c.class), retry)
 		if (err == nil) != c.valid {

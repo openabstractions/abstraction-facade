@@ -58,7 +58,7 @@ impl<T: wire::FrameTransport + Clone> Editor<T> {
     }
     pub fn read_user(&self) -> Result<wire::UserSnapshot, Error<T::Error>> {
         let r = wire::ConfigEditorClient::new(self.transport.clone())
-            .ReadUser()
+            .read_user()
             .map_err(Error::Call)?;
         require(!r.revision.is_empty(), "user revision")?;
         Ok(r)
@@ -72,7 +72,7 @@ impl<T: wire::FrameTransport + Clone> Editor<T> {
     ) -> Result<wire::UserReplaceResult, Error<T::Error>> {
         require(!expected_revision.is_empty(), "expected revision required")?;
         let r = wire::ConfigEditorClient::new(self.transport.clone())
-            .ReplaceUser(expected_revision.into(), values)
+            .replace_user(expected_revision.into(), values)
             .map_err(Error::Call)?;
         check_replace(&r)?;
         Ok(r)
@@ -115,7 +115,7 @@ impl<T: wire::FrameTransport + Clone> Reader<T> {
     pub fn read(&self, overrides: wire::RunOverrides) -> Result<wire::Snapshot, Error<T::Error>> {
         require(overrides_bounded(&overrides), "oversized override")?;
         wire::ConfigReaderClient::new(self.transport.clone())
-            .Read(overrides)
+            .read(overrides)
             .map_err(Error::Call)
     }
 }
@@ -142,7 +142,7 @@ impl<T: wire::FrameTransport + Clone> Observer<T> {
             "invalid observation bounds",
         )?;
         let r = wire::ConfigObserverClient::new(self.transport.clone())
-            .Observe(overrides, cursor.into(), wait_ms)
+            .observe(overrides, cursor.into(), wait_ms)
             .map_err(Error::Call)?;
         check_observation::<T::Error>(&r, cursor)?;
         Ok(r)
@@ -154,39 +154,39 @@ pub trait ConfigMachine<C: Connector> {
     fn resolve_config_editor(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Editor<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     fn resolve_config(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Reader<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     /// Requires the selected provider's notification contract.
     fn resolve_config_observer(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Observer<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> ConfigMachine<C> for Machine<C> {
     fn resolve_config(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Reader<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Reader::new(self.resolve_service("abstraction.config/reader@1", g, s)?))
     }
     fn resolve_config_observer(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Observer<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Observer::new(self.resolve_service("abstraction.config/observer@1", g, s)?))
     }
     fn resolve_config_editor(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Editor<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Editor::new(self.resolve_service(
             "abstraction.config/editor@1",
@@ -200,11 +200,11 @@ impl<C: Connector> ConfigMachine<C> for Machine<C> {
 mod tests {
     use super::*;
     fn observation(outcome: &str, cursor: &str, snapshot: bool) -> wire::ConfigObservation {
-        let mut r = wire::ConfigObservation::default();
-        r.outcome = outcome.into();
-        r.cursor = cursor.into();
-        r.snapshot = snapshot.then(wire::Snapshot::default);
-        r
+        wire::ConfigObservation {
+            outcome: wire::ConfigObservationOutcome::from_wire(outcome).unwrap(),
+            cursor: cursor.into(),
+            snapshot: snapshot.then(wire::Snapshot::default),
+        }
     }
     #[test]
     fn observations_keep_their_shapes() {
@@ -216,11 +216,12 @@ mod tests {
         assert!(check_observation::<()>(&observation("gap", "c1", false), "c1").is_ok());
         assert!(check_observation::<()>(&observation("gap", "moved", false), "c1").is_err());
         assert!(check_observation::<()>(&observation("unavailable", "c1", true), "c1").is_err());
-        assert!(check_observation::<()>(&observation("future", "c1", false), "c1").is_err());
     }
     fn result(outcome: &str, revision: &str, store: &str) -> wire::UserReplaceResult {
-        let mut r = wire::UserReplaceResult::default();
-        r.outcome = outcome.into();
+        let mut r = wire::UserReplaceResult {
+            outcome: wire::UserReplaceOutcome::from_wire(outcome).unwrap(),
+            snapshot: wire::UserSnapshot::default(),
+        };
         r.snapshot.revision = revision.into();
         r.snapshot.values.store = store.into();
         r
@@ -234,6 +235,5 @@ mod tests {
         assert!(check_replace::<()>(&result("applied", "", "")).is_err());
         assert!(check_replace::<()>(&result("forbidden", "r1", "")).is_err());
         assert!(check_replace::<()>(&result("unavailable", "", "leaked")).is_err());
-        assert!(check_replace::<()>(&result("granted", "r1", "")).is_err());
     }
 }

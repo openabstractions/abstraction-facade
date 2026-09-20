@@ -2,33 +2,18 @@ package runtime
 
 import (
 	"context"
-	"errors"
+
 	identity "github.com/openabstractions/abstraction-identity"
-	rights "github.com/openabstractions/abstraction-rights/go/client"
 	storage "github.com/openabstractions/abstraction-storage/go/service"
 )
 
-// ContentPolicyFromRights asks a fixed decision service before each content
-// access. Its host must explicitly trust this process to relay native subjects.
-// The action is a configured catalogue identifier: abstraction.storage/content.read
-// for StoragePolicy and abstraction.storage/content.write for StorageWritePolicy.
-// No positive decision is cached.
-func ContentPolicyFromRights(decisions *rights.Client, action string) storage.Policy {
+// ContentPolicyFromRights decides before each content access. The action is a
+// configured catalogue identifier: abstraction.storage/content.read for
+// StoragePolicy and abstraction.storage/content.write for StorageWritePolicy.
+// The resource is the one the storage service names. No positive decision is
+// cached.
+func ContentPolicyFromRights(decisions Decider, action string) storage.Policy {
 	return func(ctx context.Context, peer *identity.Peer, resource string) error {
-		if decisions == nil || action == "" {
-			return storage.ErrPolicyUnavailable
-		}
-		err := decisions.Require(ctx, peer, action, resource)
-		if err == nil {
-			return nil
-		}
-		var decision *rights.DecisionError
-		if errors.As(err, &decision) {
-			switch decision.Outcome {
-			case "denied", "not_granted", "forbidden":
-				return err
-			}
-		}
-		return errors.Join(storage.ErrPolicyUnavailable, err)
+		return requireDecision(ctx, decisions, peer, action, resource, storage.ErrPolicyUnavailable)
 	}
 }

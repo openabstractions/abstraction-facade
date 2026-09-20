@@ -13,6 +13,10 @@ import (
 )
 
 func selectInstalled(ctx context.Context) (Selection, error) {
+	// GOOS android also builds this file; no runtime exists there.
+	if err := unsupportedPlatform(); err != nil {
+		return Selection{}, err
+	}
 	if os.Getuid() != os.Geteuid() {
 		return Selection{}, fmt.Errorf("%w: select outside a changed effective identity", ErrNoTrustedInstallation)
 	}

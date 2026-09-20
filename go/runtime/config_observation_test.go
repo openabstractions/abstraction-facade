@@ -34,7 +34,7 @@ func TestResolvedConfigObservationComposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := observer.ObserveContext(ctx, wire.RunOverrides{}, "", 0)
-	if err != nil || first.Outcome != "snapshot" || first.Snapshot == nil {
+	if err != nil || first.Outcome.String() != "snapshot" || first.Snapshot == nil {
 		t.Fatal(first, err)
 	}
 	editor, err := m.ResolveConfigEditor(ctx, client.Requirements{})
@@ -48,7 +48,7 @@ func TestResolvedConfigObservationComposition(t *testing.T) {
 	for _, value := range []string{"intermediate", "latest"} {
 		current.Values.Store = value
 		result, e := editor.ReplaceUserContext(ctx, current.Revision, current.Values)
-		if e != nil || result.Outcome != "applied" {
+		if e != nil || result.Outcome.String() != "applied" {
 			t.Fatal(result, e)
 		}
 		current = result.Snapshot
@@ -67,7 +67,7 @@ func TestResolvedConfigObservationComposition(t *testing.T) {
 	close(changes)
 	for {
 		_, err = m.ResolveConfigObserver(ctx, client.Requirements{})
-		var refused *client.BindingError
+		var refused *client.ResolutionError
 		if errors.As(err, &refused) && refused.Status == "not_ready" {
 			break
 		}
@@ -78,7 +78,7 @@ func TestResolvedConfigObservationComposition(t *testing.T) {
 		}
 	}
 	failure, err := observer.ObserveContext(ctx, wire.RunOverrides{}, next.Cursor, 0)
-	if err != nil || failure.Outcome != "unavailable" {
+	if err != nil || failure.Outcome.String() != "unavailable" {
 		t.Fatal(failure, err)
 	}
 	if _, err := m.ResolveConfigEditor(ctx, client.Requirements{}); err != nil {
@@ -96,7 +96,7 @@ func TestResolvedConfigObservationComposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	gap, err := observer.ObserveContext(ctx, wire.RunOverrides{}, next.Cursor, 0)
-	if err != nil || gap.Outcome != "gap" || gap.Snapshot != nil {
+	if err != nil || gap.Outcome.String() != "gap" || gap.Snapshot != nil {
 		t.Fatal(gap, err)
 	}
 	recovered, err := observer.ObserveContext(ctx, wire.RunOverrides{}, "", 0)

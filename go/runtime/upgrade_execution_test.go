@@ -92,16 +92,16 @@ func TestUpgradeResumesPartialHTTPThroughTypedResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := lifecycleObserve(t, ctx, recovered, id, false)
-	if before.Receipt.OperationId != receipt.OperationId || before.Receipt.LogicalOwner != receipt.LogicalOwner || before.Progress.Done < 8<<20 || before.Progress.Done > prefix {
+	if before.Receipt.OperationID != receipt.OperationID || before.Receipt.LogicalOwner != receipt.LogicalOwner || before.Progress.Done < 8<<20 || before.Progress.Done > prefix {
 		t.Fatalf("replacement lost receipt or partial progress: %+v", before)
 	}
 	reconciled, err := recovered.Reconcile(ctx, id)
-	if err != nil || reconciled.Receipt == nil || reconciled.Receipt.OperationId != receipt.OperationId {
+	if err != nil || reconciled.Receipt == nil || reconciled.Receipt.OperationID != receipt.OperationID {
 		t.Fatal(reconciled, err)
 	}
 	unblock()
 	final := lifecycleObserve(t, ctx, recovered, id, true)
-	if final.State != "complete" {
+	if final.State.String() != "complete" {
 		t.Fatalf("replacement failed: %+v", final)
 	}
 	select {
@@ -115,15 +115,15 @@ func TestUpgradeResumesPartialHTTPThroughTypedResult(t *testing.T) {
 	var got []byte
 	for {
 		part, err := recovered.ReadResult(ctx, id, int64(len(got)), 65536)
-		if err != nil || part.Outcome != "data" || part.Chunk == nil {
+		if err != nil || part.Outcome.String() != "data" || part.Chunk == nil {
 			t.Fatal(part, err)
 		}
 		chunk := part.Chunk
-		if chunk.Offset != int64(len(got)) || chunk.Total != int64(len(body)) || len(chunk.Data) > 65536 || chunk.Receipt.OperationId != receipt.OperationId || chunk.Receipt.LogicalOwner != receipt.LogicalOwner {
+		if chunk.Offset != int64(len(got)) || chunk.Total != int64(len(body)) || len(chunk.Data) > 65536 || chunk.Receipt.OperationID != receipt.OperationID || chunk.Receipt.LogicalOwner != receipt.LogicalOwner {
 			t.Fatal("chunk bounds/receipt changed")
 		}
 		got = append(got, chunk.Data...)
-		if chunk.Eof {
+		if chunk.EOF {
 			break
 		}
 		if len(chunk.Data) == 0 {

@@ -24,24 +24,24 @@ pub trait JobsMachine<C: Connector> {
     fn resolve_jobs(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Jobs<Binding<C>>, Error<TransportError<C>>>;
     fn resolve_job_operations(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Jobs<Binding<C>>, Error<TransportError<C>>>;
     fn resolve_job_inventory(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Inventory<Binding<C>>, Error<TransportError<C>>>;
 }
 fn bind<C: Connector>(
     machine: &Machine<C>,
     contract: &str,
     g: Vec<String>,
-    s: &str,
+    s: abstraction_facade_service::wire::Scope,
     receipt_requirements: bool,
 ) -> Result<Jobs<Binding<C>>, Error<TransportError<C>>> {
     let binding = machine
@@ -60,21 +60,21 @@ impl<C: Connector> JobsMachine<C> for Machine<C> {
     fn resolve_jobs(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Jobs<Binding<C>>, Error<TransportError<C>>> {
         bind(self, "abstraction.job/acceptance@1", g, s, true)
     }
     fn resolve_job_operations(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Jobs<Binding<C>>, Error<TransportError<C>>> {
         bind(self, "abstraction.job/operations@1", g, s, true)
     }
     fn resolve_job_inventory(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Inventory<Binding<C>>, Error<TransportError<C>>> {
         Ok(Inventory(bind(
             self,

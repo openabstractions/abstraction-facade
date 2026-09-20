@@ -88,74 +88,74 @@ func TestResolvedRightsCatalogueRegistrationExpiryAndProvenance(t *testing.T) {
 	page, err := operator.ListPolicyContext(ctx, "", 64)
 	want := append(ResourceRightsActions(), "fixture.seed/only")
 	slices.Sort(want)
-	if err != nil || page.Outcome != "page" || !slices.Equal(page.Catalog, want) {
+	if err != nil || page.Outcome.String() != "page" || !slices.Equal(page.Catalog, want) {
 		t.Fatal("runtime composition did not register resource actions", page, err)
 	}
 	composed, err := operator.RegisterActionContext(ctx, page.Revision, ConfigEditAction)
-	if err != nil || composed.Outcome != "applied" || composed.Revision != page.Revision || composed.Current == nil ||
+	if err != nil || composed.Outcome.String() != "applied" || composed.Revision != page.Revision || composed.Current == nil ||
 		composed.Current.RegisteredBy != me || composed.Current.RegisteredAt != at {
 		t.Fatal("composed registration provenance", composed, err)
 	}
-	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome != "unavailable" {
+	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome.String() != "unavailable" {
 		t.Fatal("unregistered action decided", opened, err)
 	}
 	stale, err := operator.RegisterActionContext(ctx, "unobserved", registered)
-	if err != nil || stale.Outcome != "conflict" || stale.Revision != page.Revision || stale.Current != nil {
+	if err != nil || stale.Outcome.String() != "conflict" || stale.Revision != page.Revision || stale.Current != nil {
 		t.Fatal(stale, err)
 	}
 	added, err := operator.RegisterActionContext(ctx, page.Revision, registered)
-	if err != nil || added.Outcome != "applied" || added.Revision == page.Revision || added.Current == nil || added.Current.RegisteredBy != me {
+	if err != nil || added.Outcome.String() != "applied" || added.Revision == page.Revision || added.Current == nil || added.Current.RegisteredBy != me {
 		t.Fatal(added, err)
 	}
-	if replay, err := operator.RegisterActionContext(ctx, page.Revision, registered); err != nil || replay.Outcome != "conflict" || replay.Revision != added.Revision || replay.Current == nil {
+	if replay, err := operator.RegisterActionContext(ctx, page.Revision, registered); err != nil || replay.Outcome.String() != "conflict" || replay.Revision != added.Revision || replay.Current == nil {
 		t.Fatal(replay, err)
 	}
-	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome != "forbidden" {
+	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome.String() != "forbidden" {
 		t.Fatal("registered action granted without a rule", opened, err)
 	}
 	rule := rightsclient.PolicyRule{Subject: me, Action: registered, Resource: digest, Permit: true}
 	grant, err := operator.SetRuleForContext(ctx, added.Revision, rule, time.Hour, "fixture grant")
-	if err != nil || grant.Outcome != "applied" || grant.Current == nil || !grant.Current.Permit {
+	if err != nil || grant.Outcome.String() != "applied" || grant.Current == nil || !grant.Current.Permit {
 		t.Fatal(grant, err)
 	}
-	if again, err := operator.SetRuleForContext(ctx, added.Revision, rule, time.Hour, "fixture grant"); err != nil || again.Outcome != "conflict" {
+	if again, err := operator.SetRuleForContext(ctx, added.Revision, rule, time.Hour, "fixture grant"); err != nil || again.Outcome.String() != "conflict" {
 		t.Fatal(again, err)
 	}
 	opened, err := content.Open(ctx, digest)
-	if err != nil || opened.Outcome != "opened" || opened.Resource == nil {
+	if err != nil || opened.Outcome.String() != "opened" || opened.Resource == nil {
 		t.Fatal("registered grant not enforced", opened, err)
 	}
 	read, err := operator.ReadRuleContext(ctx, me, registered, digest)
-	if err != nil || read.Outcome != "found" || read.Revision != grant.Revision || read.Record == nil {
+	if err != nil || read.Outcome.String() != "found" || read.Revision != grant.Revision || read.Record == nil {
 		t.Fatal(read, err)
 	}
 	if r := read.Record; r.SetBy != me || r.SetAt != at || r.Why != "fixture grant" || r.Expires != base.Add(time.Hour).Format(rights.StampFormat) {
 		t.Fatal("provenance", *r)
 	}
 	offset.Store(int64(2 * time.Hour))
-	if chunk, err := content.Read(ctx, *opened.Resource, 0, 1); err != nil || chunk.Outcome != "forbidden" {
+	if chunk, err := content.Read(ctx, *opened.Resource, 0, 1); err != nil || chunk.Outcome.String() != "forbidden" {
 		t.Fatal("expired grant still enforced", chunk, err)
 	}
-	if expiredRead, err := operator.ReadRuleContext(ctx, me, registered, digest); err != nil || expiredRead.Outcome != "expired" || expiredRead.Record == nil {
+	if expiredRead, err := operator.ReadRuleContext(ctx, me, registered, digest); err != nil || expiredRead.Outcome.String() != "expired" || expiredRead.Record == nil {
 		t.Fatal(expiredRead, err)
 	}
-	if closed, err := content.Close(ctx, *opened.Resource); err != nil || closed.Outcome != "closed" {
+	if closed, err := content.Close(ctx, *opened.Resource); err != nil || closed.Outcome.String() != "closed" {
 		t.Fatal(closed, err)
 	}
-	if seeded, err := operator.RetireActionContext(ctx, grant.Revision, "fixture.seed/only"); err != nil || seeded.Outcome != "invalid" {
+	if seeded, err := operator.RetireActionContext(ctx, grant.Revision, "fixture.seed/only"); err != nil || seeded.Outcome.String() != "invalid" {
 		t.Fatal(seeded, err)
 	}
 	retired, err := operator.RetireActionContext(ctx, grant.Revision, registered)
-	if err != nil || retired.Outcome != "applied" || retired.Current != nil {
+	if err != nil || retired.Outcome.String() != "applied" || retired.Current != nil {
 		t.Fatal(retired, err)
 	}
-	if gone, err := operator.ReadRuleContext(ctx, me, registered, digest); err != nil || gone.Outcome != "unknown" || gone.Revision != retired.Revision {
+	if gone, err := operator.ReadRuleContext(ctx, me, registered, digest); err != nil || gone.Outcome.String() != "unknown" || gone.Revision != retired.Revision {
 		t.Fatal("retirement kept its rules", gone, err)
 	}
-	if absent, err := operator.RetireActionContext(ctx, retired.Revision, registered); err != nil || absent.Outcome != "unknown" {
+	if absent, err := operator.RetireActionContext(ctx, retired.Revision, registered); err != nil || absent.Outcome.String() != "unknown" {
 		t.Fatal(absent, err)
 	}
-	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome != "unavailable" {
+	if opened, err := content.Open(ctx, digest); err != nil || opened.Outcome.String() != "unavailable" {
 		t.Fatal("retired action decided", opened, err)
 	}
 }

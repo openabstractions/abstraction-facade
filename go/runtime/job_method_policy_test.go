@@ -69,24 +69,24 @@ func TestRuntimeJobMethodPolicy(t *testing.T) {
 	}
 	submission := api.Submission{Identity: api.RequestIdentity{Key: "retained", HistoryEpoch: window.HistoryEpoch}, Kind: "download", Spec: []byte(`{}`)}
 	accepted, err := client.Submit(submission)
-	if err != nil || accepted.Outcome != "accepted" {
+	if err != nil || accepted.Outcome.String() != "accepted" {
 		t.Fatal(accepted, err)
 	}
 	before := policyFiles(t, options.JobRoot)
 	deny.Store(true)
 	rejected := submission
 	rejected.Identity.Key = "denied"
-	if result, err := client.Submit(rejected); err != nil || result.Outcome != "forbidden" {
+	if result, err := client.Submit(rejected); err != nil || result.Outcome.String() != "forbidden" {
 		t.Fatal(result, err)
 	}
-	if result, err := client.CancelWork(submission.Identity); err != nil || result.Outcome != "forbidden" {
+	if result, err := client.CancelWork(submission.Identity); err != nil || result.Outcome.String() != "forbidden" {
 		t.Fatal(result, err)
 	}
 	operations := api.NewOperationControlClient(transport)
-	if result, err := operations.ObserveWork(submission.Identity); err != nil || result.Outcome != "observed" || result.Snapshot.CancellationRequested {
+	if result, err := operations.ObserveWork(submission.Identity); err != nil || result.Outcome.String() != "observed" || result.Snapshot.CancellationRequested {
 		t.Fatal(result, err)
 	}
-	if result, err := operations.ReadResult(submission.Identity, 0, 64); err != nil || result.Outcome != "unsupported" {
+	if result, err := operations.ReadResult(submission.Identity, 0, 64); err != nil || result.Outcome.String() != "unsupported" {
 		t.Fatal(result, err)
 	}
 	if observations.Load() != 2 || !reflect.DeepEqual(before, policyFiles(t, options.JobRoot)) {

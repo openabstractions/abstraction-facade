@@ -42,6 +42,10 @@ func TestBindLocalTrustAndWaiting(t *testing.T) {
 		t.Fatal(err, calls)
 	}
 	ref.Scope = wire.ScopeRemote
+	if transport, err = BindLocal(context.Background(), ref, &expected, nil); err != nil || transport.Server.Program != expected.Program || transport.Endpoint != ref.Endpoint {
+		t.Fatal("remote execution must retain local OA trust", transport, err)
+	}
+	ref.Transport = "https"
 	if _, err = BindLocal(context.Background(), ref, &expected, nil); !errors.Is(err, ErrUnsupportedTransport) {
 		t.Fatal(err)
 	}

@@ -2,7 +2,7 @@
 import threading
 import time
 from abstraction.ipc import FrameTransport, Library
-from abstraction.job.acceptance import rec as wire
+import abstraction.job.acceptance as wire
 
 class JobError(RuntimeError):
     def __init__(self, code, message):
@@ -96,8 +96,8 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                                    deadline=deadline, cancellation=cancellation, max_frame=t.max_frame, server=t.server)
         return type(self)(transport, required_guarantees=self._required, _owner=self._owner)
 
-    def GetHistoryWindow(self):
-        result = self._acceptance.GetHistoryWindow()
+    def get_history_window(self):
+        result = self._acceptance.get_history_window()
         require(text(result.history_epoch) and result.minimum_retention_ms > 0 and result.result_retention_ms >= 0,
                 "invalid_acceptance", "invalid history window")
         self._owner.bind(result.logical_owner)
@@ -124,23 +124,24 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                     and result.receipt is None, "invalid_acceptance", "inconsistent acceptance response")
         return result
 
-    def Submit(self, submission):
+    def submit(self, submission):
         identity(submission.identity)
         require(text(submission.kind), "invalid_submission", "kind required")
         requested = list(guarantees(submission.required_guarantees))
         requested.extend(g for g in self._required if g not in requested)
         outgoing = wire.Submission(identity=submission.identity, kind=submission.kind,
-                                   spec=submission.spec, required_guarantees=requested)
-        return self._result(self._acceptance.Submit(outgoing), submission.identity, requested)
+                                   spec=submission.spec, required_guarantees=requested,
+                                   label=submission.label)
+        return self._result(self._acceptance.submit(outgoing), submission.identity, requested)
 
-    def Reconcile(self, requested):
+    def reconcile(self, requested):
         identity(requested)
-        return self._result(self._acceptance.Reconcile(requested), requested, self._required)
+        return self._result(self._acceptance.reconcile(requested), requested, self._required)
 
-    def CancelWork(self, requested):
+    def cancel_work(self, requested):
         identity(requested)
-        result = self._acceptance.CancelWork(requested)
-        require(result.outcome in wire.CANCELLATIONOUTCOME_NAMES,
+        result = self._acceptance.cancel_work(requested)
+        require(result.outcome in tuple(wire.CancellationOutcome),
                 "invalid_cancellation", "unknown cancellation outcome")
         return result
 
@@ -156,9 +157,9 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                 or snapshot.state == "failed", "invalid_observation", "permanent failure on nonfailed work")
         self._receipt(snapshot.receipt, requested, required, pin=pin)
 
-    def ObserveWork(self, requested):
+    def observe_work(self, requested):
         identity(requested)
-        result = self._operations.ObserveWork(requested)
+        result = self._operations.observe_work(requested)
         if result.outcome == "observed":
             self._snapshot(result.snapshot, requested, self._required)
         else:
@@ -166,11 +167,11 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                     and result.snapshot is None, "invalid_observation", "inconsistent observation")
         return result
 
-    def ReadResult(self, requested, offset, max_bytes):
+    def read_result(self, requested, offset, max_bytes):
         identity(requested)
         require(type(offset) is int and 0 <= offset < 2**63 and type(max_bytes) is int
                 and 1 <= max_bytes <= 65536, "invalid_request", "invalid result range")
-        result = self._operations.ReadResult(requested, offset, max_bytes)
+        result = self._operations.read_result(requested, offset, max_bytes)
         if result.outcome != "data":
             require(result.outcome in ("not_ready", "unavailable", "unsupported", "unknown", "forbidden", "invalid")
                     and result.chunk is None, "invalid_result", "inconsistent result refusal")
@@ -184,7 +185,7 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         self._receipt(c.receipt, requested, self._required)
         return result
 
-    def CopyResult(self, requested, destination):
+    def copy_result(self, requested, destination):
         """Copy under one call_scope() budget; preserve confirmed partial bytes.
 
         Injected transports must provide call_scope() with a shared deadline
@@ -193,11 +194,11 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         written, operation, total = 0, None, None
         try:
             scope = getattr(self._transport, "call_scope", None)
-            require(callable(scope), "unsupported_waiting", "CopyResult transport requires call_scope")
+            require(callable(scope), "unsupported_waiting", "copy_result transport requires call_scope")
             scoped = Jobs(scope(), required_guarantees=self._required,
                           _owner=self._owner)
             while True:
-                result = scoped.ReadResult(requested, written, 65536)
+                result = scoped.read_result(requested, written, 65536)
                 require(result.outcome == "data", result.outcome, "result copy unavailable")
                 c = result.chunk
                 if operation is None:
@@ -232,11 +233,11 @@ class Inventory(wire.JobInventory):
         binding = self._binding.with_waiting(**waiting)
         return Inventory(binding._transport, required_guarantees=binding._required, _owner=binding._owner)
 
-    def ListWork(self, cursor, limit):
+    def list_work(self, cursor, limit):
         require(isinstance(cursor, str) and len(cursor.encode("utf-8")) <= 128
                 and type(limit) is int and 1 <= limit <= 64,
                 "invalid_request", "invalid inventory cursor or limit")
-        page = wire.JobInventoryClient(self._transport).ListWork(cursor, limit)
+        page = wire.JobInventoryClient(self._transport).list_work(cursor, limit)
         if page.outcome != "page":
             require(page.outcome in ("gap", "forbidden", "invalid", "unavailable")
                     and not page.snapshots and not page.next and not page.complete,

@@ -36,7 +36,7 @@ func TestResolvedLogObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	end, err := observer.ObserveContext(ctx, "", 1, 65536, 0)
-	if err != nil || end.Outcome != "page" || !end.AtEnd || len(end.Records) != 0 {
+	if err != nil || end.Outcome.String() != "page" || !end.AtEnd || len(end.Records) != 0 {
 		t.Fatalf("initial end %+v %v", end, err)
 	}
 	short, stopWait := context.WithTimeout(ctx, 20*time.Millisecond)
@@ -52,13 +52,13 @@ func TestResolvedLogObservation(t *testing.T) {
 	}
 	for _, want := range []string{"first retained", "second retained"} {
 		page, err := observer.ObserveContext(ctx, end.Next, 1, 65536, 1000)
-		if err != nil || page.Outcome != "page" || len(page.Records) != 1 || page.Records[0].Msg != want || page.Next == end.Next {
+		if err != nil || page.Outcome.String() != "page" || len(page.Records) != 1 || page.Records[0].Msg != want || page.Next == end.Next {
 			t.Fatalf("observation %+v %v expected %s", page, err, want)
 		}
 		end = page
 	}
 	expired, err := observer.ObserveContext(ctx, end.Next, 1, 65536, 5)
-	if err != nil || expired.Outcome != "page" || len(expired.Records) != 0 || expired.Next != end.Next || !expired.AtEnd {
+	if err != nil || expired.Outcome.String() != "page" || len(expired.Records) != 0 || expired.Next != end.Next || !expired.AtEnd {
 		t.Fatalf("wait expiry %+v %v", expired, err)
 	}
 	h.logging.Close()

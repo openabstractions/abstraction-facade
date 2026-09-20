@@ -104,7 +104,7 @@ func TestRuntimeJobCallerChild(t *testing.T) {
 	}
 	c := api.NewRecoverableAcceptanceClient(listen.FrameClient{Endpoint: resolved.Reference.Endpoint, Timeout: time.Second, MaxFrame: acceptanceprovider.MaxFrameBytes})
 	v, err := c.Reconcile(api.RequestIdentity{Key: os.Getenv("OA_JOB_KEY"), HistoryEpoch: os.Getenv("OA_JOB_EPOCH")})
-	if err != nil || v.Outcome != "accepted" || v.Receipt == nil || v.Receipt.OperationId != os.Getenv("OA_JOB_OPERATION") {
+	if err != nil || v.Outcome.String() != "accepted" || v.Receipt == nil || v.Receipt.OperationID != os.Getenv("OA_JOB_OPERATION") {
 		t.Fatalf("restarted caller: %+v %v", v, err)
 	}
 }
@@ -200,7 +200,7 @@ func TestRuntimeJobsOptionalAndDenied(t *testing.T) {
 			if configured {
 				c := api.NewRecoverableAcceptanceClient(listen.FrameClient{Endpoint: o.JobEndpoint, Timeout: time.Second, MaxFrame: acceptanceprovider.MaxFrameBytes})
 				v, err := c.Submit(api.Submission{Identity: api.RequestIdentity{Key: "denied", HistoryEpoch: "claimed-epoch"}, Kind: "download", Spec: []byte(`{}`)})
-				if err != nil || v.Outcome != "forbidden" {
+				if err != nil || v.Outcome.String() != "forbidden" {
 					t.Fatalf("direct denial: %+v %v", v, err)
 				}
 				files, err := os.ReadDir(filepath.Join(o.JobRoot, "acceptance", "requests"))
@@ -341,7 +341,7 @@ func TestRuntimeCppJobProbe(t *testing.T) {
 			t.Fatalf("C++ attempt %d: %v\n%s", attempt, err, output)
 		}
 		result, err := api.Decode(output)
-		if err != nil || result.Outcome != "accepted" || result.Receipt == nil {
+		if err != nil || result.Outcome.String() != "accepted" || result.Receipt == nil {
 			t.Fatalf("C++ receipt: %+v %v\n%s", result, err, output)
 		}
 		r := result.Receipt
@@ -353,11 +353,11 @@ func TestRuntimeCppJobProbe(t *testing.T) {
 		}
 		if original == nil {
 			original = r
-		} else if r.Identity != original.Identity || r.OperationId != original.OperationId || r.LogicalOwner != original.LogicalOwner {
+		} else if r.Identity != original.Identity || r.OperationID != original.OperationID || r.LogicalOwner != original.LogicalOwner {
 			t.Fatalf("duplicate/restart receipt changed: %+v vs %+v", r, original)
 		}
 		paths, err := filepath.Glob(filepath.Join(o.JobRoot, "jobs", "*.json"))
-		if err != nil || len(paths) != 1 || strings.TrimSuffix(filepath.Base(paths[0]), ".json") != r.OperationId {
+		if err != nil || len(paths) != 1 || strings.TrimSuffix(filepath.Base(paths[0]), ".json") != r.OperationID {
 			t.Fatalf("C++ admitted duplicate/wrong job: %v %v", paths, err)
 		}
 	}

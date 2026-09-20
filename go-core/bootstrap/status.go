@@ -17,12 +17,12 @@ func ObserveInstalled(ctx context.Context) wire.BootstrapObservation {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		return statusEvidence("unknown", err.Error())
+		return statusEvidence(wire.BootstrapStateUnknown, err.Error())
 	}
 	return observeInstalled(ctx)
 }
 
-func statusEvidence(state, detail string) wire.BootstrapObservation {
+func statusEvidence(state wire.BootstrapState, detail string) wire.BootstrapObservation {
 	return wire.BootstrapObservation{State: state, Detail: detail}
 }
 

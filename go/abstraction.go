@@ -11,7 +11,28 @@ import (
 
 type Machine = client.Machine
 type Requirements = client.Requirements
-type BindingError = client.BindingError
+
+// Scope selects where a capability may execute.
+type Scope = wire.Scope
+
+const (
+	ScopeAny    = wire.ScopeAny
+	ScopeLocal  = wire.ScopeLocal
+	ScopeRemote = wire.ScopeRemote
+)
+
+// ScopeValues lists the choices declared by the facade schema.
+func ScopeValues() []Scope { return wire.ScopeValues() }
+
+type ResolutionError = client.ResolutionError
+type ResolutionErrorStatus = client.ResolutionErrorStatus
+
+const (
+	RuntimeUnavailable   = client.RuntimeUnavailable
+	InvalidResolution    = client.InvalidResolution
+	UnsupportedTransport = client.UnsupportedTransport
+)
+
 type JobsClient = client.JobsClient
 type JobsOptions = client.JobsOptions
 

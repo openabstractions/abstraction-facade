@@ -1,6 +1,9 @@
 // Package client supplies service bindings selected by the runtime resolver.
 // Service absence is reported by the requested capability. Discovery performs
-// no activation or provider initialization.
+// no provider initialization. On Windows, default discovery that finds an
+// installation whose runtime endpoint is absent starts that installation's
+// runtime once (see bootstrap.ActivateInstalled); with no installation,
+// resolution fails with runtime_unavailable.
 package client
 
 import (
@@ -17,6 +20,8 @@ type Machine struct {
 	providerTrust resolution.ProviderTrust
 	// Private seam for isolated installation-selection fixtures.
 	selectInstalled func(context.Context) (bootstrap.Selection, error)
+	// Private seam for isolated activation fixtures.
+	activate func(context.Context, bootstrap.Selection) error
 }
 
 // Discover selects registered installation evidence before contacting the resolver.

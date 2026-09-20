@@ -59,7 +59,9 @@ func Listen(endpoint string, catalog *Catalog, policy PeerPolicy) (*Host, error)
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &Host{listener: l, policy: policy, ctx: ctx, cancel: cancel}
+	// A client may keep its connection for later calls; each call is still
+	// received, bound, checked and answered on its own (FRAMING.md "Sessions").
+	h := &Host{listener: listen.Sessions(l, listen.SessionOptions{}), policy: policy, ctx: ctx, cancel: cancel}
 	h.catalog.Store(catalog)
 	return h, nil
 }

@@ -70,7 +70,7 @@ impl<T: wire::FrameTransport + Clone> Model<T> {
     }
     pub fn resolve(&self, reference: wire::Ref) -> Result<wire::LookupResult, Error<T::Error>> {
         let r = wire::ModelResolverClient::new(self.transport.clone())
-            .Resolve(reference)
+            .resolve(reference)
             .map_err(Error::Call)?;
         check_lookup::<T::Error>(&r)?;
         Ok(r)
@@ -82,14 +82,14 @@ pub trait ModelMachine<C: Connector> {
     fn resolve_model(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Model<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> ModelMachine<C> for Machine<C> {
     fn resolve_model(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Model<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Model::new(self.resolve_service("abstraction.model/resolver@1", g, s)?))
     }
@@ -101,14 +101,9 @@ mod tests {
     fn resolved(locator: &str) -> wire::LookupResult {
         let mut v = request::Request::default();
         v.artifact.digest = format!("sha256:{}", "a".repeat(64));
-        let mut s = request::Source::default();
-        s.scheme = "https".into();
-        s.locator = locator.into();
+        let s = request::Source { scheme: "https".into(), locator: locator.into(), credential: String::new() };
         v.sources = vec![s];
-        let mut r = wire::LookupResult::default();
-        r.outcome = "resolved".into();
-        r.request = Some(v);
-        r
+        wire::LookupResult { outcome: wire::LookupOutcome::Resolved, request: Some(v) }
     }
     #[test]
     fn lookup_results_keep_their_shapes() {
@@ -119,15 +114,14 @@ mod tests {
         let mut empty = resolved("https://example.invalid/weights");
         empty.request.as_mut().unwrap().sources.clear();
         assert!(check_lookup::<()>(&empty).is_err());
-        for outcome in ["forbidden", "unavailable", "invalid", "unsupported_mapping"] {
-            let mut r = wire::LookupResult::default();
-            r.outcome = outcome.into();
+        use wire::LookupOutcome::{Forbidden, Invalid, Unavailable, UnsupportedMapping};
+        for outcome in [Forbidden, Unavailable, Invalid, UnsupportedMapping] {
+            let mut r = wire::LookupResult { outcome, request: None };
             assert!(check_lookup::<()>(&r).is_ok(), "{outcome}");
             r.request = resolved("https://example.invalid/w").request;
             assert!(check_lookup::<()>(&r).is_err(), "{outcome} with request");
         }
-        let mut bare = wire::LookupResult::default();
-        bare.outcome = "resolved".into();
+        let bare = wire::LookupResult { outcome: wire::LookupOutcome::Resolved, request: None };
         assert!(check_lookup::<()>(&bare).is_err());
     }
 }

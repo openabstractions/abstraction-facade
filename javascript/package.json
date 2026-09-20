@@ -13,7 +13,8 @@
     "url": "https://github.com/openabstractions/abstraction-facade/issues"
   },
   "type": "module",
-  "exports": {".": "./index.js", "./protocol": "./js/abstraction/facade/rec.mjs"},
-  "files": ["index.js", "js", "README.md"],
+  "types": "./index.d.ts",
+  "exports": {".": {"types": "./index.d.ts", "default": "./index.js"}, "./logging": {"types": "./logging.d.ts", "default": "./logging.js"}, "./protocol": {"types": "./js/abstraction/facade/index.d.mts", "default": "./js/abstraction/facade/index.mjs"}},
+  "files": ["index.js", "index.d.ts", "logging.js", "logging.d.ts", "js", "README.md"],
   "engines": {"node": ">=18"}
 }

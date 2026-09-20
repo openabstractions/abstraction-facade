@@ -10,10 +10,10 @@ import (
 )
 
 func observation(id api.RequestIdentity) api.ObservationResult {
-	return api.ObservationResult{Outcome: "observed", Snapshot: &api.OperationSnapshot{Receipt: *receipt(id).Receipt, State: "pending", Progress: api.WorkProgress{Done: 2, Total: 1}, Failure: &api.WorkFailure{Classification: "retryable", Message: "last attempt"}}}
+	return api.ObservationResult{Outcome: api.ObservationOutcomeObserved, Snapshot: &api.OperationSnapshot{Receipt: *receipt(id).Receipt, State: api.WorkStatePending, Progress: api.WorkProgress{Done: 2, Total: 1}, Failure: &api.WorkFailure{Classification: api.FailureClassRetryable, Message: "last attempt"}}}
 }
 func chunk(id api.RequestIdentity) api.ResultRead {
-	return api.ResultRead{Outcome: "data", Chunk: &api.ResultChunk{Receipt: *receipt(id).Receipt, Offset: 0, Total: 3, Data: []byte{0, 10, 255}, Eof: true}}
+	return api.ResultRead{Outcome: api.ResultOutcomeData, Chunk: &api.ResultChunk{Receipt: *receipt(id).Receipt, Offset: 0, Total: 3, Data: []byte{0, 10, 255}, EOF: true}}
 }
 func TestObservationValidation(t *testing.T) {
 	id := api.RequestIdentity{Key: "key", HistoryEpoch: "epoch"}
@@ -23,12 +23,12 @@ func TestObservationValidation(t *testing.T) {
 	}
 	cases := map[string]func(*api.ObservationResult){
 		"missing":               func(r *api.ObservationResult) { r.Snapshot = nil },
-		"unknown with snapshot": func(r *api.ObservationResult) { r.Outcome = "unknown" },
-		"invalid outcome":       func(r *api.ObservationResult) { r.Outcome = "invented"; r.Snapshot = nil },
-		"state":                 func(r *api.ObservationResult) { r.Snapshot.State = "invented" },
+		"unknown with snapshot": func(r *api.ObservationResult) { r.Outcome = api.ObservationOutcomeUnknown },
+		"invalid outcome":       func(r *api.ObservationResult) { r.Outcome = api.ObservationOutcome(99); r.Snapshot = nil },
+		"state":                 func(r *api.ObservationResult) { r.Snapshot.State = api.WorkState(99) },
 		"done":                  func(r *api.ObservationResult) { r.Snapshot.Progress.Done = -1 },
 		"total":                 func(r *api.ObservationResult) { r.Snapshot.Progress.Total = -1 },
-		"failure":               func(r *api.ObservationResult) { r.Snapshot.Failure.Classification = "invented" },
+		"failure":               func(r *api.ObservationResult) { r.Snapshot.Failure.Classification = api.FailureClass(99) },
 		"identity":              func(r *api.ObservationResult) { r.Snapshot.Receipt.Identity.Key = "other" },
 		"owner":                 func(r *api.ObservationResult) { r.Snapshot.Receipt.LogicalOwner = "other" },
 		"guarantee":             func(r *api.ObservationResult) { r.Snapshot.Receipt.AcceptedGuarantees = nil },
@@ -42,7 +42,7 @@ func TestObservationValidation(t *testing.T) {
 			}
 		})
 	}
-	for _, outcome := range []string{"unknown", "forbidden", "invalid", "definitely_not_accepted"} {
+	for _, outcome := range []api.ObservationOutcome{api.ObservationOutcomeUnknown, api.ObservationOutcomeForbidden, api.ObservationOutcomeInvalid} {
 		if err := c.validateObservation(api.ObservationResult{Outcome: outcome}, id); err != nil {
 			t.Fatal(err)
 		}
@@ -56,14 +56,14 @@ func TestResultChunkValidation(t *testing.T) {
 	}
 	cases := map[string]func(*api.ResultRead){
 		"missing":              func(r *api.ResultRead) { r.Chunk = nil },
-		"not ready with chunk": func(r *api.ResultRead) { r.Outcome = "not_ready" },
-		"invalid outcome":      func(r *api.ResultRead) { r.Outcome = "invented"; r.Chunk = nil },
+		"not ready with chunk": func(r *api.ResultRead) { r.Outcome = api.ResultOutcomeNotReady },
+		"invalid outcome":      func(r *api.ResultRead) { r.Outcome = api.ResultOutcome(99); r.Chunk = nil },
 		"wrong offset":         func(r *api.ResultRead) { r.Chunk.Offset = 1 },
 		"negative total":       func(r *api.ResultRead) { r.Chunk.Total = -1 },
 		"overflow total":       func(r *api.ResultRead) { r.Chunk.Total = 2 },
 		"early eof":            func(r *api.ResultRead) { r.Chunk.Total = 4 },
-		"missing eof":          func(r *api.ResultRead) { r.Chunk.Eof = false },
-		"no progress":          func(r *api.ResultRead) { r.Chunk.Data = nil; r.Chunk.Eof = false },
+		"missing eof":          func(r *api.ResultRead) { r.Chunk.EOF = false },
+		"no progress":          func(r *api.ResultRead) { r.Chunk.Data = nil; r.Chunk.EOF = false },
 		"oversize":             func(r *api.ResultRead) { r.Chunk.Data = make([]byte, 65537) },
 		"identity":             func(r *api.ResultRead) { r.Chunk.Receipt.Identity.HistoryEpoch = "other" },
 		"owner":                func(r *api.ResultRead) { r.Chunk.Receipt.LogicalOwner = "other" },
@@ -96,7 +96,7 @@ func TestResultChunkValidation(t *testing.T) {
 	if err := c.validateRead(r, id, 0, 65536); err != nil {
 		t.Fatal("maximum chunk", err)
 	}
-	for _, outcome := range []string{"not_ready", "unavailable", "unsupported", "unknown", "forbidden", "invalid"} {
+	for _, outcome := range []api.ResultOutcome{api.ResultOutcomeNotReady, api.ResultOutcomeUnavailable, api.ResultOutcomeUnsupported, api.ResultOutcomeUnknown, api.ResultOutcomeForbidden, api.ResultOutcomeInvalid} {
 		if err := c.validateRead(api.ResultRead{Outcome: outcome}, id, 0, 3); err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +192,7 @@ func (h *copyHandler) ReadResult(id api.RequestIdentity, offset, max int64) (api
 	}
 	if offset == 0 {
 		r.Chunk.Data = bytes.Repeat([]byte{1}, 65536)
-		r.Chunk.Eof = false
+		r.Chunk.EOF = false
 	} else {
 		r.Chunk.Data = []byte{2}
 	}
@@ -200,18 +200,18 @@ func (h *copyHandler) ReadResult(id api.RequestIdentity, offset, max int64) (api
 	case "total":
 		if offset > 0 {
 			r.Chunk.Total++
-			r.Chunk.Eof = false
+			r.Chunk.EOF = false
 		}
 	case "operation":
 		if offset > 0 {
-			r.Chunk.Receipt.OperationId = "other"
+			r.Chunk.Receipt.OperationID = "other"
 		}
 	case "empty":
 		r.Chunk.Total = 0
 		r.Chunk.Data = nil
-		r.Chunk.Eof = true
+		r.Chunk.EOF = true
 	case "not_ready":
-		r = api.ResultRead{Outcome: "not_ready"}
+		r = api.ResultRead{Outcome: api.ResultOutcomeNotReady}
 	}
 	return r, nil
 }
@@ -258,7 +258,7 @@ func TestCopyResult(t *testing.T) {
 				}
 			case "not_ready":
 				var e *api.ServiceError
-				if n != 0 || !errors.As(err, &e) || e.Code != mode || h.calls != 1 {
+				if n != 0 || !errors.As(err, &e) || string(e.Code) != mode || h.calls != 1 {
 					t.Fatal(n, err)
 				}
 			case "short":

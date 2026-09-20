@@ -9,12 +9,12 @@ capability or transport dependencies.
 #include <abstraction/facade/client.hpp>
 
 abstraction::facade::Machine machine;
-auto logger = machine.Log();
-logger.Log(1, "connected through resolution");
-auto config = machine.Config().Read();
+auto logger = machine.log();
+logger.log(1, "connected through resolution");
+auto config = machine.config().read();
 ```
 
-`ResolveLog`, `ResolveConfig` and `ResolveRouter` accept required guarantee names
+`resolve_log`, `resolve_config` and `resolve_router` accept required guarantee names
 and a scope (`any` by default). Each accessor asks the runtime for the exact
 supported capability contract, validates the result and creates the existing
 capability client at the selected endpoint. A client already returned keeps that
@@ -30,11 +30,11 @@ one waiting budget:
 
 ```cpp
 const auto deadline = abstraction::ipc::Clock::now() + std::chrono::seconds(2);
-auto logger = machine.ResolveLog({}, "any", deadline);
-logger.Log(1, "connected within the caller budget");
+auto logger = machine.resolve_log({}, abstraction::facade::Scope::Any, deadline);
+logger.log(1, "connected within the caller budget");
 // Other typed calls use the same overload:
-// machine.ResolveConfig({}, "any", deadline).Read();
-// machine.ResolveRouter({}, "any", deadline).Hosts();
+// machine.resolve_config({}, abstraction::facade::Scope::Any, deadline).read();
+// machine.resolve_router({}, abstraction::facade::Scope::Any, deadline).hosts();
 ```
 
 The deadline uses the existing monotonic IPC clock. The resolver, connection,
@@ -44,14 +44,14 @@ use a new explicit scope for later work. Default `Resolve*` is one SDK call;
 a method on its returned reusable client is a later SDK call. Resolution has a
 five-second default budget. Each subsequent logging/config method has two
 seconds, router method ten seconds, and job method five seconds. Chaining
-`machine.ResolveConfig().Read()` retains these separate budgets. Applications
+`machine.resolve_config().read()` retains these separate budgets. Applications
 that treat resolution and use as one end-to-end operation pass an absolute
 deadline as above. Repeated calls on a default client receive fresh per-call
 budgets and keep the selected endpoint.
 
-Expired deadlines throw `ipc::FrameError` with `Status::timeout` before opening a
+Expired deadlines throw `ipc::FrameError` with `Status::Timeout` before opening a
 connection. In-flight timeouts retain that type. Stopping the wait supplies no
-cancellation of provider work already sent; `Machine.WithCancellation(token)` propagates the shared IPC cancellation
+cancellation of provider work already sent; `Machine.with_cancellation(token)` propagates the shared IPC cancellation
 token through resolution and the returned capability client. Direct `logging::Logger`, `config::Client`, `ResolutionClient::Resolve`,
 `router::Client`, `JobsClient`, and shared `FrameTransport` also accept the same absolute deadline.
 
@@ -68,19 +68,40 @@ untrusted or unavailable native proof produces a typed `ipc::FrameError`.
 Copies retain the first installation snapshot, including reusable clients with
 fresh call budgets. Construct a new machine to select a changed installation.
 Explicit endpoint constructors accept independently supplied
-`WithServerExpectation(ipc::ServerExpectation{kind, principal, program})` evidence.
+`with_server_expectation(ipc::ServerExpectation{kind, principal, program})` evidence.
 An explicit endpoint without an expectation retains the explicitly configured
 transport behavior. Endpoint environment overrides do not supply identity.
 Native selection supports the platforms implemented by the installed IPC library;
-unsupported selection returns `Status::proof_unavailable`.
+unsupported selection returns `Status::ProofUnavailable`.
 
-`ResolutionClient::Resolve` returns the validated `ResolveResult`, including
-refusal statuses. Typed accessors throw `ResolutionError` with the refusal in
-`.status`. Inconsistent or weaker references throw `invalid_resolution`.
-Only concrete `local` references with transport `oa-framed-local@1` can be bound;
-other transports and remote placement throw `unsupported_transport`. Generated
-codec errors and IPC transport failures propagate. No fallback, store, activation
-or production listener is supplied here.
+`ResolutionClient::resolve` returns the validated `ResolveResult`, including
+refusal statuses. `ResolutionClient::bind_local`, which every typed accessor and
+`resolve_service` use, throws `ResolutionError` when resolution yields no service:
+`.status` is the resolver's refusal (`refusal()` returns it typed),
+`runtime_unavailable` when no runtime could be selected, reached or activated
+(`.cause` holds the `ipc::FrameError` or `ActivationError`), `upgrade_in_progress`
+when activation was refused during an installer upgrade (`.cause` holds the
+`ActivationError`), `invalid_resolution` for an inconsistent or weaker
+reference, or `unsupported_transport` for any reference other than a concrete
+`local` one over `oa-framed-local@1` (`.scope` and `.transport` name it).
+`.capability`, `.contract` and `.looked_for` say what was asked and where. The
+caller's cancellation, and a deadline already past, stay `ipc::FrameError`.
+Generated codec errors propagate; see RESOLUTION.md. No fallback, store or
+production listener is supplied here.
+
+On Windows, a default `bind_local` whose selected installation's resolver pipe
+does not exist starts that installation once: `activate_installed` (in
+`activation.hpp`) runs its own `openabstractions.exe start --timeout <remaining
+budget>` hidden, within the call's deadline or `kDefaultActivationBudget` (20 s)
+without one, and resolution retries within 2 s. An elevated caller is refused
+without a launch, the selected program must be an installed
+`openabstractions.exe`, and exit status 3 is `upgrade_in_progress`. Exit status 4
+is a refusal: the caller runs inside an MSIX packaged app with file virtualization,
+and `profile_view()` reports that view as `virtualized(<package family>)`. Explicit
+endpoints, explicit server expectations, a present but refusing or untrusted
+server, `resolve` and `observe` never activate, and with no installation nothing
+starts. On Linux and macOS systemd and launchd own the runtime, and
+`activate_installed` throws `ActivationError` of kind `Unsupported`.
 
 `cpp/test/binding` is an outside CMake package consumer: configure it with only the
 installed prefix in `CMAKE_PREFIX_PATH`, build, then run CTest. It checks semantic
@@ -115,6 +136,7 @@ Record `git rev-parse HEAD` for all eight. Select revisions containing the APIs 
 this README and use that same set for deployment; untagged development changes
 may need a coordinated release before those revisions are publicly obtainable.
 CMake uses installed dependencies or these sibling checkouts and fetches nothing.
+The resolved logging example needs only the first six; its lock names them.
 
 From their common parent, set `PREFIX` to an absolute writable path and run
 these commands in Bash (including Git Bash on Windows):
@@ -127,7 +149,19 @@ cmake --install build/facade --config Release
 ```
 
 The installed prefix contains the facade and its transitive client/protocol
-packages. Put the README's `main.cpp` and `CMakeLists.txt` in a separate `my-app`
+packages: `abstraction_ipc` from `abstraction-identity/cpp`,
+`abstraction_job_acceptance` from `abstraction-job/cpp`, the logging, config,
+router and model clients, and `abstraction_download_request` from
+`abstraction-download/cpp`, which the model client requires. The download
+request encoder for job submissions therefore needs no separate install.
+
+On Windows these libraries use CMake's default MSVC runtime library, the DLL CRT
+(`/MD`). An application built with the static CRT (`/MT`) needs libraries built
+the same way: add `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` to the first
+`cmake` command (`MultiThreadedDebug` for a Debug application). Git Bash rewrites
+arguments that look like paths, such as `/m`; pass MSBuild options as `-m`.
+
+Put the README's `main.cpp` and `CMakeLists.txt` in a separate `my-app`
 directory, then build using only that prefix:
 
 ```sh
@@ -135,10 +169,47 @@ cmake -S my-app -B build/my-app -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="
 cmake --build build/my-app --config Release
 ```
 
-A compatible runtime must be running before executing the application. An absent
-resolver fails the accessor. It leaves provider installation and activation with
-the operator. The repository's `.github/workflows/facade-binding.yml` records the
+A compatible runtime must be installed before executing the application. On
+Windows a stopped installed runtime is started once by default discovery; on other
+platforms the service manager starts it. An absent resolver fails the accessor.
+Provider installation stays with the operator. The repository's `.github/workflows/facade-binding.yml` records the
 same installed-package approach and the exact dependency revisions for each run.
+
+## Run against a runtime you started
+
+Default `Machine` and `ResolutionClient` select the installed runtime. Setting
+`ABSTRACTION_RUNTIME_ENDPOINT` changes the address they connect to, and they
+still require the installed runtime's identity. With the variable set and no
+installed runtime, resolution throws
+`select installed runtime: no trusted runtime installation (untrusted)`. Go
+`facade.Discover()` and Python `Machine()` behave the same way.
+
+For development or tests beside an installed runtime, start an isolated runtime
+from the `openabstractions` command. `go install
+github.com/openabstractions/abstractions/serve@<version>` installs that command
+as `serve` (`serve.exe` on Windows); substitute that name below.
+
+```sh
+openabstractions serve runtime --isolated my-app-dev --state-dir "$PWD/oa-state"
+```
+
+It derives every service endpoint from the name, keeps jobs and its log under
+the state directory, and prints the resolver endpoint as
+`ABSTRACTION_RUNTIME_ENDPOINT=...`. On Windows the endpoint has the form
+`\\.\pipe\openabstractions-user-<SID>-my-app-dev-runtime`. Run the command from
+PowerShell or cmd, since Git Bash can rewrite `\\.\pipe\` arguments. Pass the
+endpoint to an explicit client:
+
+```cpp
+// Reads ABSTRACTION_RUNTIME_ENDPOINT, or pass the printed value directly.
+abstraction::facade::Machine machine(abstraction::facade::runtime_endpoint());
+auto jobs = abstraction::facade::resolve_job_operations(
+    abstraction::facade::ResolutionClient(abstraction::facade::runtime_endpoint()));
+```
+
+An explicit endpoint without `with_server_expectation` is unverified transport. An
+absent runtime at that endpoint throws `ipc::FrameError` naming the endpoint:
+`connect <endpoint>: no runtime accepted the connection (io_error)`.
 
 ## Job acceptance without unrelated capabilities
 
@@ -147,14 +218,14 @@ Configure with `ABSTRACTION_FACADE_BUILD_AGGREGATE=OFF` and
 Its dependencies are the generated `abstraction::job_acceptance` protocol and
 shared `abstraction::ipc`. It brings no embedded job store, CAS/watch, or
 logging/config/router dependency. `abstraction_job_acceptance` can also be
-installed directly from job/cpp with `ABSTRACTION_JOB_BUILD_LEGACY=OFF`.
+installed directly from job/cpp.
 
 ```cpp
 #include <abstraction/facade/jobs.hpp>
 using namespace abstraction::facade;
-auto jobs = ResolveJobs(ResolutionClient{},
+auto jobs = resolve_jobs(ResolutionClient{},
                         {"abstraction.job/reconciliation@1"});
-auto history = jobs.GetHistoryWindow();
+auto history = jobs.get_history_window();
 // Persist the caller-owned key, history epoch and logical owner before sending.
 job_api::Submission submission;
 submission.identity.key = persisted_caller_key;
@@ -162,9 +233,9 @@ submission.identity.history_epoch = history.history_epoch;
 submission.kind = "download";
 submission.spec = encoded_download_request; // generated Request encoding, described below
 submission.required_guarantees = {"abstraction.job/reconciliation@1"};
-auto result = jobs.Submit(submission);
+auto result = jobs.submit(submission);
 // After an ambiguous outcome, reconcile this identity at this same binding.
-auto recovered = jobs.Reconcile(submission.identity);
+auto recovered = jobs.reconcile(submission.identity);
 ```
 
 For `encoded_download_request`, use the generated download Request encoder and
@@ -173,7 +244,7 @@ link `abstraction::download_request` from `abstraction_download_request`. The
 package setup. An empty JSON object is not a valid HTTP execution request.
 The default resolver above requires a trusted installed runtime.
 
-The aggregate `Machine::ResolveJobs` forwards to that same binder. `JobsClient`
+The aggregate `Machine::resolve_jobs` forwards to that same binder. `JobsClient`
 implements the generated `RecoverableAcceptance` interface and owns a fixed
 shared transport with a 2 MiB frame limit matching the provider. Identities and
 cancellation remain explicit. Neither transport failure nor `unknown` triggers
@@ -182,8 +253,8 @@ request identity and requested guarantees; callers retain and verify their
 expected logical owner across restart. Admission is not downstream completion.
 
 For a single budget spanning job resolution and admission, use
-`ResolveJobs(resolver, guarantees, scope, deadline)` or
-`machine.ResolveJobs(guarantees, scope, deadline)`. History lookup and submission
+`resolve_jobs(resolver, guarantees, scope, deadline)` or
+`machine.resolve_jobs(guarantees, scope, deadline)`. History lookup and submission
 on that client consume the same deadline, including caller time between calls.
 Persist identity and logical owner before submission. An expired wait leaves
 acceptance unresolved; it can occur after the provider accepted the request.
@@ -196,21 +267,21 @@ abstraction::facade::job_api::AcceptanceResult submit_or_reconcile(
     const abstraction::facade::JobsClient& jobs,
     const abstraction::facade::job_api::Submission& submission) {
     using namespace std::chrono_literals;
-    auto attempt = jobs.WithDeadline(abstraction::ipc::Clock::now() + 5s);
+    auto attempt = jobs.with_deadline(abstraction::ipc::Clock::now() + 5s);
     try {
-        return attempt.Submit(submission);
+        return attempt.submit(submission);
     } catch (const abstraction::ipc::FrameError& error) {
-        if (error.status != abstraction::ipc::Status::timeout) throw;
-        auto recovery = jobs.WithDeadline(abstraction::ipc::Clock::now() + 5s);
-        return recovery.Reconcile(submission.identity);
+        if (error.status != abstraction::ipc::Status::Timeout) throw;
+        auto recovery = jobs.with_deadline(abstraction::ipc::Clock::now() + 5s);
+        return recovery.reconcile(submission.identity);
     }
 }
 ```
 
-`WithDeadline` leaves the original client unchanged and shares its exact endpoint,
+`with_deadline` leaves the original client unchanged and shares its exact endpoint,
 required guarantees and logical-owner pin. Reconciliation may itself time out or
 return an unresolved outcome; callers preserve the same identity for subsequent
-recovery. Waiting expiry does not call `CancelWork`. After a caller restart,
+recovery. Waiting expiry does not call `cancel_work`. After a caller restart,
 restore the persisted endpoint and logical owner through the existing JobsClient
 constructor instead of resolving an existing operation to another provider.
 
@@ -230,33 +301,44 @@ caller. On Linux the path is `/proc/<pid>/exe` with symlinks resolved, and a
 process whose executable was replaced while it ran is refused until it restarts.
 
 For continuity across reinstall, install to one stable absolute path without a
-version component, including behind symlinks. Before `Submit`, persist the
+version component, including behind symlinks. Before `submit`, persist the
 identity, the complete submission, the endpoint, the required guarantees and the
-logical owner outside the installation directory. After reinstall, restore with
-the installed runtime's trust and reconcile the saved identity:
+logical owner outside the installation directory. `jobs.endpoint()` returns the
+endpoint of a resolved binding, and `get_history_window().logical_owner` the owner:
+
+```cpp
+auto jobs = resolve_job_operations(ResolutionClient{}, {"abstraction.job/reconciliation@1"});
+auto history = jobs.get_history_window();
+saved.endpoint = jobs.endpoint();
+saved.logical_owner = history.logical_owner;
+saved.required_guarantees = {"abstraction.job/reconciliation@1"};
+```
+
+After reinstall, restore with the installed runtime's trust and reconcile the
+saved identity:
 
 ```cpp
 ResolutionClient resolver;
 auto jobs = JobsClient(saved.endpoint, 5000, saved.required_guarantees, saved.logical_owner)
-                .WithServerExpectation(resolver.Server());
-auto recovered = jobs.Reconcile(saved.identity);
+                .with_server_expectation(resolver.server());
+auto recovered = jobs.reconcile(saved.identity);
 ```
 
 The runtime has no transfer of work between program scopes. The Go client
 [README](../go/client/README.md) lists the same model event by event.
 
-The same binding offers `ObserveWork`, `ReadResult` and `CopyResult`. Observation
+The same binding offers `ObserveWork`, `ReadResult` and `copy_result`. Observation
 returns typed state, progress, cancellation intent and last-attempt failure class.
-`CancelWork` acknowledges intent; subsequent observation reports whether
+`cancel_work` acknowledges intent; subsequent observation reports whether
 cancellation or completion won. The service supplies complete result bytes in
-chunks of at most 64 KiB. `CopyResult` checks identity and total across chunks
+chunks of at most 64 KiB. `copy_result` checks identity and total across chunks
 and writes to an application-owned `std::ostream`:
 
 ```cpp
-auto observation = jobs.ObserveWork(submission.identity);
+auto observation = jobs.observe_work(submission.identity);
 if (observation.outcome == "observed" &&
     observation.snapshot->state == "complete") {
-    auto copied = jobs.CopyResult(submission.identity, destination);
+    auto copied = jobs.copy_result(submission.identity, destination);
     if (copied.error) std::rethrow_exception(copied.error);
 }
 ```
@@ -264,13 +346,13 @@ if (observation.outcome == "observed" &&
 Here `destination` is the application's output stream. Partial output remains
 with that stream on error. `confirmed` counts confirmed writes; a throwing
 stream buffer can leave the current write's partial count unknown. A fresh
-`WithDeadline` supplies a budget for later observation or copying.
-`ResolveJobOperations` selects the operation contract for new bindings; retain
+`with_deadline` supplies a budget for later observation or copying.
+`resolve_job_operations` selects the operation contract for new bindings; retain
 the original binding for accepted work. Admission-only providers explicitly
 return `unsupported` for result reads.
 
 Both installed consumers accept `--runtime <endpoint> --jobs <caller-key>`.
-The job-only consumer under `cpp/test/jobs` makes history, Submit and Reconcile
+The job-only consumer under `cpp/test/jobs` makes history, submit and reconcile
 calls without logging/config calls. It prints the reconciled generated
 AcceptanceResult JSON, including logical owner, operation ID, key and epoch,
 only after both receipts agree. The original logging/config probe mode remains
@@ -278,37 +360,37 @@ available in `cpp/test/binding`.
 
 ## User configuration edits
 
-`Machine.ResolveConfigEditor()` resolves `abstraction.config/editor@1` and returns
-`config::Editor`. The existing `Config()` accessor retains read semantics.
+`Machine.resolve_config_editor()` resolves `abstraction.config/editor@1` and returns
+`config::Editor`. The existing `config()` accessor retains read semantics.
 
 ```cpp
-auto editor = machine.ResolveConfigEditor();
-auto snapshot = editor.ReadUser();
+auto editor = machine.resolve_config_editor();
+auto snapshot = editor.read_user();
 auto values = snapshot.values;
 values.off["example"] = "disabled";
-auto update = editor.ReplaceUser(snapshot.revision, values);
+auto update = editor.replace_user(snapshot.revision, values);
 // update.outcome is applied or conflict; update.snapshot carries current values.
 ```
 
 Replacement sends only the user rung and its expected revision. Conflict is
 returned to the caller without retry. The service owns persistence. A deliberate
 provider endpoint can be supplied to `config::Editor(endpoint)`. Copies made with
-`WithDeadline` and `WithCancellation` preserve the other waiting constraint.
+`with_deadline` and `with_cancellation` preserve the other waiting constraint.
 The resolver's deadline overload shares one budget with the returned editor.
 Cancellation ends waiting and can leave a sent replacement's outcome unknown;
 read the current snapshot before deciding on another edit.
 
 ## Runtime observations
 
-`Machine.Observe()` returns a `RuntimeObservationResult` containing the shared
+`Machine.observe()` returns a `RuntimeObservationResult` containing the shared
 `RuntimeObservation` vocabulary and an optional `std::exception_ptr error`.
 Default requests cover logging, config reader, job acceptance, job operations
 and config editor with local scope and no additional guarantees. All resolution
 calls share one five-second deadline; the explicit overload accepts the caller's
-absolute deadline. `WithCancellation` applies to the whole observation.
+absolute deadline. `with_cancellation` applies to the whole observation.
 
 ```cpp
-auto result = machine.Observe();
+auto result = machine.observe();
 for (const auto& capability : result.observation.capabilities) {
     if (capability.result) {
         // Inspect the original resolver status and optional selected reference.
@@ -345,7 +427,8 @@ target_link_libraries(app PRIVATE abstraction::facade_storage)
 #include <abstraction/facade/storage.hpp>
 auto deadline = abstraction::ipc::Clock::now() + std::chrono::seconds(5);
 abstraction::facade::ResolutionClient resolver;
-auto content = abstraction::facade::ResolveStorage(resolver, {}, "local", deadline);
+auto content = abstraction::facade::resolve_storage(
+    resolver, {}, abstraction::facade::Scope::Local, deadline);
 // Open a canonical sha256 digest, then Read the returned Resource in bounded chunks.
 ```
 
@@ -371,13 +454,13 @@ with aggregate disabled for independent adoption. Installed packages
 the independent resolver and their capability package, plus shared IPC.
 
 Headers `abstraction/facade/asks.hpp` and `abstraction/facade/rights.hpp` provide
-ResolveAsks and ResolveRights. Each accepts a ResolutionClient, required
+resolve_asks and resolve_rights. Each accepts a ResolutionClient, required
 guarantees and scope, with an optional absolute deadline. Resolution and future
 calls retain that same deadline and cancellation token; the default starts a
 fresh five-second operation scope at resolution. A new operation needs a new
 scope. The selected endpoint remains fixed.
 
-ResolveTrustedRightsEnforcer exposes the relay operation separately. Its caller
+resolve_trusted_rights_enforcer exposes the relay operation separately. Its caller
 must be a receiver-designated enforcement point supplying actual bound subject
 evidence. A question answer grants no resource access itself. These bindings
 provide no operator answering method or live awake lease.
@@ -387,10 +470,10 @@ provide no operator answering method or live awake lease.
 `ABSTRACTION_FACADE_BUILD_LOGGING=ON` with aggregate disabled installs
 `abstraction_facade_logging`, target `abstraction::facade_logging`. It requires
 only the logging capability package and independent resolver/shared IPC.
-`abstraction/facade/logging.hpp` supplies ResolveLog, ResolveLogReader, and
-ResolveLogObserver. Aggregate Machine also exposes ResolveLogObserver.
+`abstraction/facade/logging.hpp` supplies resolve_log, resolve_log_reader, and
+resolve_log_observer. Aggregate Machine also exposes resolve_log_observer.
 
-`logging::Observer.Observe(cursor, max_records, max_bytes, wait_ms)` long-polls
+`logging::Observer.observe(cursor, max_records, max_bytes, wait_ms)` long-polls
 one selected history instance. The default call budget is two seconds;
 wait_ms (0..30000) cannot extend it. For longer waits, use the accessor overload
 accepting an absolute IPC deadline. That same deadline and cancellation token
@@ -413,9 +496,9 @@ it. For configuration, link `abstraction::config_client` and use:
 ```cpp
 #include <abstraction/facade/resolution.hpp>
 #include <abstraction/config/rec.h>
-auto observer = abstraction::facade::ResolveService<
+auto observer = abstraction::facade::resolve_service<
     abstraction::config::ConfigObserverService>(abstraction::facade::ResolutionClient{});
-auto observation = observer->Observe({}, "", 0);
+auto observation = observer->observe({}, "", 0);
 ```
 
 Every generated service descriptor supplies its authoritative wire name, derived
@@ -425,7 +508,7 @@ through operator-> is borrowed for that binding's lifetime. Default bindings use
 fresh per-call timeouts. The overload accepting an absolute IPC deadline preserves
 that deadline through resolution and calls. Resolver cancellation is retained.
 
-`BindService<Descriptor>(reference, transport, guarantees, scope)` accepts an
+`bind_service<Descriptor>(reference, transport, guarantees, scope)` accepts an
 explicit alternative transport and validates the same reference requirements.
 That transport owns its identity, scope, waiting and framing guarantees. Resolution
 uses shared local IPC and refuses unsupported transports. Neither path chooses a

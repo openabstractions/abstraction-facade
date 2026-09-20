@@ -89,7 +89,7 @@ impl<T: wire::FrameTransport + Clone> Questions<T> {
     pub fn ask(&self, q: wire::ApplicationQuestion) -> Result<wire::QuestionObservation, Error<T::Error>> {
         require(word(&q.request_key) && word(&q.key), "question key")?;
         let r = wire::QuestionApplicationClient::new(self.transport.clone())
-            .Ask(q)
+            .ask(q)
             .map_err(Error::Call)?;
         check_observation(&r)?;
         Ok(r)
@@ -98,7 +98,7 @@ impl<T: wire::FrameTransport + Clone> Questions<T> {
     pub fn observe(&self, request_key: &str, wait_ms: i64) -> Result<wire::QuestionObservation, Error<T::Error>> {
         require(word(request_key) && (0..=30000).contains(&wait_ms), "observation request")?;
         let r = wire::QuestionApplicationClient::new(self.transport.clone())
-            .Observe(request_key.into(), wait_ms)
+            .observe(request_key.into(), wait_ms)
             .map_err(Error::Call)?;
         check_observation(&r)?;
         Ok(r)
@@ -118,7 +118,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
     pub fn list(&self, cursor: &str, limit: i64) -> Result<wire::OperatorPage, Error<T::Error>> {
         require(cursor.len() <= 256 && (1..=64).contains(&limit), "history range")?;
         let r = wire::QuestionOperatorClient::new(self.transport.clone())
-            .ListQuestions(cursor.into(), limit)
+            .list_questions(cursor.into(), limit)
             .map_err(Error::Call)?;
         check_page(&r, limit)?;
         Ok(r)
@@ -126,7 +126,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
     pub fn answer(&self, id: &str, option: &str) -> Result<wire::OperatorDecision, Error<T::Error>> {
         require(word(id) && word(option), "answer")?;
         let r = wire::QuestionOperatorClient::new(self.transport.clone())
-            .AnswerQuestion(id.into(), option.into())
+            .answer_question(id.into(), option.into())
             .map_err(Error::Call)?;
         check_decision(&r, id, option)?;
         Ok(r)
@@ -134,7 +134,7 @@ impl<T: wire::FrameTransport + Clone> Operator<T> {
     pub fn retire(&self, id: &str) -> Result<wire::OperatorRetirement, Error<T::Error>> {
         require(word(id), "retirement")?;
         let r = wire::QuestionOperatorClient::new(self.transport.clone())
-            .RetireQuestion(id.into())
+            .retire_question(id.into())
             .map_err(Error::Call)?;
         check_retirement(&r, id)?;
         Ok(r)
@@ -145,27 +145,27 @@ pub trait AsksMachine<C: Connector> {
     fn resolve_asks(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Questions<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     /// Resolution grants no operator authority; the host's operator policy decides each call.
     fn resolve_asks_operator(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Operator<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> AsksMachine<C> for Machine<C> {
     fn resolve_asks(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Questions<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Questions::new(self.resolve_service("abstraction.asks/application@1", g, s)?))
     }
     fn resolve_asks_operator(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Operator<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Operator::new(self.resolve_service("abstraction.asks/operator@1", g, s)?))
     }
@@ -175,11 +175,13 @@ impl<C: Connector> AsksMachine<C> for Machine<C> {
 mod tests {
     use super::*;
     fn record(id: &str, option: &str) -> wire::RecordMetadata {
-        let mut r = wire::RecordMetadata::default();
-        r.id = id.into();
-        r.text = "Allow download?".into();
-        r.options = vec!["once".into(), "refuse".into()];
-        r.option = option.into();
+        let mut r = wire::RecordMetadata {
+            id: id.into(),
+            text: "Allow download?".into(),
+            options: vec!["once".into(), "refuse".into()],
+            option: option.into(),
+            ..Default::default()
+        };
         if !option.is_empty() {
             r.answered = "2026-09-15T00:00:00Z".into();
         }
@@ -187,17 +189,15 @@ mod tests {
     }
     #[test]
     fn operator_results_keep_their_shapes() {
-        let mut retired = wire::OperatorRetirement::default();
-        retired.outcome = "retired".into();
+        let mut retired = wire::OperatorRetirement { outcome: wire::OperatorRetirementOutcome::Retired, record: None };
         assert!(check_retirement::<()>(&retired, "q1").is_ok());
         retired.record = Some(record("q1", ""));
         assert!(check_retirement::<()>(&retired, "q1").is_ok());
         assert!(check_retirement::<()>(&retired, "q2").is_err());
-        retired.outcome = "forbidden".into();
+        retired.outcome = wire::OperatorRetirementOutcome::Forbidden;
         assert!(check_retirement::<()>(&retired, "q1").is_err());
 
-        let mut decision = wire::OperatorDecision::default();
-        decision.outcome = "answered".into();
+        let mut decision = wire::OperatorDecision { outcome: wire::OperatorDecisionOutcome::Answered, record: None };
         assert!(check_decision::<()>(&decision, "q1", "once").is_err());
         decision.record = Some(record("q1", "once"));
         assert!(check_decision::<()>(&decision, "q1", "once").is_ok());
@@ -205,12 +205,16 @@ mod tests {
         decision.record = Some(record("q1", "never"));
         assert!(check_decision::<()>(&decision, "q1", "never").is_err());
 
-        let mut page = wire::OperatorPage::default();
-        page.outcome = "forbidden".into();
+        let mut page = wire::OperatorPage {
+            outcome: wire::OperatorPageOutcome::Forbidden,
+            records: vec![],
+            next: String::new(),
+            complete: false,
+        };
         assert!(check_page::<()>(&page, 16).is_ok());
         page.records.push(record("q1", ""));
         assert!(check_page::<()>(&page, 16).is_err());
-        page.outcome = "page".into();
+        page.outcome = wire::OperatorPageOutcome::Page;
         page.complete = true;
         assert!(check_page::<()>(&page, 16).is_ok());
         assert!(check_page::<()>(&page, 0).is_err());

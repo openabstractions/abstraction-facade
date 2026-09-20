@@ -14,6 +14,10 @@ import (
 type Candidate struct {
 	Reference wire.ServiceReference
 	Ready     bool
+	// Activate, when set, is called when an authorized request is sufficient
+	// for this candidate and it is not ready: the runtime starts an on-demand
+	// provider, and a later request finds it ready. It must not block.
+	Activate func() `json:"-"`
 }
 
 // Catalog is an immutable snapshot in administrator/runtime policy order.
@@ -88,6 +92,9 @@ func (r *Resolver) Resolve(request wire.ResolveRequest) (wire.ResolveResult, err
 		}
 		sufficient = true
 		if !candidate.Ready {
+			if candidate.Activate != nil {
+				candidate.Activate()
+			}
 			continue
 		}
 		selected := clone(ref)

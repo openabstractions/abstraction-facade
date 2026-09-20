@@ -1,7 +1,7 @@
 # Resolved storage content reader
 
 This optional crate adds `StorageMachine` to the pure facade `Machine<C>`.
-`resolve_storage(vec![], "local")` returns a fixed `Client<Binding<C>>`.
+`resolve_storage(vec![], abstraction_facade_native::Scope::Local)` returns a fixed `Client<Binding<C>>`.
 The base connector performs resolution, reference validation, waiting and framing.
 Use the separate facade-native crate to select installed native IPC, or supply
 another trusted Connector preserving the requested transport guarantees.
@@ -14,7 +14,7 @@ Close explicitly, including after revocation. `gap` requires an explicit reopen;
 there is no retry or provider switching. Bytes are unverified: the digest names
 requested content and callers verify assembled bytes before trusting them.
 
-`resolve_storage_writer(vec![], "local")` returns a `Writer<Binding<C>>` for the
+`resolve_storage_writer(vec![], abstraction_facade_native::Scope::Local)` returns a `Writer<Binding<C>>` for the
 separate content-writer contract; every call remains subject to the service
 write policy. `begin`, `append`, `commit` and `abort` validate inputs before any
 exchange and check result consistency. `write(request, digest, bytes)` uploads

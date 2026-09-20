@@ -32,4 +32,12 @@ version = "0.0.0"
 dependencies = [
  "abstraction-download-request-api",
  "abstraction-frame",
+ "abstraction-storage-content-api",
+]
+
+[[package]]
+name = "abstraction-storage-content-api"
+version = "0.0.0"
+dependencies = [
+ "abstraction-frame",
 ]

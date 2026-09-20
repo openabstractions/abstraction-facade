@@ -3,19 +3,19 @@
 #include <exception>
 
 namespace abstraction::facade {
-inline BootstrapObservation UnknownBootstrap() {
+inline BootstrapObservation unknown_bootstrap() {
     BootstrapObservation value;
-    value.state = "unknown";
+    value.state = BootstrapState::Unknown;
     return value;
 }
 
-inline std::vector<ResolveRequest> DefaultStatusRequests() {
+inline std::vector<ResolveRequest> default_status_requests() {
     std::vector<ResolveRequest> requests;
     for (const auto& contract : kDefaultRuntimeContracts) {
         ResolveRequest request;
         request.capability = contract.substr(0, contract.find('/'));
         request.contracts = {contract};
-        request.scope = "local";
+        request.scope = Scope::Local;
         requests.push_back(std::move(request));
     }
     return requests;
@@ -28,7 +28,7 @@ struct RuntimeObservationResult {
     std::exception_ptr error;
 };
 
-inline RuntimeObservationResult ObserveRuntime(
+inline RuntimeObservationResult observe_runtime(
     const ResolutionClient& resolver, const std::vector<ResolveRequest>& requests,
     const BootstrapObservation& bootstrap, ipc::Deadline deadline) {
     RuntimeObservationResult result;
@@ -45,7 +45,7 @@ inline RuntimeObservationResult ObserveRuntime(
     }
     for (auto& capability : result.observation.capabilities) {
         try {
-            capability.result = resolver.Resolve(capability.request, deadline);
+            capability.result = resolver.resolve(capability.request, deadline);
         } catch (...) {
             result.error = std::current_exception();
             break;

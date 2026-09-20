@@ -85,7 +85,7 @@ func TestMissingLogSinkIsReported(t *testing.T) {
 				case <-time.After(20 * time.Millisecond):
 				}
 			}
-			want := []string{wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusResolved}
+			want := []wire.ResolutionStatus{wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusResolved}
 			for i, observation := range report.Capabilities {
 				if observation.Result == nil || observation.Result.Status != want[i] {
 					t.Fatalf("%s: %+v, want %s", contracts[i], observation.Result, want[i])

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openabstractions/abstraction-facade/go-core/resolution"
 	wire "github.com/openabstractions/abstraction-facade/go/abstraction/facade"
 )
 
@@ -59,6 +60,43 @@ func (m *Machine) Observe(ctx context.Context, requests []wire.ResolveRequest, e
 		return report, err
 	}
 	return observeQueries(ctx, report, resolver.Resolve)
+}
+
+// CallerObservation is the runtime's answer to ObserveCaller.
+type CallerObservation = wire.CallerObservation
+
+// CallerAttribute is one attribute's established proof and platform ceiling.
+type CallerAttribute = wire.CallerAttribute
+
+// ObserveCaller asks the selected runtime's resolver endpoint how its receiving
+// boundary bound this process (abstraction.facade/caller@1), under the same
+// selection and server trust as resolution. Without a caller deadline the budget
+// is two seconds. A selection or transport failure is the resolution error; the
+// runtime's answer, including a refusal outcome, is returned unchanged.
+func (m *Machine) ObserveCaller(ctx context.Context) (CallerObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return wire.CallerObservation{}, err
+	}
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+	}
+	const capability, contract = "abstraction.facade", "abstraction.facade/caller@1"
+	resolver, _, lookedFor, err := m.resolverSelection(ctx)
+	if err != nil {
+		return wire.CallerObservation{}, resolution.Unreachable(ctx, err, capability, contract, lookedFor)
+	}
+	observed, err := resolver.ObserveCaller(ctx)
+	if err != nil {
+		return wire.CallerObservation{}, resolution.Unreachable(ctx, err, capability, contract, lookedFor)
+	}
+	identified := observed.Account != "" || observed.Program != "" || observed.PID != -1 || len(observed.Attributes) != 0
+	if (observed.Outcome == wire.CallerOutcomeObserved) != identified || (observed.Outcome == wire.CallerOutcomeObserved && len(observed.Attributes) != 5) {
+		return wire.CallerObservation{}, &ResolutionError{Status: InvalidResolution, Capability: capability, Contract: contract, LookedFor: lookedFor,
+			Err: errors.New("caller observation identity does not match its outcome")}
+	}
+	return observed, nil
 }
 
 func observeQueries(ctx context.Context, report wire.RuntimeObservation, resolve func(context.Context, wire.ResolveRequest) (wire.ResolveResult, error)) (wire.RuntimeObservation, error) {

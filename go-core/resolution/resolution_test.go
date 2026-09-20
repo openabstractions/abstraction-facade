@@ -41,7 +41,7 @@ func TestResolutionCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != tc.Want {
+			if result.Status.String() != tc.Want {
 				t.Fatalf("got %s, want %s", result.Status, tc.Want)
 			}
 			if tc.Provider == "" {
@@ -61,6 +61,30 @@ func example() (Candidate, wire.ResolveRequest) {
 			Transport: "ipc", Endpoint: "opaque"}, Ready: true},
 		wire.ResolveRequest{Capability: "work", Contracts: []string{"example.work/runner@1"},
 			Guarantees: []string{"durable"}, Scope: wire.ScopeAny}
+}
+
+// A candidate that is sufficient and not ready is activated once per request
+// that reaches it; one the request cannot use, or one the caller may not see,
+// is never activated.
+func TestASufficientCandidateThatIsNotReadyIsActivated(t *testing.T) {
+	activated := map[string]int{}
+	candidate := func(provider, contract string, guarantees ...string) Candidate {
+		return Candidate{Activate: func() { activated[provider]++ }, Reference: wire.ServiceReference{Provider: provider, Capability: "example.cap",
+			Contract: contract, Scope: wire.ScopeLocal, Transport: LocalTransport, Endpoint: "e-" + provider, Guarantees: append([]string{}, guarantees...)}}
+	}
+	catalog, err := New([]Candidate{candidate("hidden", "example.cap/a@1"), candidate("other", "example.cap/b@1"), candidate("weak", "example.cap/a@1"),
+		candidate("declared", "example.cap/a@1", "example/g@1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := catalog.ForCaller(func(ref wire.ServiceReference) bool { return ref.Provider != "hidden" })
+	result, err := resolver.Resolve(wire.ResolveRequest{Capability: "example.cap", Contracts: []string{"example.cap/a@1"}, Guarantees: []string{"example/g@1"}, Scope: wire.ScopeAny})
+	if err != nil || result.Status != wire.ResolutionStatusNotReady {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if activated["declared"] != 1 || activated["hidden"]+activated["other"]+activated["weak"] != 0 {
+		t.Fatalf("activated %v", activated)
+	}
 }
 
 func TestSnapshotAndPolicyCannotMutateGuarantees(t *testing.T) {
@@ -93,7 +117,7 @@ func TestMissingPolicyDeniesAndInvalidInputIsTyped(t *testing.T) {
 	if err != nil || result.Status != wire.ResolutionStatusForbidden {
 		t.Fatalf("%+v %v", result, err)
 	}
-	request.Scope = "invented"
+	request.Scope = wire.Scope(99)
 	result, err = catalog.ForCaller(nil).Resolve(request)
 	if err != nil || result.Status != wire.ResolutionStatusInvalidRequest {
 		t.Fatalf("%+v %v", result, err)

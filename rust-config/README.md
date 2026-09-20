@@ -1,7 +1,7 @@
 # Resolved configuration editor
 
 This optional crate adds `ConfigMachine` to the pure facade `Machine<C>`.
-`resolve_config_editor(vec![], "local")` returns a fixed `Editor<Binding<C>>`
+`resolve_config_editor(vec![], abstraction_facade_native::Scope::Local)` returns a fixed `Editor<Binding<C>>`
 bound to `abstraction.config/editor@1`. Select installed native IPC through the
 separate facade-native crate, or supply another trusted Connector.
 

@@ -7,21 +7,21 @@ import (
 
 func TestInventoryRejectsInconsistentPagesWithoutPinningOwner(t *testing.T) {
 	id := api.RequestIdentity{Key: "key", HistoryEpoch: "epoch"}
-	s := api.OperationSnapshot{Receipt: *receipt(id).Receipt, State: "pending"}
+	s := api.OperationSnapshot{Receipt: *receipt(id).Receipt, State: api.WorkStatePending}
 	page := func() api.InventoryPage {
-		return api.InventoryPage{Outcome: "page", Snapshots: []api.OperationSnapshot{s}, Next: "cursor:1"}
+		return api.InventoryPage{Outcome: api.InventoryOutcomePage, Snapshots: []api.OperationSnapshot{s}, Next: "cursor:1"}
 	}
 	for name, mutate := range map[string]func(*api.InventoryPage){
-		"refusal data":    func(p *api.InventoryPage) { p.Outcome = "gap" },
+		"refusal data":    func(p *api.InventoryPage) { p.Outcome = api.InventoryOutcomeGap },
 		"no progress":     func(p *api.InventoryPage) { p.Next = "cursor:0" },
 		"complete cursor": func(p *api.InventoryPage) { p.Complete = true },
 		"duplicate":       func(p *api.InventoryPage) { p.Snapshots = append(p.Snapshots, s) },
-		"bad state":       func(p *api.InventoryPage) { p.Snapshots[0].State = "invented" },
+		"bad state":       func(p *api.InventoryPage) { p.Snapshots[0].State = api.WorkState(99) },
 		"bad identity":    func(p *api.InventoryPage) { p.Snapshots[0].Receipt.Identity.Key = "" },
 		"mixed owner": func(p *api.InventoryPage) {
 			other := s
 			other.Receipt.LogicalOwner = "other"
-			other.Receipt.OperationId = "another"
+			other.Receipt.OperationID = "another"
 			p.Snapshots = append(p.Snapshots, other)
 		},
 	} {
@@ -46,7 +46,7 @@ func TestInventoryRejectsInconsistentPagesWithoutPinningOwner(t *testing.T) {
 	if c.validate(p, "cursor:0", 1) == nil {
 		t.Fatal("owner changed")
 	}
-	if err := c.validate(api.InventoryPage{Outcome: "page", Snapshots: []api.OperationSnapshot{}, Next: "cursor:2"}, "cursor:1", 1); err != nil {
+	if err := c.validate(api.InventoryPage{Outcome: api.InventoryOutcomePage, Snapshots: []api.OperationSnapshot{}, Next: "cursor:2"}, "cursor:1", 1); err != nil {
 		t.Fatal("empty scan page", err)
 	}
 }

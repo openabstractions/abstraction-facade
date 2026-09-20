@@ -6,15 +6,16 @@ import canonical "github.com/openabstractions/abstraction-facade/go-core/go/abst
 
 // Exported data initially shares canonical values; variable reassignment is package-local.
 type Raw = canonical.Raw
-
-var ScopeNames = canonical.ScopeNames
+type Scope = canonical.Scope
 
 const ScopeAny = canonical.ScopeAny
 const ScopeLocal = canonical.ScopeLocal
 const ScopeRemote = canonical.ScopeRemote
-const ScopeUnknown = canonical.ScopeUnknown
 
-var ResolutionStatusNames = canonical.ResolutionStatusNames
+func ParseScope(word string) (Scope, bool) { return canonical.ParseScope(word) }
+func ScopeValues() []Scope                 { return canonical.ScopeValues() }
+
+type ResolutionStatus = canonical.ResolutionStatus
 
 const ResolutionStatusResolved = canonical.ResolutionStatusResolved
 const ResolutionStatusUnavailable = canonical.ResolutionStatusUnavailable
@@ -23,17 +24,174 @@ const ResolutionStatusIncompatible = canonical.ResolutionStatusIncompatible
 const ResolutionStatusUnmetRequirements = canonical.ResolutionStatusUnmetRequirements
 const ResolutionStatusNotReady = canonical.ResolutionStatusNotReady
 const ResolutionStatusInvalidRequest = canonical.ResolutionStatusInvalidRequest
-const ResolutionStatusUnknown = canonical.ResolutionStatusUnknown
 
-var BootstrapStateNames = canonical.BootstrapStateNames
+func ParseResolutionStatus(word string) (ResolutionStatus, bool) {
+	return canonical.ParseResolutionStatus(word)
+}
+func ResolutionStatusValues() []ResolutionStatus { return canonical.ResolutionStatusValues() }
+
+type BootstrapState = canonical.BootstrapState
 
 const BootstrapStateUnknown = canonical.BootstrapStateUnknown
 const BootstrapStateInstalled = canonical.BootstrapStateInstalled
 const BootstrapStateStarting = canonical.BootstrapStateStarting
 const BootstrapStateRunning = canonical.BootstrapStateRunning
 const BootstrapStateUnavailable = canonical.BootstrapStateUnavailable
-const BootstrapStateUnknownPolicy = canonical.BootstrapStateUnknownPolicy
 
+func ParseBootstrapState(word string) (BootstrapState, bool) {
+	return canonical.ParseBootstrapState(word)
+}
+func BootstrapStateValues() []BootstrapState { return canonical.BootstrapStateValues() }
+
+type CallerOutcome = canonical.CallerOutcome
+
+const CallerOutcomeObserved = canonical.CallerOutcomeObserved
+const CallerOutcomeForbidden = canonical.CallerOutcomeForbidden
+const CallerOutcomeUnavailable = canonical.CallerOutcomeUnavailable
+const CallerOutcomeInvalid = canonical.CallerOutcomeInvalid
+
+func ParseCallerOutcome(word string) (CallerOutcome, bool) { return canonical.ParseCallerOutcome(word) }
+func CallerOutcomeValues() []CallerOutcome                 { return canonical.CallerOutcomeValues() }
+
+type DescriptionOutcome = canonical.DescriptionOutcome
+
+const DescriptionOutcomeDescribed = canonical.DescriptionOutcomeDescribed
+const DescriptionOutcomeForbidden = canonical.DescriptionOutcomeForbidden
+const DescriptionOutcomeUnavailable = canonical.DescriptionOutcomeUnavailable
+const DescriptionOutcomeInvalid = canonical.DescriptionOutcomeInvalid
+
+func ParseDescriptionOutcome(word string) (DescriptionOutcome, bool) {
+	return canonical.ParseDescriptionOutcome(word)
+}
+func DescriptionOutcomeValues() []DescriptionOutcome { return canonical.DescriptionOutcomeValues() }
+
+type ServiceReadiness = canonical.ServiceReadiness
+
+const ServiceReadinessReady = canonical.ServiceReadinessReady
+const ServiceReadinessNotReady = canonical.ServiceReadinessNotReady
+const ServiceReadinessUnknown = canonical.ServiceReadinessUnknown
+
+func ParseServiceReadiness(word string) (ServiceReadiness, bool) {
+	return canonical.ParseServiceReadiness(word)
+}
+func ServiceReadinessValues() []ServiceReadiness { return canonical.ServiceReadinessValues() }
+
+type DeclarationTransport = canonical.DeclarationTransport
+
+const DeclarationTransportNative = canonical.DeclarationTransportNative
+const DeclarationTransportRemote = canonical.DeclarationTransportRemote
+
+func ParseDeclarationTransport(word string) (DeclarationTransport, bool) {
+	return canonical.ParseDeclarationTransport(word)
+}
+func DeclarationTransportValues() []DeclarationTransport {
+	return canonical.DeclarationTransportValues()
+}
+
+type Activation = canonical.Activation
+
+const ActivationOnDemand = canonical.ActivationOnDemand
+const ActivationAttach = canonical.ActivationAttach
+const ActivationRemote = canonical.ActivationRemote
+
+func ParseActivation(word string) (Activation, bool) { return canonical.ParseActivation(word) }
+func ActivationValues() []Activation                 { return canonical.ActivationValues() }
+
+type DeclarationReadiness = canonical.DeclarationReadiness
+
+const DeclarationReadinessReady = canonical.DeclarationReadinessReady
+const DeclarationReadinessIdle = canonical.DeclarationReadinessIdle
+const DeclarationReadinessStarting = canonical.DeclarationReadinessStarting
+const DeclarationReadinessRestarting = canonical.DeclarationReadinessRestarting
+const DeclarationReadinessRefused = canonical.DeclarationReadinessRefused
+const DeclarationReadinessUnreachable = canonical.DeclarationReadinessUnreachable
+const DeclarationReadinessNotReady = canonical.DeclarationReadinessNotReady
+
+func ParseDeclarationReadiness(word string) (DeclarationReadiness, bool) {
+	return canonical.ParseDeclarationReadiness(word)
+}
+func DeclarationReadinessValues() []DeclarationReadiness {
+	return canonical.DeclarationReadinessValues()
+}
+
+type DeclarationListOutcome = canonical.DeclarationListOutcome
+
+const DeclarationListOutcomePage = canonical.DeclarationListOutcomePage
+const DeclarationListOutcomeInvalid = canonical.DeclarationListOutcomeInvalid
+const DeclarationListOutcomeForbidden = canonical.DeclarationListOutcomeForbidden
+const DeclarationListOutcomeUnavailable = canonical.DeclarationListOutcomeUnavailable
+
+func ParseDeclarationListOutcome(word string) (DeclarationListOutcome, bool) {
+	return canonical.ParseDeclarationListOutcome(word)
+}
+func DeclarationListOutcomeValues() []DeclarationListOutcome {
+	return canonical.DeclarationListOutcomeValues()
+}
+
+type DeclarationEditOutcome = canonical.DeclarationEditOutcome
+
+const DeclarationEditOutcomeApplied = canonical.DeclarationEditOutcomeApplied
+const DeclarationEditOutcomeConflict = canonical.DeclarationEditOutcomeConflict
+const DeclarationEditOutcomeUnknown = canonical.DeclarationEditOutcomeUnknown
+const DeclarationEditOutcomeInvalid = canonical.DeclarationEditOutcomeInvalid
+const DeclarationEditOutcomeForbidden = canonical.DeclarationEditOutcomeForbidden
+const DeclarationEditOutcomeUnavailable = canonical.DeclarationEditOutcomeUnavailable
+
+func ParseDeclarationEditOutcome(word string) (DeclarationEditOutcome, bool) {
+	return canonical.ParseDeclarationEditOutcome(word)
+}
+func DeclarationEditOutcomeValues() []DeclarationEditOutcome {
+	return canonical.DeclarationEditOutcomeValues()
+}
+
+type ApplicationOutcome = canonical.ApplicationOutcome
+
+const ApplicationOutcomeApplied = canonical.ApplicationOutcomeApplied
+const ApplicationOutcomePage = canonical.ApplicationOutcomePage
+const ApplicationOutcomeUnknown = canonical.ApplicationOutcomeUnknown
+const ApplicationOutcomeStale = canonical.ApplicationOutcomeStale
+const ApplicationOutcomeConflict = canonical.ApplicationOutcomeConflict
+const ApplicationOutcomeInvalid = canonical.ApplicationOutcomeInvalid
+const ApplicationOutcomeForbidden = canonical.ApplicationOutcomeForbidden
+const ApplicationOutcomeUnavailable = canonical.ApplicationOutcomeUnavailable
+
+func ParseApplicationOutcome(word string) (ApplicationOutcome, bool) {
+	return canonical.ParseApplicationOutcome(word)
+}
+func ApplicationOutcomeValues() []ApplicationOutcome { return canonical.ApplicationOutcomeValues() }
+
+type ApplicationActivationOutcome = canonical.ApplicationActivationOutcome
+
+const ApplicationActivationOutcomeReady = canonical.ApplicationActivationOutcomeReady
+const ApplicationActivationOutcomeUnknown = canonical.ApplicationActivationOutcomeUnknown
+const ApplicationActivationOutcomeDisabled = canonical.ApplicationActivationOutcomeDisabled
+const ApplicationActivationOutcomeForbidden = canonical.ApplicationActivationOutcomeForbidden
+const ApplicationActivationOutcomeInvalid = canonical.ApplicationActivationOutcomeInvalid
+const ApplicationActivationOutcomeLaunchRefused = canonical.ApplicationActivationOutcomeLaunchRefused
+const ApplicationActivationOutcomeIdentityRefused = canonical.ApplicationActivationOutcomeIdentityRefused
+const ApplicationActivationOutcomeNotReady = canonical.ApplicationActivationOutcomeNotReady
+const ApplicationActivationOutcomeUnavailable = canonical.ApplicationActivationOutcomeUnavailable
+
+func ParseApplicationActivationOutcome(word string) (ApplicationActivationOutcome, bool) {
+	return canonical.ParseApplicationActivationOutcome(word)
+}
+func ApplicationActivationOutcomeValues() []ApplicationActivationOutcome {
+	return canonical.ApplicationActivationOutcomeValues()
+}
+
+type ServiceErrorCode = canonical.ServiceErrorCode
+
+const ServiceErrorCodeHandlerError = canonical.ServiceErrorCodeHandlerError
+const ServiceErrorCodeInvalidResult = canonical.ServiceErrorCodeInvalidResult
+const ServiceErrorCodeUnknownVersion = canonical.ServiceErrorCodeUnknownVersion
+const ServiceErrorCodeUnknownService = canonical.ServiceErrorCodeUnknownService
+const ServiceErrorCodeUnknownMethod = canonical.ServiceErrorCodeUnknownMethod
+const ServiceErrorCodeWrongMode = canonical.ServiceErrorCodeWrongMode
+
+func ServiceErrorCodeValues() []ServiceErrorCode { return canonical.ServiceErrorCodeValues() }
+
+var DeclarationResourceKinds = canonical.DeclarationResourceKinds
+var RegistryActions = canonical.RegistryActions
 var DefaultRuntimeContracts = canonical.DefaultRuntimeContracts
 
 type ResolveRequest = canonical.ResolveRequest
@@ -42,11 +200,26 @@ type ResolveResult = canonical.ResolveResult
 type BootstrapObservation = canonical.BootstrapObservation
 type CapabilityObservation = canonical.CapabilityObservation
 type RuntimeObservation = canonical.RuntimeObservation
-type OAResolverResolveArguments = canonical.OAResolverResolveArguments
-type OAServiceFrame = canonical.OAServiceFrame
-type OAServiceReply = canonical.OAServiceReply
-type OAServiceError = canonical.OAServiceError
-type OAResolverResolveResult = canonical.OAResolverResolveResult
+type CallerAttribute = canonical.CallerAttribute
+type CallerObservation = canonical.CallerObservation
+type ServiceState = canonical.ServiceState
+type Description = canonical.Description
+type RemoteTrust = canonical.RemoteTrust
+type Declaration = canonical.Declaration
+type DeclarationState = canonical.DeclarationState
+type DeclarationList = canonical.DeclarationList
+type DeclarationChange = canonical.DeclarationChange
+type DeclarationObservation = canonical.DeclarationObservation
+type ApplicationInterface = canonical.ApplicationInterface
+type ApplicationActivationRecipe = canonical.ApplicationActivationRecipe
+type ApplicationDescriptor = canonical.ApplicationDescriptor
+type ApplicationContext = canonical.ApplicationContext
+type ApplicationPresence = canonical.ApplicationPresence
+type ApplicationInstance = canonical.ApplicationInstance
+type ApplicationEntry = canonical.ApplicationEntry
+type ApplicationChange = canonical.ApplicationChange
+type ApplicationPage = canonical.ApplicationPage
+type ApplicationActivationResult = canonical.ApplicationActivationResult
 
 func Encode(v *ResolveResult) []byte { return canonical.Encode(v) }
 
@@ -54,14 +227,28 @@ type Refusal = canonical.Refusal
 
 func Decode(in []byte) (*ResolveResult, error) { return canonical.Decode(in) }
 
-var Refusals = canonical.Refusals
-
-func RefusalRank(word string) int { return canonical.RefusalRank(word) }
-
 type FrameWriter = canonical.FrameWriter
 type DispatchError = canonical.DispatchError
+
+func ServiceName(frame []byte) (string, error) { return canonical.ServiceName(frame) }
+
 type FrameExchanger = canonical.FrameExchanger
 type ServiceError = canonical.ServiceError
+
+const EndpointContract = canonical.EndpointContract
+
+type DescribedService = canonical.DescribedService
+
+func DescribeEndpoint(frame []byte, program, version string, services ...DescribedService) ([]byte, error) {
+	return canonical.DescribeEndpoint(frame, program, version, services...)
+}
+
+type ServedService = canonical.ServedService
+
+func ServeEndpoint(frame []byte, program, version string, services ...ServedService) ([]byte, error) {
+	return canonical.ServeEndpoint(frame, program, version, services...)
+}
+
 type Resolver = canonical.Resolver
 type ResolverTransport = canonical.ResolverTransport
 type ResolverClient = canonical.ResolverClient
@@ -69,3 +256,33 @@ type ResolverClient = canonical.ResolverClient
 func NewResolverClient(t ResolverTransport) *ResolverClient { return canonical.NewResolverClient(t) }
 
 type ResolverDispatcher = canonical.ResolverDispatcher
+type Caller = canonical.Caller
+type CallerTransport = canonical.CallerTransport
+type CallerClient = canonical.CallerClient
+
+func NewCallerClient(t CallerTransport) *CallerClient { return canonical.NewCallerClient(t) }
+
+type CallerDispatcher = canonical.CallerDispatcher
+type Endpoint = canonical.Endpoint
+type EndpointTransport = canonical.EndpointTransport
+type EndpointClient = canonical.EndpointClient
+
+func NewEndpointClient(t EndpointTransport) *EndpointClient { return canonical.NewEndpointClient(t) }
+
+type EndpointDispatcher = canonical.EndpointDispatcher
+type Registry = canonical.Registry
+type RegistryTransport = canonical.RegistryTransport
+type RegistryClient = canonical.RegistryClient
+
+func NewRegistryClient(t RegistryTransport) *RegistryClient { return canonical.NewRegistryClient(t) }
+
+type RegistryDispatcher = canonical.RegistryDispatcher
+type Applications = canonical.Applications
+type ApplicationsTransport = canonical.ApplicationsTransport
+type ApplicationsClient = canonical.ApplicationsClient
+
+func NewApplicationsClient(t ApplicationsTransport) *ApplicationsClient {
+	return canonical.NewApplicationsClient(t)
+}
+
+type ApplicationsDispatcher = canonical.ApplicationsDispatcher

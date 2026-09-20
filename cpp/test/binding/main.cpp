@@ -12,12 +12,12 @@ namespace f = abstraction::facade;
 void require(bool value) { if (!value) throw std::runtime_error("test assertion failed"); }
 f::ResolveRequest request() {
     f::ResolveRequest q; q.capability="abstraction.logging";
-    q.contracts={"abstraction.logging/sink@1"}; q.guarantees={"event-write@1"};q.scope="any";return q;
+    q.contracts={"abstraction.logging/sink@1"}; q.guarantees={"event-write@1"};q.scope=abstraction::facade::Scope::Any;return q;
 }
 f::ResolveResult resolved(const f::ResolveRequest& q, const std::string& endpoint="selected") {
-    f::ResolveResult r;r.status="resolved";
+    f::ResolveResult r;r.status=abstraction::facade::ResolutionStatus::Resolved;
     f::ServiceReference ref;ref.provider="policy-first";ref.capability=q.capability;
-    ref.contract=q.contracts[0];ref.guarantees=q.guarantees;ref.scope="local";
+    ref.contract=q.contracts[0];ref.guarantees=q.guarantees;ref.scope=abstraction::facade::Scope::Local;
     ref.transport="oa-framed-local@1";ref.endpoint=endpoint;r.reference=ref;return r;
 }
 template<class Fn> void refusal(const std::string& status, Fn fn) {
@@ -29,23 +29,23 @@ void semantics() {
     require(f::local_binding(q,good).endpoint=="selected");
     for (const auto& status : f::kResolutionStatusNames) {
         if(status=="resolved")continue;
-        f::ResolveResult denied;denied.status=status;
+        f::ResolveResult denied;denied.status=f::parse_resolution_status(status).value();
         refusal(status,[&]{f::local_binding(q,denied);});
         denied.reference=good.reference;
         refusal("invalid_resolution",[&]{f::local_binding(q,denied);});
     }
     const std::vector<std::function<void(f::ResolveResult&)>> corrupt={
-      [](auto&r){r.reference.reset();},[](auto&r){r.status="invented";},
+      [](auto&r){r.reference.reset();},[](auto&r){r.status=f::ResolutionStatus{};},
       [](auto&r){r.reference->provider="";},[](auto&r){r.reference->capability="other";},
       [](auto&r){r.reference->contract="abstraction.logging/sink@2";},
       [](auto&r){r.reference->guarantees.clear();},[](auto&r){r.reference->guarantees.push_back("event-write@1");},
       [](auto&r){r.reference->endpoint="";},[](auto&r){r.reference->endpoint=std::string("a\0b",3);},
-      [](auto&r){r.reference->scope="any";}
+      [](auto&r){r.reference->scope=abstraction::facade::Scope::Any;}
     };
     for(const auto& edit:corrupt){auto bad=good;edit(bad);refusal("invalid_resolution",[&]{f::local_binding(q,bad);});}
     auto bad=good;bad.reference->transport="https";refusal("unsupported_transport",[&]{f::local_binding(q,bad);});
-    bad=good;bad.reference->scope="remote";refusal("unsupported_transport",[&]{f::local_binding(q,bad);});
-    q.scope="local";refusal("invalid_resolution",[&]{f::local_binding(q,bad);});
+    bad=good;bad.reference->scope=abstraction::facade::Scope::Remote;require(f::local_binding(q,bad).endpoint==good.reference->endpoint);
+    q.scope=abstraction::facade::Scope::Local;refusal("invalid_resolution",[&]{f::local_binding(q,bad);});
     q=request();q.contracts.push_back(q.contracts[0]);refusal("invalid_request",[&]{f::validate_resolve_request(q);});
 }
 #ifdef _WIN32
@@ -67,7 +67,7 @@ public:
         worker_=std::thread([this,fn,exchanges]{try{for(unsigned exchange=0;exchange<exchanges;++exchange){
           if(!ConnectNamedPipe(pipe_,nullptr)&&GetLastError()!=ERROR_PIPE_CONNECTED)throw std::runtime_error("connect fixture");
           unsigned char h[4];io(pipe_,h,4,false);
-          auto n=(unsigned(h[0])<<24)|(unsigned(h[1])<<16)|(unsigned(h[2])<<8)|h[3];require(n<=f::JobsClient::MaxFrameBytes);
+          auto n=(unsigned(h[0])<<24)|(unsigned(h[1])<<16)|(unsigned(h[2])<<8)|h[3];require(n<=f::JobsClient::kMaxFrameBytes);
           std::string frame(n,'\0');io(pipe_,frame.data(),n,false);auto reply=fn(frame);
           if(!reply.empty()){n=static_cast<unsigned>(reply.size());unsigned char rh[4]={static_cast<unsigned char>(n>>24),static_cast<unsigned char>(n>>16),static_cast<unsigned char>(n>>8),static_cast<unsigned char>(n)};io(pipe_,rh,4,true);io(pipe_,reply.data(),n,true);FlushFileBuffers(pipe_);}
           DisconnectNamedPipe(pipe_);
@@ -79,8 +79,8 @@ public:
 struct OperationsFixture : f::job_api::OperationControl {
     f::job_api::ObservationResult observation;
     f::job_api::ResultRead result;
-    f::job_api::ObservationResult ObserveWork(const f::job_api::RequestIdentity&) override {return observation;}
-    f::job_api::ResultRead ReadResult(const f::job_api::RequestIdentity&,const std::int64_t&,const std::int64_t&) override {return result;}
+    f::job_api::ObservationResult observe_work(const f::job_api::RequestIdentity&) override {return observation;}
+    f::job_api::ResultRead read_result(const f::job_api::RequestIdentity&,const std::int64_t&,const std::int64_t&) override {return result;}
 };
 void job_operations() {
     namespace a=f::job_api;
@@ -88,40 +88,40 @@ void job_operations() {
     a::Receipt receipt;receipt.identity=id;receipt.logical_owner="owner";receipt.operation_id="op";
     receipt.history_retention_ms=1000;receipt.accepted_guarantees={"required@1"};
     OperationsFixture initial;
-    initial.observation.outcome="observed";
-    a::OperationSnapshot snapshot;snapshot.receipt=receipt;snapshot.state="pending";snapshot.progress.done=2;snapshot.progress.total=1;
-    a::WorkFailure failure;failure.classification="retryable";failure.message="last attempt";snapshot.failure=failure;
+    initial.observation.outcome=abstraction::job::acceptance::ObservationOutcome::Observed;
+    a::OperationSnapshot snapshot;snapshot.receipt=receipt;snapshot.state=abstraction::job::acceptance::WorkState::Pending;snapshot.progress.done=2;snapshot.progress.total=1;
+    a::WorkFailure failure;failure.classification=abstraction::job::acceptance::FailureClass::Retryable;failure.message="last attempt";snapshot.failure=failure;
     initial.observation.snapshot=snapshot;
-    initial.result.outcome="data";a::ResultChunk chunk;chunk.receipt=receipt;chunk.offset=0;chunk.total=3;chunk.data={0,10,255};chunk.eof=true;initial.result.chunk=chunk;
+    initial.result.outcome=abstraction::job::acceptance::ResultOutcome::Data;a::ResultChunk chunk;chunk.receipt=receipt;chunk.offset=0;chunk.total=3;chunk.data={0,10,255};chunk.eof=true;initial.result.chunk=chunk;
     auto probe=[&](OperationsFixture fixture,bool observation,bool reject){
       a::OperationControlDispatcher dispatch(fixture);
-      SingleFrame pipe([&](const std::string& frame){return dispatch.ExchangeFrame(frame);});
+      SingleFrame pipe([&](const std::string& frame){return dispatch.exchange_frame(frame);});
       f::JobsClient client(pipe.endpoint,5000,{"required@1"},"owner");
       bool refused=false;
-      try {if(observation){auto value=client.ObserveWork(id);require(value.snapshot.has_value());}
-           else {auto value=client.ReadResult(id,0,3);require(value.chunk&&value.chunk->data==std::vector<std::uint8_t>({0,10,255}));}}
+      try {if(observation){auto value=client.observe_work(id);require(value.snapshot.has_value());}
+           else {auto value=client.read_result(id,0,3);require(value.chunk&&value.chunk->data==std::vector<std::uint8_t>({0,10,255}));}}
       catch(const a::ServiceError&){refused=true;}
       require(refused==reject);pipe.finish();
     };
     probe(initial,true,false);probe(initial,false,false);
-    {auto fixture=initial;fixture.observation.snapshot->state="failed";fixture.observation.snapshot->failure->classification="permanent";
+    {auto fixture=initial;fixture.observation.snapshot->state=abstraction::job::acceptance::WorkState::Failed;fixture.observation.snapshot->failure->classification=abstraction::job::acceptance::FailureClass::Permanent;
      fixture.observation.snapshot->failure->cause="digest_mismatch";probe(fixture,true,false);}
-    {auto fixture=initial;fixture.observation.snapshot->state="failed";fixture.observation.snapshot->failure->classification="permanent";
+    {auto fixture=initial;fixture.observation.snapshot->state=abstraction::job::acceptance::WorkState::Failed;fixture.observation.snapshot->failure->classification=abstraction::job::acceptance::FailureClass::Permanent;
      fixture.observation.snapshot->failure->cause="a_future_cause";probe(fixture,true,false);}
     std::vector<std::function<void(OperationsFixture&)>> bad_observation={
       [](auto&f){f.observation.snapshot.reset();},
-      [](auto&f){f.observation.outcome="unknown";},
+      [](auto&f){f.observation.outcome=abstraction::job::acceptance::ObservationOutcome::Unknown;},
       [](auto&f){f.observation.snapshot->progress.done=-1;},
       [](auto&f){f.observation.snapshot->progress.total=-1;},
       [](auto&f){f.observation.snapshot->receipt.identity.key="other";},
       [](auto&f){f.observation.snapshot->receipt.logical_owner="other";},
       [](auto&f){f.observation.snapshot->receipt.accepted_guarantees.clear();},
       [](auto&f){f.observation.snapshot->receipt.identity.attempt=1;},
-      [](auto&f){f.observation.snapshot->failure->classification="permanent";}
+      [](auto&f){f.observation.snapshot->failure->classification=abstraction::job::acceptance::FailureClass::Permanent;}
     };
     for(auto edit:bad_observation){auto fixture=initial;edit(fixture);probe(fixture,true,true);}
     std::vector<std::function<void(OperationsFixture&)>> bad_chunk={
-      [](auto&f){f.result.chunk.reset();},[](auto&f){f.result.outcome="not_ready";},
+      [](auto&f){f.result.chunk.reset();},[](auto&f){f.result.outcome=abstraction::job::acceptance::ResultOutcome::NotReady;},
       [](auto&f){f.result.chunk->offset=1;},[](auto&f){f.result.chunk->total=-1;},
       [](auto&f){f.result.chunk->total=2;},[](auto&f){f.result.chunk->total=4;},
       [](auto&f){f.result.chunk->eof=false;},
@@ -134,24 +134,24 @@ void job_operations() {
     for(auto edit:bad_chunk){auto fixture=initial;edit(fixture);probe(fixture,false,true);}
     f::JobsClient unused("unused");
     for(auto bounds:std::vector<std::pair<std::int64_t,std::int64_t>>{{-1,1},{0,0},{0,65537}}){
-      bool refused=false;try{unused.ReadResult(id,bounds.first,bounds.second);}catch(const a::ServiceError&e){refused=e.code=="invalid_request";}require(refused);
+      bool refused=false;try{unused.read_result(id,bounds.first,bounds.second);}catch(const a::ServiceError&e){refused=e.code=="invalid_request";}require(refused);
     }
-    auto expired=unused.WithDeadline(abstraction::ipc::Clock::now()-std::chrono::seconds(1));
-    try{expired.ObserveWork(id);throw std::runtime_error("expired observation sent");}catch(const abstraction::ipc::FrameError&e){require(e.status==abstraction::ipc::Status::timeout);}
+    auto expired=unused.with_deadline(abstraction::ipc::Clock::now()-std::chrono::seconds(1));
+    try{expired.observe_work(id);throw std::runtime_error("expired observation sent");}catch(const abstraction::ipc::FrameError&e){require(e.status==abstraction::ipc::Status::Timeout);}
 }
 struct CopyFixture : OperationsFixture {
     unsigned calls=0;
     std::string mode;
-    f::job_api::ResultRead ReadResult(const f::job_api::RequestIdentity& id,const std::int64_t& offset,const std::int64_t& max) override {
+    f::job_api::ResultRead read_result(const f::job_api::RequestIdentity& id,const std::int64_t& offset,const std::int64_t& max) override {
         ++calls;require(max==65536);
-        f::job_api::ResultRead r;r.outcome="data";f::job_api::ResultChunk c;
+        f::job_api::ResultRead r;r.outcome=abstraction::job::acceptance::ResultOutcome::Data;f::job_api::ResultChunk c;
         c.receipt.identity=id;c.receipt.logical_owner="owner";c.receipt.operation_id="op";
         c.receipt.history_retention_ms=1000;c.offset=offset;c.total=65537;
         c.data.assign(offset?1:65536,offset?2:1);c.eof=offset!=0;
         if(mode=="total"&&offset){++c.total;c.eof=false;}
         if(mode=="operation"&&offset)c.receipt.operation_id="changed";
         if(mode=="empty"){c.data.clear();c.total=0;c.eof=true;}
-        if(mode=="not_ready"){r.outcome=mode;return r;}
+        if(mode=="not_ready"){r.outcome=abstraction::job::acceptance::ResultOutcome::NotReady;return r;}
         r.chunk=c;return r;
     }
 };
@@ -169,9 +169,9 @@ void job_copy() {
     for(const std::string mode:{"normal","total","operation","empty","not_ready","short","throw"}){
         CopyFixture fixture;fixture.mode=mode;a::OperationControlDispatcher dispatch(fixture);
         const unsigned exchanges=(mode=="normal"||mode=="total"||mode=="operation")?2:1;
-        SingleFrame pipe([&](const std::string& frame){return dispatch.ExchangeFrame(frame);},exchanges);
+        SingleFrame pipe([&](const std::string& frame){return dispatch.exchange_frame(frame);},exchanges);
         f::JobsClient client(pipe.endpoint,5000,{},"owner");CopyBuffer buffer;buffer.mode=mode;std::ostream output(&buffer);
-        auto copied=client.CopyResult({"key","epoch"},output);pipe.finish();require(fixture.calls==exchanges);
+        auto copied=client.copy_result({"key","epoch"},output);pipe.finish();require(fixture.calls==exchanges);
         if(mode=="normal"){require(!copied.error&&copied.confirmed==65537&&buffer.str().size()==65537&&buffer.str().back()==2);}
         else if(mode=="empty"){require(!copied.error&&copied.confirmed==0&&buffer.str().empty());}
         else {
@@ -187,40 +187,40 @@ void job_copy() {
 struct ResolverFixture:f::Resolver {
     std::string capability,contract,endpoint;
     bool defaults=false;
-    f::ResolveResult Resolve(const f::ResolveRequest& q)override {
+    f::ResolveResult resolve(const f::ResolveRequest& q)override {
         require(q.capability==capability&&q.contracts==std::vector<std::string>{contract});
         require(defaults ? (q.guarantees.empty()&&q.scope=="any") : (q.guarantees==std::vector<std::string>{"required@1"}&&q.scope=="local"));
         return resolved(q,endpoint);
     }
 };
 struct JobFixture:f::job_api::RecoverableAcceptance {
- f::job_api::HistoryWindow GetHistoryWindow()override{f::job_api::HistoryWindow h;h.logical_owner="owner";h.history_epoch="epoch";h.minimum_retention_ms=60000;return h;}
- f::job_api::AcceptanceResult Submit(const f::job_api::Submission& s)override{
+ f::job_api::HistoryWindow get_history_window()override{f::job_api::HistoryWindow h;h.logical_owner="owner";h.history_epoch="epoch";h.minimum_retention_ms=60000;return h;}
+ f::job_api::AcceptanceResult submit(const f::job_api::Submission& s)override{
    require(s.identity.key=="explicit-key"&&s.spec.size()>750000);
    require(f::resolution_detail::contains(s.required_guarantees,"required@1"));
-   f::job_api::AcceptanceResult r;r.outcome="accepted";f::job_api::Receipt receipt;
+   f::job_api::AcceptanceResult r;r.outcome=abstraction::job::acceptance::AcceptanceOutcome::Accepted;f::job_api::Receipt receipt;
    receipt.identity=s.identity;receipt.logical_owner="owner";receipt.operation_id="original-op";
    receipt.accepted_guarantees=s.required_guarantees;receipt.history_retention_ms=60000;r.receipt=receipt;return r;
  }
- f::job_api::AcceptanceResult Reconcile(const f::job_api::RequestIdentity&)override{f::job_api::AcceptanceResult r;r.outcome="unknown";return r;}
- f::job_api::CancellationResult CancelWork(const f::job_api::RequestIdentity&)override{f::job_api::CancellationResult r;r.outcome="requested";return r;}
+ f::job_api::AcceptanceResult reconcile(const f::job_api::RequestIdentity&)override{f::job_api::AcceptanceResult r;r.outcome=abstraction::job::acceptance::AcceptanceOutcome::Unknown;return r;}
+ f::job_api::CancellationResult cancel_work(const f::job_api::RequestIdentity&)override{f::job_api::CancellationResult r;r.outcome=abstraction::job::acceptance::CancellationOutcome::Requested;return r;}
 };
 void weak_job_receipts() {
  for(bool reconcile:{false,true}) {
   SingleFrame selected([&](const std::string& frame){
-   auto v=f::job_api::service_payload(frame);f::job_api::AcceptanceResult result;result.outcome="accepted";
+   auto v=f::job_api::detail::service_payload(frame);f::job_api::AcceptanceResult result;result.outcome=abstraction::job::acceptance::AcceptanceOutcome::Accepted;
    f::job_api::Receipt r;r.identity.key="key";r.identity.history_epoch="epoch";r.logical_owner="owner";r.operation_id="op";r.history_retention_ms=60000;result.receipt=r;
    std::string raw;
-   if(reconcile){f::job_api::OARecoverableAcceptanceReconcileResult p;p.value=result;f::job_api::enc_oarecoverableacceptancereconcileresult(raw,p,1);}
-   else {f::job_api::OARecoverableAcceptanceSubmitResult p;p.value=result;f::job_api::enc_oarecoverableacceptancesubmitresult(raw,p,1);}
-   return f::job_api::service_reply(v,raw,nullptr);
+   if(reconcile){f::job_api::detail::OARecoverableAcceptanceReconcileResult p;p.value=result;f::job_api::detail::enc_oa_recoverable_acceptance_reconcile_result(raw,p,1);}
+   else {f::job_api::detail::OARecoverableAcceptanceSubmitResult p;p.value=result;f::job_api::detail::enc_oa_recoverable_acceptance_submit_result(raw,p,1);}
+   return f::job_api::detail::service_reply(v,raw,nullptr);
   });
   ResolverFixture catalogue;catalogue.capability="abstraction.job";catalogue.contract="abstraction.job/acceptance@1";catalogue.endpoint=selected.endpoint;
-  f::ResolverDispatcher dispatcher(catalogue);SingleFrame bootstrap([&](const std::string& frame){return dispatcher.ExchangeFrame(frame);});
-  auto jobs=f::Machine(bootstrap.endpoint).ResolveJobs({"required@1"},"local");
+  f::ResolverDispatcher dispatcher(catalogue);SingleFrame bootstrap([&](const std::string& frame){return dispatcher.exchange_frame(frame);});
+  auto jobs=f::Machine(bootstrap.endpoint).resolve_jobs({"required@1"},abstraction::facade::Scope::Local);
   bool rejected=false;
-  try {if(reconcile){f::job_api::RequestIdentity id;id.key="key";id.history_epoch="epoch";jobs.Reconcile(id);}
-    else {f::job_api::Submission value;value.identity.key="key";value.identity.history_epoch="epoch";value.kind="test";jobs.Submit(value);}}
+  try {if(reconcile){f::job_api::RequestIdentity id;id.key="key";id.history_epoch="epoch";jobs.reconcile(id);}
+    else {f::job_api::Submission value;value.identity.key="key";value.identity.history_epoch="epoch";value.kind="test";jobs.submit(value);}}
   catch(const f::job_api::ServiceError&e){rejected=e.code=="invalid_acceptance";}
   bootstrap.finish();selected.finish();
   if(!rejected)throw std::runtime_error(reconcile?"Reconcile accepted weaker binding receipt":"Submit accepted weaker binding receipt");
@@ -229,38 +229,50 @@ void weak_job_receipts() {
 void job_owner_consistency() {
  for(bool recovered:{false,true}) {
   SingleFrame selected([&](const std::string& frame){
-   auto v=f::job_api::service_payload(frame);std::string raw;
-   if(v.method=="GetHistoryWindow") {f::job_api::OARecoverableAcceptanceGetHistoryWindowResult p;p.value.logical_owner="original-owner";p.value.history_epoch="epoch";p.value.minimum_retention_ms=60000;f::job_api::enc_oarecoverableacceptancegethistorywindowresult(raw,p,1);}
-   else {f::job_api::OARecoverableAcceptanceReconcileResult p;p.value.outcome="accepted";f::job_api::Receipt r;r.identity.key="key";r.identity.history_epoch="epoch";r.logical_owner="different-owner";r.operation_id="op";r.history_retention_ms=60000;p.value.receipt=r;f::job_api::enc_oarecoverableacceptancereconcileresult(raw,p,1);}
-   return f::job_api::service_reply(v,raw,nullptr);
+   auto v=f::job_api::detail::service_payload(frame);std::string raw;
+   if(v.method=="GetHistoryWindow") {f::job_api::detail::OARecoverableAcceptanceGetHistoryWindowResult p;p.value.logical_owner="original-owner";p.value.history_epoch="epoch";p.value.minimum_retention_ms=60000;f::job_api::detail::enc_oa_recoverable_acceptance_get_history_window_result(raw,p,1);}
+   else {f::job_api::detail::OARecoverableAcceptanceReconcileResult p;p.value.outcome=abstraction::job::acceptance::AcceptanceOutcome::Accepted;f::job_api::Receipt r;r.identity.key="key";r.identity.history_epoch="epoch";r.logical_owner="different-owner";r.operation_id="op";r.history_retention_ms=60000;p.value.receipt=r;f::job_api::detail::enc_oa_recoverable_acceptance_reconcile_result(raw,p,1);}
+   return f::job_api::detail::service_reply(v,raw,nullptr);
   },recovered?1:2);
   f::JobsClient jobs(selected.endpoint,5000,{},recovered?"original-owner":"");
   auto copied=jobs;
-  if(!recovered)jobs.GetHistoryWindow();
+  if(!recovered)jobs.get_history_window();
   bool rejected=false;f::job_api::RequestIdentity id;id.key="key";id.history_epoch="epoch";
-  try{copied.Reconcile(id);}catch(const f::job_api::ServiceError&e){rejected=e.code=="invalid_acceptance";}
+  try{copied.reconcile(id);}catch(const f::job_api::ServiceError&e){rejected=e.code=="invalid_acceptance";}
   selected.finish();if(!rejected)throw std::runtime_error("accepted changed logical owner");
  }
 }
 void job_binding() {
- static_assert(f::JobsClient::MaxFrameBytes==2097152,"job provider frame budget changed");
+ static_assert(f::JobsClient::kMaxFrameBytes==2097152,"job provider frame budget changed");
  JobFixture provider;f::job_api::RecoverableAcceptanceDispatcher dispatcher(provider);
- SingleFrame selected([&](const std::string& frame){require(frame.size()>1048576);return dispatcher.ExchangeFrame(frame);});
+ SingleFrame selected([&](const std::string& frame){require(frame.size()>1048576);return dispatcher.exchange_frame(frame);});
  ResolverFixture catalogue;catalogue.capability="abstraction.job";catalogue.contract="abstraction.job/acceptance@1";catalogue.endpoint=selected.endpoint;
  f::ResolverDispatcher resolver(catalogue);
- SingleFrame bootstrap([&](const std::string& frame){return resolver.ExchangeFrame(frame);});
- auto client=f::Machine(bootstrap.endpoint).ResolveJobs({"required@1"},"local");
+ SingleFrame bootstrap([&](const std::string& frame){return resolver.exchange_frame(frame);});
+ auto client=f::Machine(bootstrap.endpoint).resolve_jobs({"required@1"},abstraction::facade::Scope::Local);
  f::job_api::Submission submission;submission.identity.key="explicit-key";submission.identity.history_epoch="epoch";
  submission.kind="download";submission.spec.assign(800000,'x');submission.required_guarantees={};
- auto result=client.Submit(submission);require(result.receipt&&result.receipt->operation_id=="original-op");require(submission.required_guarantees.empty());
+ auto result=client.submit(submission);require(result.receipt&&result.receipt->operation_id=="original-op");require(submission.required_guarantees.empty());
  bootstrap.finish();selected.finish();
+ // The resolved binding exposes the endpoint a caller persists for restart recovery.
+ require(client.endpoint()==selected.endpoint);
+ require(client.with_deadline(abstraction::ipc::Clock::now()+std::chrono::seconds(1)).endpoint()==selected.endpoint);
+ require(f::JobsClient(client.endpoint(),5000,{"required@1"},"owner").endpoint()==selected.endpoint);
+ {
+  const std::string absent=R"(\\.\pipe\oa-absent-jobs-)"+std::to_string(GetCurrentProcessId());
+  bool named=false;
+  try{f::JobsClient(absent,1000).get_history_window();}
+  catch(const abstraction::ipc::FrameError&e){const std::string what=e.what();named=what.find("connect "+absent+": no runtime accepted the connection")!=std::string::npos;}
+  if(!named)throw std::runtime_error("absent job endpoint was not named");
+ }
  for(const auto& status:std::vector<std::string>{"forbidden","unavailable","remote","wrong-transport"}) {
-  SingleFrame service([&](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;
-    f::ResolveRequest q;q.capability="abstraction.job";q.contracts={"abstraction.job/acceptance@1"};q.scope="any";
-    if(status=="remote"||status=="wrong-transport"){payload.value=resolved(q);if(status=="remote")payload.value.reference->scope="remote";else payload.value.reference->transport="https";}
-    else payload.value.status=status;
-    std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
-  refusal(status=="remote"||status=="wrong-transport"?"unsupported_transport":status,[&]{f::Machine(service.endpoint).ResolveJobs();});service.finish();
+  SingleFrame service([&](const std::string& frame){auto v=f::detail::service_payload(frame);f::detail::OAResolverResolveResult payload;
+    f::ResolveRequest q;q.capability="abstraction.job";q.contracts={"abstraction.job/acceptance@1"};q.scope=abstraction::facade::Scope::Any;
+    if(status=="remote"||status=="wrong-transport"){payload.value=resolved(q);if(status=="remote")payload.value.reference->scope=f::Scope::Remote;else payload.value.reference->transport="https";}
+    else payload.value.status=f::parse_resolution_status(status).value();
+    std::string raw;f::detail::enc_oa_resolver_resolve_result(raw,payload,1);return f::detail::service_reply(v,raw,nullptr);});
+  if(status==abstraction::facade::Scope::Remote) { f::Machine(service.endpoint).resolve_jobs(); }
+  else refusal(status=="wrong-transport"?"unsupported_transport":status,[&]{f::Machine(service.endpoint).resolve_jobs();});service.finish();
  }
 }
 void selected_endpoints(bool defaults=false) {
@@ -269,42 +281,42 @@ void selected_endpoints(bool defaults=false) {
         SingleFrame selected([&](const std::string& frame){
           // Decode through the capability's own generated dispatcher/client format.
           if(cap=="logging") {
-            auto v=abstraction::logging::service_payload(frame);require(v.service=="abstraction.logging/sink@1"&&v.method=="Write");
+            auto v=abstraction::logging::detail::service_payload(frame);require(v.service=="abstraction.logging/sink@1"&&v.method=="Write");
             method=v.method;return std::string{};
           }
           if(cap=="config") {
-            auto v=abstraction::config::service_payload(frame);require(v.service=="abstraction.config/reader@1"&&v.method=="Read");method=v.method;
-            abstraction::config::OAConfigReaderReadResult payload;payload.value.stamp="selected-config";
-            std::string raw;abstraction::config::enc_oaconfigreaderreadresult(raw,payload,1);
-            return abstraction::config::service_reply(v,raw,nullptr);
+            auto v=abstraction::config::detail::service_payload(frame);require(v.service=="abstraction.config/reader@1"&&v.method=="Read");method=v.method;
+            abstraction::config::detail::OAConfigReaderReadResult payload;payload.value.stamp="selected-config";
+            std::string raw;abstraction::config::detail::enc_oa_config_reader_read_result(raw,payload,1);
+            return abstraction::config::detail::service_reply(v,raw,nullptr);
           }
-          auto v=abstraction::router::service_payload(frame);require(v.service=="abstraction.router/router@1"&&v.method=="Hosts");method=v.method;
-          abstraction::router::OARouterHostsResult payload;payload.value.doubled={"selected-router"};
-          std::string raw;abstraction::router::enc_oarouterhostsresult(raw,payload,1);
-          return abstraction::router::service_reply(v,raw,nullptr);
+          auto v=abstraction::router::detail::service_payload(frame);require(v.service=="abstraction.router/router@1"&&v.method=="Hosts");method=v.method;
+          abstraction::router::detail::OARouterHostsResult payload;payload.value.doubled={"selected-router"};
+          std::string raw;abstraction::router::detail::enc_oa_router_hosts_result(raw,payload,1);
+          return abstraction::router::detail::service_reply(v,raw,nullptr);
         });
         ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
         provider.defaults=defaults;
         provider.contract=provider.capability+(cap=="logging"?"/sink@1":cap=="config"?"/reader@1":"/router@1");
         f::ResolverDispatcher dispatcher(provider);
-        SingleFrame bootstrap([&](const std::string& frame){return dispatcher.ExchangeFrame(frame);});
+        SingleFrame bootstrap([&](const std::string& frame){return dispatcher.exchange_frame(frame);});
         f::Machine machine(bootstrap.endpoint);
-        if(cap=="logging")(defaults?machine.Log():machine.ResolveLog({"required@1"},"local")).Log(1,"selected logging");
-        if(cap=="config")require((defaults?machine.Config():machine.ResolveConfig({"required@1"},"local")).Read().stamp=="selected-config");
-        if(cap=="router")require((defaults?machine.Router():machine.ResolveRouter({"required@1"},"local")).Hosts().doubled==std::vector<std::string>{"selected-router"});
+        if(cap=="logging")(defaults?machine.log():machine.resolve_log({"required@1"},abstraction::facade::Scope::Local)).log(1,"selected logging");
+        if(cap=="config")require((defaults?machine.config():machine.resolve_config({"required@1"},abstraction::facade::Scope::Local)).read().stamp=="selected-config");
+        if(cap=="router")require((defaults?machine.router():machine.resolve_router({"required@1"},abstraction::facade::Scope::Local)).hosts().doubled==std::vector<std::string>{"selected-router"});
         bootstrap.finish();selected.finish();require(!method.empty());
     }
     for(const std::string cap:{"logging","config","router"})
     for(const std::string status:{"forbidden","not_ready","unavailable"}) {
-      SingleFrame bootstrap([&](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;payload.value.status=status;std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
-      refusal(status,[&]{f::Machine m(bootstrap.endpoint);if(cap=="logging")m.Log();else if(cap=="config")m.Config();else m.Router();});bootstrap.finish();
+      SingleFrame bootstrap([&](const std::string& frame){auto v=f::detail::service_payload(frame);f::detail::OAResolverResolveResult payload;payload.value.status=f::parse_resolution_status(status).value();std::string raw;f::detail::enc_oa_resolver_resolve_result(raw,payload,1);return f::detail::service_reply(v,raw,nullptr);});
+      refusal(status,[&]{f::Machine m(bootstrap.endpoint);if(cap=="logging")m.log();else if(cap=="config")m.config();else m.router();});bootstrap.finish();
     }
-    SingleFrame forged([](const std::string& frame){auto v=f::service_payload(frame);f::OAResolverResolveResult payload;payload.value=resolved(request());payload.value.reference->contract="wrong-contract";std::string raw;f::enc_oaresolverresolveresult(raw,payload,1);return f::service_reply(v,raw,nullptr);});
-    refusal("invalid_resolution",[&]{f::Machine(forged.endpoint).ResolveLog();});forged.finish();
+    SingleFrame forged([](const std::string& frame){auto v=f::detail::service_payload(frame);f::detail::OAResolverResolveResult payload;payload.value=resolved(request());payload.value.reference->contract="wrong-contract";std::string raw;f::detail::enc_oa_resolver_resolve_result(raw,payload,1);return f::detail::service_reply(v,raw,nullptr);});
+    refusal("invalid_resolution",[&]{f::Machine(forged.endpoint).resolve_log();});forged.finish();
 }
 template<class Fn> void timeout(Fn fn) {
     try { fn(); } catch(const abstraction::ipc::FrameError& e) {
-        require(e.status==abstraction::ipc::Status::timeout);return;
+        require(e.status==abstraction::ipc::Status::Timeout);return;
     }
     throw std::runtime_error("expected shared call budget exhaustion");
 }
@@ -313,49 +325,49 @@ void job_call_budget() {
     struct Admission : f::job_api::RecoverableAcceptance {
         unsigned submits=0,reconciles=0,cancellations=0;
         f::job_api::AcceptanceResult accepted;
-        f::job_api::HistoryWindow GetHistoryWindow()override {
+        f::job_api::HistoryWindow get_history_window()override {
             f::job_api::HistoryWindow h;h.logical_owner="fixed-owner";h.history_epoch="epoch";h.minimum_retention_ms=60000;return h;
         }
-        f::job_api::AcceptanceResult Submit(const f::job_api::Submission& s)override {
+        f::job_api::AcceptanceResult submit(const f::job_api::Submission& s)override {
             ++submits;require(submits==1&&s.identity.key=="caller-key"&&s.identity.history_epoch=="epoch");
             require(s.required_guarantees==std::vector<std::string>{"required@1"});
-            accepted.outcome="accepted";f::job_api::Receipt r;r.identity=s.identity;r.logical_owner="fixed-owner";
+            accepted.outcome=abstraction::job::acceptance::AcceptanceOutcome::Accepted;f::job_api::Receipt r;r.identity=s.identity;r.logical_owner="fixed-owner";
             r.operation_id="only-operation";r.accepted_guarantees=s.required_guarantees;r.history_retention_ms=60000;
             accepted.receipt=r;return accepted;
         }
-        f::job_api::AcceptanceResult Reconcile(const f::job_api::RequestIdentity& id)override {
+        f::job_api::AcceptanceResult reconcile(const f::job_api::RequestIdentity& id)override {
             ++reconciles;require(id.key==accepted.receipt->identity.key&&id.history_epoch==accepted.receipt->identity.history_epoch);
             auto result=accepted;
             if(reconciles==2)result.receipt->logical_owner="other-owner";
             if(reconciles==3)result.receipt->accepted_guarantees.clear();
             return result;
         }
-        f::job_api::CancellationResult CancelWork(const f::job_api::RequestIdentity&)override {
+        f::job_api::CancellationResult cancel_work(const f::job_api::RequestIdentity&)override {
             ++cancellations;throw std::runtime_error("waiting expiry must not cancel work");
         }
     } admission;
     f::job_api::RecoverableAcceptanceDispatcher dispatcher(admission);
     SingleFrame selected([&](const std::string& frame){
-        const auto method=f::job_api::service_payload(frame).method;
-        auto reply=dispatcher.ExchangeFrame(frame); // Acceptance precedes delayed/lost reply.
+        const auto method=f::job_api::detail::service_payload(frame).method;
+        auto reply=dispatcher.exchange_frame(frame); // Acceptance precedes delayed/lost reply.
         if(method=="Submit"){std::this_thread::sleep_for(500ms);return std::string{};}
         return reply;
     },5);
     ResolverFixture provider;provider.capability="abstraction.job";provider.contract="abstraction.job/acceptance@1";provider.endpoint=selected.endpoint;
     f::ResolverDispatcher resolver(provider);
-    SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return resolver.ExchangeFrame(frame);});
-    auto jobs=f::Machine(bootstrap.endpoint).ResolveJobs({"required@1"},"local",abstraction::ipc::Clock::now()+800ms);
-    auto history=jobs.GetHistoryWindow();
+    SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return resolver.exchange_frame(frame);});
+    auto jobs=f::Machine(bootstrap.endpoint).resolve_jobs({"required@1"},abstraction::facade::Scope::Local,abstraction::ipc::Clock::now()+800ms);
+    auto history=jobs.get_history_window();
     f::job_api::Submission submission;submission.identity.key="caller-key";submission.identity.history_epoch=history.history_epoch;submission.kind="test";
-    timeout([&]{jobs.Submit(submission);});
+    timeout([&]{jobs.submit(submission);});
     require(submission.required_guarantees.empty());
-    auto recovery=jobs.WithDeadline(abstraction::ipc::Clock::now()+2s);
-    const auto result=recovery.Reconcile(submission.identity);
+    auto recovery=jobs.with_deadline(abstraction::ipc::Clock::now()+2s);
+    const auto result=recovery.reconcile(submission.identity);
     require(result.outcome=="accepted"&&result.receipt->operation_id=="only-operation"&&result.receipt->logical_owner==history.logical_owner);
-    timeout([&]{jobs.Reconcile(submission.identity);}); // Original scope stays expired.
+    timeout([&]{jobs.reconcile(submission.identity);}); // Original scope stays expired.
     for(unsigned i=0;i<2;++i) {
         bool refused=false;
-        try{recovery.WithDeadline(abstraction::ipc::Clock::now()+2s).Reconcile(submission.identity);}
+        try{recovery.with_deadline(abstraction::ipc::Clock::now()+2s).reconcile(submission.identity);}
         catch(const f::job_api::ServiceError&e){refused=e.code=="invalid_acceptance";}
         require(refused);
     }
@@ -371,26 +383,26 @@ void call_budgets() {
                 std::this_thread::sleep_for(500ms);
                 if(cap=="logging")return std::string{};
                 if(cap=="router") {
-                    auto v=abstraction::router::service_payload(frame);
-                    abstraction::router::OARouterHostsResult payload;payload.value.doubled={"budget-router"};
-                    std::string raw;abstraction::router::enc_oarouterhostsresult(raw,payload,1);
-                    return abstraction::router::service_reply(v,raw,nullptr);
+                    auto v=abstraction::router::detail::service_payload(frame);
+                    abstraction::router::detail::OARouterHostsResult payload;payload.value.doubled={"budget-router"};
+                    std::string raw;abstraction::router::detail::enc_oa_router_hosts_result(raw,payload,1);
+                    return abstraction::router::detail::service_reply(v,raw,nullptr);
                 }
-                auto v=abstraction::config::service_payload(frame);
-                abstraction::config::OAConfigReaderReadResult payload;payload.value.stamp="budget-config";
-                std::string raw;abstraction::config::enc_oaconfigreaderreadresult(raw,payload,1);
-                return abstraction::config::service_reply(v,raw,nullptr);
+                auto v=abstraction::config::detail::service_payload(frame);
+                abstraction::config::detail::OAConfigReaderReadResult payload;payload.value.stamp="budget-config";
+                std::string raw;abstraction::config::detail::enc_oa_config_reader_read_result(raw,payload,1);
+                return abstraction::config::detail::service_reply(v,raw,nullptr);
             });
             ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
             provider.contract=provider.capability+(cap=="logging"?"/sink@1":cap=="config"?"/reader@1":"/router@1");
             f::ResolverDispatcher dispatcher(provider);
-            SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return dispatcher.ExchangeFrame(frame);});
+            SingleFrame bootstrap([&](const std::string& frame){std::this_thread::sleep_for(500ms);return dispatcher.exchange_frame(frame);});
             f::Machine machine(bootstrap.endpoint);
             const auto deadline=abstraction::ipc::Clock::now()+(limited?800ms:2000ms);
             auto invoke=[&]{
-                if(cap=="logging")machine.ResolveLog({"required@1"},"local",deadline).Log(1,"budget");
-                else if(cap=="router")require(machine.ResolveRouter({"required@1"},"local",deadline).Hosts().doubled==std::vector<std::string>{"budget-router"});
-                else require(machine.ResolveConfig({"required@1"},"local",deadline).ReadWithOverrides({}).stamp=="budget-config");
+                if(cap=="logging")machine.resolve_log({"required@1"},abstraction::facade::Scope::Local,deadline).log(1,"budget");
+                else if(cap=="router")require(machine.resolve_router({"required@1"},abstraction::facade::Scope::Local,deadline).hosts().doubled==std::vector<std::string>{"budget-router"});
+                else require(machine.resolve_config({"required@1"},abstraction::facade::Scope::Local,deadline).read_with_overrides({}).stamp=="budget-config");
             };
             if(limited)timeout(invoke);else invoke();
             bootstrap.finish();
@@ -400,24 +412,24 @@ void call_budgets() {
         SingleFrame selected([&](const std::string& frame){
             if(cap=="logging")return std::string{};
             if(cap=="router") {
-                auto v=abstraction::router::service_payload(frame);
-                abstraction::router::OARouterHostsResult payload;payload.value.doubled={"budget-router"};
-                std::string raw;abstraction::router::enc_oarouterhostsresult(raw,payload,1);
-                return abstraction::router::service_reply(v,raw,nullptr);
+                auto v=abstraction::router::detail::service_payload(frame);
+                abstraction::router::detail::OARouterHostsResult payload;payload.value.doubled={"budget-router"};
+                std::string raw;abstraction::router::detail::enc_oa_router_hosts_result(raw,payload,1);
+                return abstraction::router::detail::service_reply(v,raw,nullptr);
             }
-            auto v=abstraction::config::service_payload(frame);
-            abstraction::config::OAConfigReaderReadResult payload;payload.value.stamp="reusable";
-            std::string raw;abstraction::config::enc_oaconfigreaderreadresult(raw,payload,1);
-            return abstraction::config::service_reply(v,raw,nullptr);
+            auto v=abstraction::config::detail::service_payload(frame);
+            abstraction::config::detail::OAConfigReaderReadResult payload;payload.value.stamp="reusable";
+            std::string raw;abstraction::config::detail::enc_oa_config_reader_read_result(raw,payload,1);
+            return abstraction::config::detail::service_reply(v,raw,nullptr);
         },2);
         ResolverFixture provider;provider.capability="abstraction."+cap;provider.endpoint=selected.endpoint;
         provider.contract=provider.capability+(cap=="logging"?"/sink@1":cap=="config"?"/reader@1":"/router@1");
         f::ResolverDispatcher dispatcher(provider);
-        SingleFrame bootstrap([&](const std::string& frame){return dispatcher.ExchangeFrame(frame);});
+        SingleFrame bootstrap([&](const std::string& frame){return dispatcher.exchange_frame(frame);});
         f::Machine machine(bootstrap.endpoint);
-        if(cap=="logging"){auto logger=machine.ResolveLog({"required@1"},"local");logger.Log(1,"one");logger.Log(1,"two");}
-        else if(cap=="router"){auto router=machine.ResolveRouter({"required@1"},"local");require(router.Hosts().doubled==std::vector<std::string>{"budget-router"});require(router.Hosts().doubled==std::vector<std::string>{"budget-router"});}
-        else {auto config=machine.ResolveConfig({"required@1"},"local");require(config.ReadWithOverrides({}).stamp=="reusable");require(config.ReadWithOverrides({}).stamp=="reusable");}
+        if(cap=="logging"){auto logger=machine.resolve_log({"required@1"},abstraction::facade::Scope::Local);logger.log(1,"one");logger.log(1,"two");}
+        else if(cap=="router"){auto router=machine.resolve_router({"required@1"},abstraction::facade::Scope::Local);require(router.hosts().doubled==std::vector<std::string>{"budget-router"});require(router.hosts().doubled==std::vector<std::string>{"budget-router"});}
+        else {auto config=machine.resolve_config({"required@1"},abstraction::facade::Scope::Local);require(config.read_with_overrides({}).stamp=="reusable");require(config.read_with_overrides({}).stamp=="reusable");}
         bootstrap.finish();selected.finish();
     }
 }
@@ -429,27 +441,27 @@ void call_budgets() {
 int main(int argc,char**argv){try{
  if(argc==2&&std::string(argv[1])=="--default-runtime-endpoint") {std::cout<<abstraction::facade::runtime_endpoint()<<"\n";return 0;}
  if(argc==5&&std::string(argv[1])=="--runtime"&&std::string(argv[3])=="--jobs") {
-   auto jobs=f::Machine(argv[2]).ResolveJobs({"abstraction.job/reconciliation@1"});
-   auto history=jobs.GetHistoryWindow();
+   auto jobs=f::Machine(argv[2]).resolve_jobs({"abstraction.job/reconciliation@1"});
+   auto history=jobs.get_history_window();
    f::job_api::Submission submission;submission.identity.key=argv[4];submission.identity.history_epoch=history.history_epoch;
    submission.kind="download";const std::string spec=R"({"source":"test"})";
    submission.spec.assign(spec.begin(),spec.end());submission.required_guarantees={"abstraction.job/reconciliation@1"};
-   const auto accepted=jobs.Submit(submission);require(accepted.outcome=="accepted"&&accepted.receipt&&accepted.receipt->logical_owner==history.logical_owner);
-   const auto recovered=jobs.Reconcile(submission.identity);require(recovered.outcome=="accepted"&&recovered.receipt);
+   const auto accepted=jobs.submit(submission);require(accepted.outcome=="accepted"&&accepted.receipt&&accepted.receipt->logical_owner==history.logical_owner);
+   const auto recovered=jobs.reconcile(submission.identity);require(recovered.outcome=="accepted"&&recovered.receipt);
    require(recovered.receipt->operation_id==accepted.receipt->operation_id&&recovered.receipt->logical_owner==accepted.receipt->logical_owner);
    require(recovered.receipt->accepted_guarantees==accepted.receipt->accepted_guarantees);
    std::cout<<f::job_api::encode(recovered);return 0;
  }
  if(argc==3&&std::string(argv[1])=="--observe") {
-   auto result=f::Machine(argv[2]).Observe();
-   std::string raw;f::enc_runtimeobservation(raw,result.observation,0);std::cout<<raw<<"\n";
+   auto result=f::Machine(argv[2]).observe();
+   std::string raw;f::detail::enc_runtime_observation(raw,result.observation,0);std::cout<<raw<<"\n";
    if(result.error)std::rethrow_exception(result.error);
    return 0;
  }
  if(argc==3&&std::string(argv[1])=="--runtime") {
    f::Machine machine(argv[2]);
-   machine.ResolveLog().Log(1,"cpp-resolved-log");
-   machine.ResolveConfig().ReadWithOverrides({});
+   machine.resolve_log().log(1,"cpp-resolved-log");
+   machine.resolve_config().read_with_overrides({});
    std::cout<<"C++ runtime resolution passed\n";return 0;
  }
  if(argc!=1)throw std::runtime_error("usage: facade_binding_consumer [--default-runtime-endpoint | --runtime endpoint [--jobs caller-key]]");

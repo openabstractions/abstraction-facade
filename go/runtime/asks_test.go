@@ -36,10 +36,10 @@ func TestResolvedQuestionsKeepAdmissionAndAnswer(t *testing.T) {
 			t.Fatal(err)
 		}
 		first, err := c.AskContext(ctx, question)
-		if err != nil || first.Outcome != "pending" || first.Answer == nil || first.Answer.Yes {
+		if err != nil || first.Outcome.String() != "pending" || first.Answer == nil || first.Answer.Yes {
 			t.Fatalf("admission %+v %v", first, err)
 		}
-		original = first.Answer.Id
+		original = first.Answer.ID
 		short, cancelWait := context.WithTimeout(ctx, 20*time.Millisecond)
 		_, err = c.ObserveContext(short, question.RequestKey, 1000)
 		cancelWait()
@@ -47,13 +47,13 @@ func TestResolvedQuestionsKeepAdmissionAndAnswer(t *testing.T) {
 			t.Fatal("waiting budget ignored")
 		}
 		replay, err := c.AskContext(ctx, question)
-		if err != nil || replay.Answer == nil || replay.Answer.Id != original || replay.Outcome != "pending" {
+		if err != nil || replay.Answer == nil || replay.Answer.ID != original || replay.Outcome.String() != "pending" {
 			t.Fatalf("replay %+v %v", replay, err)
 		}
 		conflicting := question
 		conflicting.Slots = map[string]string{"host": "different.example"}
 		conflict, err := c.AskContext(ctx, conflicting)
-		if err != nil || conflict.Outcome != "conflict" {
+		if err != nil || conflict.Outcome.String() != "conflict" {
 			t.Fatalf("conflict %+v %v", conflict, err)
 		}
 		// The trusted native operator supplies consent independently of the client.
@@ -76,14 +76,14 @@ func TestResolvedQuestionsKeepAdmissionAndAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, err := c.AskContext(ctx, question)
-	if err != nil || answer.Outcome != "answered" || answer.Answer == nil || answer.Answer.Id != original || answer.Answer.Option != "once" {
+	if err != nil || answer.Outcome.String() != "answered" || answer.Answer == nil || answer.Answer.ID != original || answer.Answer.Option != "once" {
 		t.Fatalf("retained answer %+v %v", answer, err)
 	}
 	if err := book.Forget(original); err != nil {
 		t.Fatal(err)
 	}
 	forgotten, err := c.AskContext(ctx, question)
-	if err != nil || forgotten.Outcome != "gone" {
+	if err != nil || forgotten.Outcome.String() != "gone" {
 		t.Fatalf("forgotten request %+v %v", forgotten, err)
 	}
 	h.questions.Close()
@@ -98,7 +98,7 @@ func TestResolvedQuestionsKeepAdmissionAndAnswer(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	var refusal *client.BindingError
+	var refusal *client.ResolutionError
 	if !errors.As(err, &refusal) || refusal.Status != "not_ready" {
 		t.Fatalf("stopped questions %v", err)
 	}

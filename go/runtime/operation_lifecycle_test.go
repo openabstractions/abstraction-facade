@@ -55,7 +55,7 @@ func lifecycleObserve(t *testing.T, ctx context.Context, c *client.JobsClient, i
 			t.Fatalf("observe: %+v %v", result, err)
 		}
 		s := *result.Snapshot
-		done := s.State == "complete" || s.State == "failed" || s.State == "cancelled"
+		done := s.State.String() == "complete" || s.State.String() == "failed" || s.State.String() == "cancelled"
 		if !terminal || done {
 			return s
 		}
@@ -105,11 +105,11 @@ func TestOperationLifecycleServiceOnlyRestartAndChunks(t *testing.T) {
 		t.Fatalf("expired caller wait: %v", err)
 	}
 	observed := lifecycleObserve(t, ctx, c, id, false)
-	if observed.State != "running" || observed.Receipt.OperationId != receipt.OperationId {
+	if observed.State.String() != "running" || observed.Receipt.OperationID != receipt.OperationID {
 		t.Fatalf("caller expiry changed work: %+v", observed)
 	}
 	read, err := c.ReadResult(ctx, id, 0, 65536)
-	if err != nil || read.Outcome != "not_ready" || read.Chunk != nil {
+	if err != nil || read.Outcome.String() != "not_ready" || read.Chunk != nil {
 		t.Fatalf("premature bytes: %+v %v", read, err)
 	}
 	// The application reconstructs only its persisted binding/owner/identity.
@@ -122,23 +122,23 @@ func TestOperationLifecycleServiceOnlyRestartAndChunks(t *testing.T) {
 	defer stopAgain()
 	unblock()
 	final := lifecycleObserve(t, ctx, recovered, id, true)
-	if final.State != "complete" || final.Receipt.OperationId != receipt.OperationId {
+	if final.State.String() != "complete" || final.Receipt.OperationID != receipt.OperationID {
 		t.Fatalf("restart terminal: %+v", final)
 	}
 	var got []byte
 	chunks := 0
 	for {
 		part, err := recovered.ReadResult(ctx, id, int64(len(got)), 65536)
-		if err != nil || part.Outcome != "data" || part.Chunk == nil {
+		if err != nil || part.Outcome.String() != "data" || part.Chunk == nil {
 			t.Fatalf("chunk: %+v %v", part, err)
 		}
 		chunk := part.Chunk
-		if chunk.Offset != int64(len(got)) || chunk.Total != int64(len(body)) || len(chunk.Data) > 65536 || chunk.Receipt.OperationId != receipt.OperationId {
+		if chunk.Offset != int64(len(got)) || chunk.Total != int64(len(body)) || len(chunk.Data) > 65536 || chunk.Receipt.OperationID != receipt.OperationID {
 			t.Fatalf("chunk bounds/identity: %+v", chunk)
 		}
 		got = append(got, chunk.Data...)
 		chunks++
-		if chunk.Eof {
+		if chunk.EOF {
 			break
 		}
 		if len(chunk.Data) == 0 {
@@ -149,11 +149,11 @@ func TestOperationLifecycleServiceOnlyRestartAndChunks(t *testing.T) {
 		t.Fatalf("result differs: chunks=%d bytes=%d", chunks, len(got))
 	}
 	eof, err := recovered.ReadResult(ctx, id, int64(len(body)), 65536)
-	if err != nil || eof.Chunk == nil || !eof.Chunk.Eof || len(eof.Chunk.Data) != 0 {
+	if err != nil || eof.Chunk == nil || !eof.Chunk.EOF || len(eof.Chunk.Data) != 0 {
 		t.Fatalf("exact EOF: %+v %v", eof, err)
 	}
 	beyond, err := recovered.ReadResult(ctx, id, int64(len(body)+1), 65536)
-	if err != nil || beyond.Outcome != "invalid" || beyond.Chunk != nil {
+	if err != nil || beyond.Outcome.String() != "invalid" || beyond.Chunk != nil {
 		t.Fatalf("past-end is not EOF: %+v %v", beyond, err)
 	}
 	for _, r := range [][2]int64{{-1, 1}, {0, 0}, {0, 65537}} {
@@ -232,33 +232,33 @@ func TestOperationLifecycleCancellationAndFailure(t *testing.T) {
 				if mode == "pending" {
 					wanted = "pending"
 				}
-				if before.State != wanted {
+				if before.State.String() != wanted {
 					t.Fatalf("cancellation precondition: %+v", before)
 				}
 				if mode == "completion-race" {
 					unblock()
 				}
 				ack, err := c.CancelWork(ctx, id)
-				if err != nil || (ack.Outcome != "requested" && ack.Outcome != "already_terminal") {
+				if err != nil || (ack.Outcome.String() != "requested" && ack.Outcome.String() != "already_terminal") {
 					t.Fatalf("cancel: %+v %v", ack, err)
 				}
 				start()
 			}
 			final := lifecycleObserve(t, ctx, c, id, true)
-			if final.Receipt.OperationId != receipt.OperationId {
+			if final.Receipt.OperationID != receipt.OperationID {
 				t.Fatal("terminal operation changed")
 			}
 			switch mode {
 			case "failure":
-				if final.State != "failed" || final.Failure == nil || final.Failure.Classification != "permanent" {
+				if final.State.String() != "failed" || final.Failure == nil || final.Failure.Classification.String() != "permanent" {
 					t.Fatalf("failure lost: %+v", final)
 				}
 			case "completion-race":
-				if final.State != "cancelled" && final.State != "complete" {
+				if final.State.String() != "cancelled" && final.State.String() != "complete" {
 					t.Fatalf("cancel/completion race: %+v", final)
 				}
 			default:
-				if final.State != "cancelled" {
+				if final.State.String() != "cancelled" {
 					t.Fatalf("cancel acknowledgement was not terminal cancellation: %+v", final)
 				}
 			}
@@ -269,11 +269,11 @@ func TestOperationLifecycleCancellationAndFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if final.State == "complete" {
+			if final.State.String() == "complete" {
 				if result.Chunk == nil || !bytes.Equal(result.Chunk.Data, body) {
 					t.Fatalf("completed race bytes: %+v", result)
 				}
-			} else if result.Outcome != "unavailable" || result.Chunk != nil {
+			} else if result.Outcome.String() != "unavailable" || result.Chunk != nil {
 				t.Fatalf("failed/cancelled is not EOF: %+v", result)
 			}
 		})
@@ -366,7 +366,7 @@ func TestOperationLifecycleContinuesAfterCallerExit(t *testing.T) {
 			}
 		}
 	}
-	if !found || receipt.Identity.Key != submission.Identity.Key || receipt.OperationId == "" {
+	if !found || receipt.Identity.Key != submission.Identity.Key || receipt.OperationID == "" {
 		t.Fatalf("missing child receipt: %s", output)
 	}
 	recovered, err := client.NewJobs(o.JobEndpoint, client.JobsOptions{ExpectedOwner: receipt.LogicalOwner})
@@ -379,13 +379,13 @@ func TestOperationLifecycleContinuesAfterCallerExit(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	before := lifecycleObserve(t, ctx, recovered, receipt.Identity, false)
-	if before.State != "running" || before.Receipt.OperationId != receipt.OperationId {
+	if before.State.String() != "running" || before.Receipt.OperationID != receipt.OperationID {
 		t.Fatalf("work did not outlive child: %+v", before)
 	}
 	// Only now, after OS-confirmed caller exit, can HTTP deliver result bytes.
 	unblock()
 	final := lifecycleObserve(t, ctx, recovered, receipt.Identity, true)
-	if final.State != "complete" || final.Receipt.OperationId != receipt.OperationId {
+	if final.State.String() != "complete" || final.Receipt.OperationID != receipt.OperationID {
 		t.Fatalf("post-exit completion: %+v", final)
 	}
 	var got []byte
@@ -395,11 +395,11 @@ func TestOperationLifecycleContinuesAfterCallerExit(t *testing.T) {
 			t.Fatalf("post-exit read: %+v %v", result, err)
 		}
 		chunk := result.Chunk
-		if chunk.Receipt.OperationId != receipt.OperationId || chunk.Total != int64(len(body)) || chunk.Offset != int64(len(got)) {
+		if chunk.Receipt.OperationID != receipt.OperationID || chunk.Total != int64(len(body)) || chunk.Offset != int64(len(got)) {
 			t.Fatalf("post-exit chunk identity/bounds: %+v", chunk)
 		}
 		got = append(got, chunk.Data...)
-		if chunk.Eof {
+		if chunk.EOF {
 			break
 		}
 	}

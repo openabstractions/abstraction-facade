@@ -1,8 +1,8 @@
 # Resolved questions and question operator
 
 This optional crate adds `AsksMachine` to the pure facade `Machine<C>`.
-`resolve_asks(vec![], "local")` returns `Questions<Binding<C>>` for
-`abstraction.asks/application@1`; `resolve_asks_operator(vec![], "local")` returns
+`resolve_asks(vec![], abstraction_facade_native::Scope::Local)` returns `Questions<Binding<C>>` for
+`abstraction.asks/application@1`; `resolve_asks_operator(vec![], abstraction_facade_native::Scope::Local)` returns
 `Operator<Binding<C>>` for `abstraction.asks/operator@1`. Select installed native
 IPC through the separate facade-native crate.
 

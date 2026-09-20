@@ -13,24 +13,24 @@ import (
 	"strings"
 )
 
-const runtimeAgent = "com.openabstractions.jobd"
+const runtimeAgent = "com.openabstractions.runtime"
 
 func hideStatusCommand(*exec.Cmd) {}
 func observeInstalled(ctx context.Context) wire.BootstrapObservation {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return statusEvidence("unknown", "user home unavailable")
+		return statusEvidence(wire.BootstrapStateUnknown, "user home unavailable")
 	}
 	raw, err := readAgent(filepath.Join(home, "Library", "LaunchAgents", runtimeAgent+".plist"))
 	if err != nil {
-		return statusEvidence("unknown", "current-user LaunchAgent registration unavailable")
+		return statusEvidence(wire.BootstrapStateUnknown, "current-user LaunchAgent registration unavailable")
 	}
 	if err = ValidateRuntimeAgent(raw, filepath.Join(home, ".local", "bin", "openabstractions")); err != nil {
-		return statusEvidence("unknown", err.Error())
+		return statusEvidence(wire.BootstrapStateUnknown, err.Error())
 	}
 	out, err := statusCommand(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+runtimeAgent)
 	if err != nil {
-		return statusEvidence("installed", "validated current-user LaunchAgent exists; supervision could not be observed")
+		return statusEvidence(wire.BootstrapStateInstalled, "validated current-user LaunchAgent exists; supervision could not be observed")
 	}
 	return observeLaunchd(out)
 }
@@ -42,19 +42,19 @@ func observeLaunchd(out string) wire.BootstrapObservation {
 			continue
 		}
 		if state != "" {
-			return statusEvidence("unknown", "ambiguous launchd state")
+			return statusEvidence(wire.BootstrapStateUnknown, "ambiguous launchd state")
 		}
 		state = strings.TrimSpace(strings.TrimPrefix(line, "\tstate = "))
 	}
 	switch state {
 	case "running":
-		return statusEvidence("running", "current-user launchd job is running; capability readiness is separate")
+		return statusEvidence(wire.BootstrapStateRunning, "current-user launchd job is running; capability readiness is separate")
 	case "spawn scheduled", "spawning":
-		return statusEvidence("starting", "current-user launchd job is starting")
+		return statusEvidence(wire.BootstrapStateStarting, "current-user launchd job is starting")
 	case "not running", "waiting":
-		return statusEvidence("installed", "current-user launchd job is registered but not running")
+		return statusEvidence(wire.BootstrapStateInstalled, "current-user launchd job is registered but not running")
 	default:
-		return statusEvidence("unknown", "unrecognized launchd state response")
+		return statusEvidence(wire.BootstrapStateUnknown, "unrecognized launchd state response")
 	}
 }
 

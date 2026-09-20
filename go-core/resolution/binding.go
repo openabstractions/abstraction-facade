@@ -20,7 +20,7 @@ func BindLocal(ctx context.Context, ref wire.ServiceReference, installation *lis
 	if err := ctx.Err(); err != nil {
 		return listen.FrameClient{}, err
 	}
-	if ref.Scope != wire.ScopeLocal || ref.Transport != LocalTransport || ref.Endpoint == "" {
+	if (ref.Scope != wire.ScopeLocal && ref.Scope != wire.ScopeRemote) || ref.Transport != LocalTransport || ref.Endpoint == "" {
 		return listen.FrameClient{}, ErrUnsupportedTransport
 	}
 	server := installation

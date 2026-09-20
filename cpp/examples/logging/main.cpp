@@ -3,8 +3,8 @@
 
 int main() {
     try {
-        auto events = abstraction::facade::Discover().ResolveLog();
-        events.Log(0, "worker started", {{"component", "worker"}});
+        auto events = abstraction::facade::discover().resolve_log();
+        events.log(0, "worker started", {{"component", "worker"}});
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

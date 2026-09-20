@@ -1,13 +1,43 @@
 """Typed service facade with shared native bootstrap; no provider fallback."""
+import sys
 import time
-from abstraction.ipc import FrameTransport, Library, FrameError, TIMEOUT, ServerExpectation
-from abstraction.facade import rec as wire
+from abstraction.ipc import FrameTransport, Library, FrameError, TIMEOUT, CANCELLED, ServerExpectation
+import abstraction.facade as wire
+from abstraction.facade import Scope
+
+RUNTIME_UNAVAILABLE = "runtime_unavailable"
+
+
+def unsupported_platform():
+    """Return "android" or "macos" when this process runs on a platform the
+    runtime's platform declaration lists as unsupported, otherwise None."""
+    if sys.platform == "android" or hasattr(sys, "getandroidapilevel"):
+        return "android"
+    if sys.platform == "darwin":
+        return "macos"
+    return None
 
 
 class ResolutionError(RuntimeError):
-    def __init__(self, status):
-        super().__init__("service resolution: " + status)
-        self.status = status
+    """A resolve call produced no usable service.
+
+    status is the resolver's refusal word, invalid_resolution or
+    unsupported_transport after validation, or runtime_unavailable when no
+    runtime could be selected or reached. capability and contract name the
+    request; looked_for names the installed runtime or the explicit endpoint.
+    platform names a platform the runtime declares unsupported, and is None
+    otherwise. A transport failure is chained as __cause__.
+    """
+
+    def __init__(self, status, capability=None, contract=None, looked_for=None, *, platform=None):
+        message = "service resolution: " + status
+        if contract is not None:
+            message += ": %s (capability %s) at %s" % (contract, capability, looked_for)
+        if platform is not None:
+            message += ": no supported OpenAbstractions runtime exists for " + platform
+        super().__init__(message)
+        self.status, self.capability, self.contract, self.looked_for = status, capability, contract, looked_for
+        self.platform = platform
 
 
 class Machine:
@@ -17,7 +47,17 @@ class Machine:
 
         Explicit endpoints retain compatibility unless server is supplied.
         provider_trust may select independent configured trust for other hosts.
+        On a platform the runtime declares unsupported, default discovery loads
+        no native library and every resolve raises runtime_unavailable naming it.
         """
+        self._platform = unsupported_platform() if endpoint is None and server is None else None
+        if self._platform is not None and library is None and cancellation is None:
+            if provider_trust is not None and not callable(provider_trust):
+                raise ValueError("provider_trust must be callable")
+            self._library = None
+            self._options = dict(timeout=timeout, deadline=deadline, cancellation=cancellation)
+            self._endpoint, self._server, self._provider_trust = endpoint, server, provider_trust
+            return
         if library is None:
             library = cancellation._library if cancellation is not None else Library()
         if provider_trust is not None and not callable(provider_trust):
@@ -28,96 +68,139 @@ class Machine:
         # Validate options without selecting, connecting or consuming a call budget.
         FrameTransport(library, endpoint if endpoint is not None else "validation", server=server, **self._options)
 
-    def resolve_storage(self, *, guarantees=(), scope="any"):
+    def resolve_storage(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Resolve one fixed content reader through the shared transport."""
         from abstraction.storage.content.client import Client
         return Client(self._bind("abstraction.storage", "abstraction.storage/content-reader@1", guarantees, scope))
 
-    def resolve_storage_writer(self, *, guarantees=(), scope="any"):
+    def resolve_storage_writer(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Resolve one content writer; every call remains subject to its write policy."""
         from abstraction.storage.content.client import Writer
         return Writer(self._bind("abstraction.storage", "abstraction.storage/content-writer@1", guarantees, scope))
 
-    def resolve_log(self, *, guarantees=(), scope="any"):
+    def resolve_log(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Return the generated SinkClient at one validated, fixed endpoint."""
-        from abstraction.logging import rec as logging
+        import abstraction.logging as logging
         return logging.SinkClient(self._bind("abstraction.logging", "abstraction.logging/sink@1", guarantees, scope))
 
-    def resolve_config(self, *, guarantees=(), scope="any"):
+    def resolve_config(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Read existing provider settings with explicit per-call run overrides."""
-        from abstraction.config import rec as config
+        import abstraction.config as config
         return config.ConfigReaderClient(self._bind("abstraction.config", "abstraction.config/reader@1", guarantees, scope))
 
-    def resolve_config_editor(self, *, guarantees=(), scope="any"):
+    def resolve_config_editor(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Edit user settings with the service's compare-and-replace revision."""
-        from abstraction.config import rec as config
+        import abstraction.config as config
         return config.ConfigEditorClient(self._bind("abstraction.config", "abstraction.config/editor@1", guarantees, scope))
 
-    def resolve_asks(self, *, guarantees=(), scope="any"):
+    def resolve_asks(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Admit and observe questions in the caller's bound scope."""
-        from abstraction.asks.api import rec as asks
+        import abstraction.asks.api as asks
         return asks.QuestionApplicationClient(self._bind("abstraction.asks", "abstraction.asks/application@1", guarantees, scope))
 
-    def resolve_asks_operator(self, *, guarantees=(), scope="any"):
+    def resolve_asks_operator(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """List, answer and retire questions; every call remains subject to the host's operator policy."""
-        from abstraction.asks.api import rec as asks
+        import abstraction.asks.api as asks
         return asks.QuestionOperatorClient(self._bind("abstraction.asks", "abstraction.asks/operator@1", guarantees, scope))
 
-    def resolve_model(self, *, guarantees=(), scope="any"):
+    def resolve_credentials(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Register, rotate, revoke, list and audit credentials by name; no call returns secret bytes."""
+        import abstraction.credentials.api as credentials
+        return credentials.HolderClient(self._bind("abstraction.credentials", "abstraction.credentials/holder@1", guarantees, scope))
+
+    def resolve_credentials_applier(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Apply a credential for one request; only a program the host designated as an enforcer is served."""
+        import abstraction.credentials.api as credentials
+        return credentials.ApplierClient(self._bind("abstraction.credentials", "abstraction.credentials/applier@1", guarantees, scope))
+
+    def resolve_inference(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Complete and stream model calls the runtime performs; no key or endpoint reaches this program."""
+        from abstraction.inference.client import Chat
+        return Chat(self._bind("abstraction.inference", "abstraction.inference/chat@1", guarantees, scope))
+
+    def resolve_inference_operator(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Hosts, gateway window keys and the inference audit; the runtime decides host.manage, key.issue or audit.read per call."""
+        import abstraction.inference.api as inference
+        return inference.OperatorClient(self._bind("abstraction.inference", "abstraction.inference/operator@1", guarantees, scope))
+
+    def resolve_registry(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """The runtime's provider declarations, abstraction.facade/registry@1; the runtime decides provider.manage per call."""
+        return wire.RegistryClient(self._bind("abstraction.facade", "abstraction.facade/registry@1", guarantees, scope))
+
+    def resolve_applications(self, *, guarantees=(), scope: Scope = Scope.LOCAL):
+        """Bind the local identity-scoped application directory and activation API."""
+        if not isinstance(scope, Scope) or scope not in (Scope.ANY, Scope.LOCAL):
+            raise ResolutionError("unmet_requirements", "abstraction.facade",
+                                  "abstraction.facade/applications@1", scope)
+        return wire.ApplicationsClient(self._bind("abstraction.facade",
+            "abstraction.facade/applications@1", guarantees, Scope.LOCAL))
+
+    def describe_endpoint(self, endpoint):
+        """Call abstraction.facade/endpoint@1 Describe on one local endpoint: the services it hosts and each one's readiness.
+
+        The description's program is the provider's own claim and grants nothing."""
+        if not isinstance(endpoint, str) or not endpoint or "\0" in endpoint:
+            raise ValueError("invalid endpoint")
+        return wire.EndpointClient(FrameTransport(self._library, endpoint, **self._options)).describe()
+
+    def resolve_model(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Look up portable download requests; forbidden and unavailable are typed lookup outcomes."""
-        from abstraction.model.api import rec as model
+        import abstraction.model.api as model
         return model.ModelResolverClient(self._bind("abstraction.model", "abstraction.model/resolver@1", guarantees, scope))
 
-    def resolve_router(self, *, guarantees=(), scope="any"):
+    def resolve_router(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Read host inventory and pick hosts; policy refusals raise ServiceError codes forbidden or policy_unavailable."""
-        from abstraction.router import rec as router
+        import abstraction.router as router
         return router.RouterClient(self._bind("abstraction.router", "abstraction.router/router@1", guarantees, scope))
 
-    def resolve_jobs(self, *, guarantees=(), scope="any"):
+    def resolve_jobs(self, *, guarantees=(), scope: Scope = Scope.ANY):
         guarantees = tuple(guarantees)
         from abstraction.facade.jobs import Jobs
         return Jobs(self._bind("abstraction.job", "abstraction.job/acceptance@1", guarantees, scope), required_guarantees=guarantees)
 
-    def resolve_job_operations(self, *, guarantees=(), scope="any"):
+    def resolve_job_operations(self, *, guarantees=(), scope: Scope = Scope.ANY):
         guarantees = tuple(guarantees)
         from abstraction.facade.jobs import Jobs
         return Jobs(self._bind("abstraction.job", "abstraction.job/operations@1", guarantees, scope), required_guarantees=guarantees)
 
-    def resolve_job_inventory(self, *, guarantees=(), scope="any"):
+    def resolve_job_inventory(self, *, guarantees=(), scope: Scope = Scope.ANY):
         guarantees = tuple(guarantees)
         from abstraction.facade.jobs import Inventory
         return Inventory(self._bind("abstraction.job", "abstraction.job/inventory@1", guarantees, scope), required_guarantees=guarantees)
 
-    def resolve_log_reader(self, *, guarantees=(), scope="any"):
+    def resolve_log_reader(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Return bounded history at one fixed endpoint; gaps require explicit restart."""
         return LogHistory(self._bind("abstraction.logging", "abstraction.logging/reader@1", guarantees, scope))
 
-    def resolve_rights(self, *, guarantees=(), scope="any"):
-        """Point-in-time decisions for the bound caller; DecideFor needs trusted-enforcer authority at the service."""
+    def resolve_rights(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Point-in-time decisions for the bound caller; decide_for needs trusted-enforcer authority at the service."""
         return Rights(self._bind("abstraction.rights", "abstraction.rights/authorization@1", guarantees, scope))
 
-    def resolve_rights_operator(self, *, guarantees=(), scope="any"):
+    def resolve_rights_operator(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Conditional policy administration; every call remains subject to the host's operator authorization."""
         return RightsOperator(self._bind("abstraction.rights", "abstraction.rights/operator@1", guarantees, scope))
 
-    def resolve_config_observer(self, *, guarantees=(), scope="any"):
+    def resolve_config_observer(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Latest-snapshot long-poll configuration observation; each call's budget is extended by its wait_ms."""
         return ConfigObserver(self._bind("abstraction.config", "abstraction.config/observer@1", guarantees, scope))
 
-    def resolve_log_observer(self, *, guarantees=(), scope="any"):
+    def resolve_log_observer(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Long-poll history observation; each call's budget is extended by its wait_ms."""
         return LogObserver(self._bind("abstraction.logging", "abstraction.logging/observer@1", guarantees, scope))
 
-    def resolve_storage_changes(self, *, guarantees=(), scope="any"):
+    def resolve_storage_changes(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Observe added and removed objects; every call remains subject to the observe and read policies."""
         from abstraction.storage.content.client import Changes
         return Changes(self._bind("abstraction.storage", "abstraction.storage/content-changes@1", guarantees, scope))
 
     def _bind(self, capability, contract, guarantees, scope):
         guarantees = list(guarantees)
-        if scope not in ("any", "local", "remote") or any(
+        if not isinstance(scope, Scope) or any(
                 not isinstance(g, str) or not g for g in guarantees) or len(set(guarantees)) != len(guarantees):
             raise ValueError("invalid resolution requirements")
+        if self._platform is not None:
+            raise ResolutionError(RUNTIME_UNAVAILABLE, capability, contract, "the installed runtime",
+                                  platform=self._platform)
         request = wire.ResolveRequest(capability=capability,
                                       contracts=[contract],
                                       guarantees=guarantees, scope=scope)
@@ -125,25 +208,42 @@ class Machine:
         if end is None:
             end = time.monotonic() + self._options["timeout"]
         options = dict(self._options, deadline=end)
-        server = self._server
-        if self._endpoint is None and server is None:
-            server = self._library.select_runtime(**options)
-        endpoint = self._endpoint if self._endpoint is not None else self._library.runtime_endpoint()
-        result = wire.ResolverClient(FrameTransport(self._library, endpoint, server=server, **options)).Resolve(request)
+        server, endpoint = self._server, self._endpoint
+
+        def refused(status):
+            if self._endpoint is not None:
+                looked_for = "the explicit endpoint " + self._endpoint
+            else:
+                looked_for = "the installed runtime" + ("" if endpoint is None else " at " + endpoint)
+            return ResolutionError(status, capability, contract, looked_for)
+        try:
+            if endpoint is None and server is None:
+                server = self._library.select_runtime(**options)
+            if endpoint is None:
+                endpoint = self._library.runtime_endpoint()
+            # The resolver endpoint serves sessions (FRAMING.md "Sessions"); the
+            # shared library keeps its connection for the next resolution.
+            result = wire.ResolverClient(FrameTransport(self._library, endpoint, server=server, sessions=True,
+                                                        **options)).resolve(request)
+        except FrameError as error:
+            # The caller's own cancellation stays a transport outcome.
+            if error.status == CANCELLED:
+                raise
+            raise refused(RUNTIME_UNAVAILABLE) from error
         ref = result.reference
         if result.status != "resolved":
             if ref is not None:
-                raise ResolutionError("invalid_resolution")
-            raise ResolutionError(result.status)
+                raise refused("invalid_resolution")
+            raise refused(result.status)
         if (ref is None or not ref.provider or not ref.endpoint or "\0" in ref.endpoint
                 or ref.capability != request.capability or ref.contract not in request.contracts
-                or ref.scope not in ("local", "remote") or (scope != "any" and ref.scope != scope)
+                or ref.scope not in (Scope.LOCAL, Scope.REMOTE) or (scope != Scope.ANY and ref.scope != scope)
                 or len(set(ref.guarantees)) != len(ref.guarantees)
                 or any(not g for g in ref.guarantees)
                 or not set(guarantees).issubset(ref.guarantees)):
-            raise ResolutionError("invalid_resolution")
-        if ref.scope != "local" or ref.transport != "oa-framed-local@1":
-            raise ResolutionError("unsupported_transport")
+            raise refused("invalid_resolution")
+        if ref.scope not in (Scope.LOCAL, Scope.REMOTE) or ref.transport != "oa-framed-local@1":
+            raise refused("unsupported_transport")
         if self._provider_trust is not None:
             server = self._provider_trust(ref)
             if not isinstance(server, ServerExpectation):
@@ -175,7 +275,7 @@ class Rights:
     """Point-in-time decisions. Evaluated outcomes carry the observed policy revision; refusals carry none."""
 
     def __init__(self, transport):
-        from abstraction.rights.api import rec as rights
+        import abstraction.rights.api as rights
         self._client = rights.AuthorizationClient(transport)
 
     @staticmethod
@@ -186,26 +286,26 @@ class Rights:
             raise ValueError("inconsistent decision revision")
         return decision
 
-    def Decide(self, action, resource):
-        return self._checked(self._client.Decide(action, resource))
+    def decide(self, action, resource):
+        return self._checked(self._client.decide(action, resource))
 
-    def DecideFor(self, subject, action, resource):
-        return self._checked(self._client.DecideFor(subject, action, resource))
+    def decide_for(self, subject, action, resource):
+        return self._checked(self._client.decide_for(subject, action, resource))
 
 
 class RightsOperator:
     """Conditional administration at an expected revision. A lost reply is uncertain and is never retried."""
 
     def __init__(self, transport):
-        from abstraction.rights.api import rec as rights
+        import abstraction.rights.api as rights
         self._codec = rights
         self._client = rights.AuthorizationOperatorClient(transport)
 
-    def ListPolicy(self, cursor, limit):
+    def list_policy(self, cursor, limit):
         if (not isinstance(cursor, str) or len(cursor.encode("utf-8")) > 256
                 or type(limit) is not int or not 1 <= limit <= 64):
             raise ValueError("invalid policy range")
-        page = self._client.ListPolicy(cursor, limit)
+        page = self._client.list_policy(cursor, limit)
         if page.outcome != "page":
             if page.revision or page.catalog or page.rules or page.next or page.complete:
                 raise ValueError("malformed policy refusal")
@@ -241,17 +341,17 @@ class RightsOperator:
             raise ValueError("malformed applied state")
         return result
 
-    def SetRule(self, expected_revision, rule):
+    def set_rule(self, expected_revision, rule):
         if not _rights_text(expected_revision, 128) or not _rights_rule(rule):
             raise ValueError("invalid policy edit")
-        result = self._client.SetRule(expected_revision, rule)
+        result = self._client.set_rule(expected_revision, rule)
         return self._edit(result, rule.subject, rule.action, rule.resource, rule.permit)
 
-    def RevokeRule(self, expected_revision, subject, action, resource):
+    def revoke_rule(self, expected_revision, subject, action, resource):
         probe = self._codec.PolicyRule(subject=subject, action=action, resource=resource, permit=False)
         if not _rights_text(expected_revision, 128) or not _rights_rule(probe):
             raise ValueError("invalid policy revoke")
-        result = self._client.RevokeRule(expected_revision, subject, action, resource)
+        result = self._client.revoke_rule(expected_revision, subject, action, resource)
         return self._edit(result, subject, action, resource, None)
 
 
@@ -263,11 +363,11 @@ class ConfigObserver:
     """
 
     def __init__(self, transport):
-        from abstraction.config import rec as config
+        import abstraction.config as config
         self._codec = config
         self._transport = transport
 
-    def Observe(self, overrides, cursor, wait_ms):
+    def observe(self, overrides, cursor, wait_ms):
         if (not isinstance(cursor, str) or len(cursor.encode("utf-8")) > 512
                 or type(wait_ms) is not int or not 0 <= wait_ms <= 30000):
             raise ValueError("invalid observation bounds")
@@ -278,7 +378,7 @@ class ConfigObserver:
         if transport.deadline is None:
             transport = transport.with_waiting(deadline=time.monotonic() + transport.timeout + wait_ms / 1000,
                                                cancellation=transport.cancellation)
-        result = self._codec.ConfigObserverClient(transport).Observe(overrides, cursor, wait_ms)
+        result = self._codec.ConfigObserverClient(transport).observe(overrides, cursor, wait_ms)
         if result.outcome == "snapshot":
             if (result.snapshot is None or not result.cursor or result.cursor == cursor
                     or len(result.cursor.encode("utf-8")) > 512):
@@ -298,13 +398,13 @@ def _history_bounds(cursor, max_records, max_bytes):
 
 class LogHistory:
     def __init__(self, transport):
-        from abstraction.logging import rec as logging
+        import abstraction.logging as logging
         self._codec = logging
         self._client = logging.HistoryReaderClient(transport)
 
-    def Read(self, cursor, max_records, max_bytes):
+    def read(self, cursor, max_records, max_bytes):
         _history_bounds(cursor, max_records, max_bytes)
-        return self._check(self._client.Read(cursor, max_records, max_bytes), cursor, max_records, max_bytes,
+        return self._check(self._client.read(cursor, max_records, max_bytes), cursor, max_records, max_bytes,
                            ("gap", "unavailable", "invalid_request", "record_too_large", "corrupt"))
 
     def _check(self, page, cursor, max_records, max_bytes, refusals):
@@ -324,12 +424,12 @@ class LogObserver(LogHistory):
     """Long-poll observation with the reader's bounds; forbidden and policy_unavailable raise ServiceError."""
 
     def __init__(self, transport):
-        from abstraction.logging import rec as logging
+        import abstraction.logging as logging
         self._codec = logging
         self._transport = transport
         self._client = None
 
-    def Observe(self, cursor, max_records, max_bytes, wait_ms):
+    def observe(self, cursor, max_records, max_bytes, wait_ms):
         _history_bounds(cursor, max_records, max_bytes)
         if type(wait_ms) is not int or not 0 <= wait_ms <= 30000:
             raise ValueError("wait_ms outside 0..30000")
@@ -337,6 +437,6 @@ class LogObserver(LogHistory):
         if transport.deadline is None:
             transport = transport.with_waiting(deadline=time.monotonic() + transport.timeout + wait_ms / 1000,
                                                cancellation=transport.cancellation)
-        page = self._codec.HistoryObserverClient(transport).Observe(cursor, max_records, max_bytes, wait_ms)
+        page = self._codec.HistoryObserverClient(transport).observe(cursor, max_records, max_bytes, wait_ms)
         return self._check(page, cursor, max_records, max_bytes,
                            ("gap", "unavailable", "invalid_request", "record_too_large", "corrupt", "unsupported"))

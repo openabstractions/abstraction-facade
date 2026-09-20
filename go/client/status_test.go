@@ -110,7 +110,7 @@ func TestObserveAuthorizedStatuses(t *testing.T) {
 	}
 	expected := []string{"resolved", "not_ready", "unavailable", "unavailable", "incompatible"}
 	for i, item := range report.Capabilities {
-		if item.Result == nil || item.Result.Status != expected[i] {
+		if item.Result == nil || item.Result.Status.String() != expected[i] {
 			t.Fatalf("item %d: %+v", i, item)
 		}
 	}
@@ -139,7 +139,7 @@ func TestObserveAuthorizedStatuses(t *testing.T) {
 		}
 	}
 	again, err := machine.Observe(ctx, requests)
-	if err != nil || again.Capabilities[0].Result.Status != "resolved" {
+	if err != nil || again.Capabilities[0].Result.Status != wire.ResolutionStatusResolved {
 		t.Fatalf("reuse: %+v %v", again, err)
 	}
 }

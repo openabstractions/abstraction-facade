@@ -55,11 +55,11 @@ func TestResolvedModelToDurableDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	portable, err := lookup.ResolveContext(ctx, modelclient.Ref{Registry: "fixture", Repo: "weights"})
-	if err != nil || portable.Outcome != "resolved" || portable.Request == nil {
+	if err != nil || portable.Outcome.String() != "resolved" || portable.Request == nil {
 		t.Fatalf("lookup %+v %v", portable, err)
 	}
 	private, err := lookup.ResolveContext(ctx, modelclient.Ref{Registry: "fixture", Repo: "private"})
-	if err != nil || private.Outcome != "unsupported_mapping" || private.Request != nil {
+	if err != nil || private.Outcome.String() != "unsupported_mapping" || private.Request != nil {
 		t.Fatalf("private mapping %+v %v", private, err)
 	}
 	jobs, err := m.ResolveJobs(ctx, client.Requirements{})
@@ -72,7 +72,7 @@ func TestResolvedModelToDurableDownload(t *testing.T) {
 	}
 	id := api.RequestIdentity{Key: "model-download", HistoryEpoch: w.HistoryEpoch}
 	accepted, err := jobs.Submit(ctx, api.Submission{Identity: id, Kind: download.Kind, Spec: request.Encode(portable.Request)})
-	if err != nil || accepted.Outcome != "accepted" {
+	if err != nil || accepted.Outcome.String() != "accepted" {
 		t.Fatalf("acceptance %+v %v", accepted, err)
 	}
 	for {
@@ -80,7 +80,7 @@ func TestResolvedModelToDurableDownload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.Snapshot != nil && state.Snapshot.State == "complete" {
+		if state.Snapshot != nil && state.Snapshot.State.String() == "complete" {
 			break
 		}
 		select {

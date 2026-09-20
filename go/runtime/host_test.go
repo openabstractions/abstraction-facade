@@ -117,12 +117,12 @@ func TestResolvedRuntime(t *testing.T) {
 		t.Log("C++ consumer not requested; this run verifies Go runtime clients only")
 	}
 	_, err = m.ResolveRouter(ctx, client.Requirements{})
-	var refused *client.BindingError
-	if !errors.As(err, &refused) || refused.Status != wire.ResolutionStatusUnavailable {
+	var refused *client.ResolutionError
+	if !errors.As(err, &refused) || refused.Status != client.ResolutionErrorStatus(wire.ResolutionStatusUnavailable.String()) {
 		t.Fatalf("missing router: %v", err)
 	}
 	_, err = m.ResolveLog(ctx, client.Requirements{Guarantees: []string{"not-promised"}})
-	if !errors.As(err, &refused) || refused.Status != wire.ResolutionStatusUnmetRequirements {
+	if !errors.As(err, &refused) || refused.Status != client.ResolutionErrorStatus(wire.ResolutionStatusUnmetRequirements.String()) {
 		t.Fatalf("weakened demands: %v", err)
 	}
 	// Keep the installed binding stable: a stopped provider is not replaced by
@@ -138,7 +138,7 @@ func TestResolvedRuntime(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for {
 		_, err = m.ResolveLog(ctx, client.Requirements{})
-		if errors.As(err, &refused) && refused.Status == wire.ResolutionStatusNotReady {
+		if errors.As(err, &refused) && refused.Status == client.ResolutionErrorStatus(wire.ResolutionStatusNotReady.String()) {
 			break
 		}
 		if time.Now().After(deadline) {

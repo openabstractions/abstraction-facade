@@ -9,10 +9,96 @@
 <nav class="site"><a class="name" href="index.html">Open Abstractions</a>
 <a href="index.html">Overview</a> <a href="cases.html">Cases</a> <a href="reference.html">Reference</a> <a href="evidence.html">Evidence</a> <a href="coverage.html">Coverage</a> <a href="adopt.html">Adopt</a>
 <a class="right" href="https://github.com/openabstractions">github.com/openabstractions</a></nav>
-<p class="meta" style="margin-top:10px"><a href="#encoding">Encoding</a> · <a href="#types">Types</a> · <a href="#structs">Structs</a> · <a href="#enums">Enumerations</a> · <a href="#constants">Constants</a> · <a href="#vocabulary">Vocabulary</a> · <a href="#refusals">Refusals</a> · <a href="#protocol">Protocol</a></p>
+
 
 <h1>Schema</h1>
-<p class="lead">One definition; this page and every encoder are emitted from it. Nothing below is written by hand, and each rule tag links the construct to the profile that admits it.</p>
+<p class="lead">Use this reference to inspect fields, methods, accepted values and failure outcomes. For setup and working examples, start with the <a href="reference.html">API guide</a>.</p>
+<p>Definition: <code>abstraction.facade</code></p>
+<nav aria-label="Schema sections" class="meta"><a href="#service-Resolver">Resolver</a> · <a href="#service-Caller">Caller</a> · <a href="#service-Endpoint">Endpoint</a> · <a href="#service-Registry">Registry</a> · <a href="#service-Applications">Applications</a> · <a href="#types">Types</a> · <a href="#structs">Fields</a> · <a href="#enums">Enumerations</a> · <a href="#constants">Constants</a> · <a href="#encoding">Encoding</a> · <a href="#refusals">Refusals</a></nav>
+<h2 id="service-Resolver">Service <code>Resolver</code> <span class="tag">[DEF-S1]</span></h2>
+<p>Common provider resolution vocabulary. Authorization comes from the receiving boundary, never from request fields. See RESOLUTION.md for selection and refusal semantics.</p>
+<p>Wire identity: <code>abstraction.facade/resolver@1</code></p>
+<p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
+<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
+<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
+<p>Find an authorized ready candidate satisfying an exact acceptable contract and all required guarantees. Does not submit work, activate an embedded provider, or transfer ownership.</p>
+<h3><code>Resolve</code></h3><p><code>request-response</code> <code>ResolveResult</code></p><ul>
+<li>Argument 1: <code>ResolveRequest</code> <code>request</code> (required, including zero/false/empty)</li>
+</ul>
+<h2 id="service-Caller">Service <code>Caller</code> <span class="tag">[DEF-S1]</span></h2>
+<p>The runtime resolver endpoint&#39;s echo of its bound caller, for diagnostics such as the control panel. Local transport only: a remote service states its own authentication and never inherits these proofs.</p>
+<p>Wire identity: <code>abstraction.facade/caller@1</code></p>
+<p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
+<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
+<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
+<p>Return what the receiving boundary bound for this connection&#39;s caller. It is the same Program evidence every runtime-hosted local service requires. unavailable means the binding could not be rechecked; forbidden is reserved for a boundary policy that withholds the echo; invalid for a request this provider cannot interpret. Observe grants, checks and changes nothing.</p>
+<h3><code>Observe</code></h3><p><code>request-response</code> <code>CallerObservation</code></p><ul>
+</ul>
+<h2 id="service-Endpoint">Service <code>Endpoint</code> <span class="tag">[DEF-S1]</span></h2>
+<p>The base-protocol description every generated endpoint serves beside its own contracts. A registry probes readiness with it over a connection that requires the declared program as the server. An endpoint built before this service answers unknown_service.</p>
+<p>Wire identity: <code>abstraction.facade/endpoint@1</code></p>
+<p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
+<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
+<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
+<p>Describe the services this endpoint hosts and each one&#39;s readiness. Grants, checks and changes nothing.</p>
+<h3><code>Describe</code></h3><p><code>request-response</code> <code>Description</code></p><ul>
+</ul>
+<h2 id="service-Registry">Service <code>Registry</code> <span class="tag">[DEF-S1]</span></h2>
+<p>The runtime&#39;s provider declarations, for operator tools. Applications never read it; they resolve. Each call is a rights decision for the bound operator subject; same-account identity alone grants nothing. A decision point that cannot answer reads unavailable. The registry is local: a remote runtime&#39;s services come from its own endpoint@1 Describe, and no registry is read across machines.</p>
+<p>Wire identity: <code>abstraction.facade/registry@1</code></p>
+<p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
+<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
+<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
+<p>Read every declaration and its reading. Gated by abstraction.facade/provider.manage on resource account.</p>
+<h3><code>Declarations</code></h3><p><code>request-response</code> <code>DeclarationList</code></p><ul>
+</ul>
+<p>Conditionally add one declaration, kept as providers/&lt;name&gt;.json in the runtime state. Gated by provider.manage. A program cannot declare itself (invalid, program:self). A store:&lt;name&gt; resource writes the permit rule abstraction.storage/inventory.provide on store:&lt;name&gt; for program, and a remote declaration writes abstraction.inference/complete on host:&lt;name&gt; for the runtime&#39;s operator programs and the caller; an existing rule on a target is left as it is. A declaration grants nothing else.</p>
+<h3><code>Declare</code></h3><p><code>request-response</code> <code>DeclarationChange</code></p><ul>
+<li>Argument 1: <code>string</code> <code>expected_revision</code> (required, including zero/false/empty)</li>
+<li>Argument 2: <code>Declaration</code> <code>declaration</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Conditionally remove one declaration: the runtime withdraws its candidates and hosts and ends a launched child. Gated by provider.manage. Rules are left as they are.</p>
+<h3><code>Withdraw</code></h3><p><code>request-response</code> <code>DeclarationChange</code></p><ul>
+<li>Argument 1: <code>string</code> <code>expected_revision</code> (required, including zero/false/empty)</li>
+<li>Argument 2: <code>string</code> <code>name</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Wait up to wait_ms milliseconds for the declarations or their readings to differ from cursor, then read them. An empty cursor answers at once. Gated by provider.manage.</p>
+<h3><code>Observe</code></h3><p><code>request-response</code> <code>DeclarationObservation</code></p><ul>
+<li>Argument 1: <code>string</code> <code>cursor</code> (required, including zero/false/empty)</li>
+<li>Argument 2: <code>i64</code> <code>wait_ms</code> (required, including zero/false/empty)</li>
+</ul>
+<h2 id="service-Applications">Service <code>Applications</code> <span class="tag">[DEF-S1]</span></h2>
+<p>Experimental application-presence profile owned by the OA service. Persistent operator descriptors and transient app announcements have distinct authority and lifetime. This is a local directory; MCP/UI metadata are claims, and invocation remains behind OA capability mediation. Native callers retain their actual account/program identity. Unsupported platform identity refuses access.</p>
+<p>Wire identity: <code>abstraction.facade/applications@1</code></p>
+<p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
+<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
+<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
+<p>Add an installed descriptor. Requires application.manage on account; existing names conflict. Does not launch or grant use. Programs cannot self-register.</p>
+<h3><code>Register</code></h3><p><code>request-response</code> <code>ApplicationChange</code></p><ul>
+<li>Argument 1: <code>ApplicationDescriptor</code> <code>descriptor</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Remove an installed descriptor and its presence. Requires application.manage on account. Does not terminate user applications.</p>
+<h3><code>Remove</code></h3><p><code>request-response</code> <code>ApplicationChange</code></p><ul>
+<li>Argument 1: <code>string</code> <code>application</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Publish or renew presence. Requires application.announce on app:&lt;name&gt;, a bound native program and kernel session matching this runtime, and current owner/session/epoch for renewal. Claims never alter descriptors or grants.</p>
+<h3><code>Announce</code></h3><p><code>request-response</code> <code>ApplicationChange</code></p><ul>
+<li>Argument 1: <code>ApplicationPresence</code> <code>presence</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Withdraw only the bound program and session&#39;s own current instance. Requires application.announce on app:&lt;name&gt;. Does not terminate the application or remove its installed descriptor.</p>
+<h3><code>Withdraw</code></h3><p><code>request-response</code> <code>ApplicationChange</code></p><ul>
+<li>Argument 1: <code>string</code> <code>application</code> (required, including zero/false/empty)</li>
+<li>Argument 2: <code>string</code> <code>instance</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Read or wait for a caller-filtered complete snapshot. Requires application.read on each returned app:&lt;name&gt;; hidden entries and changes remain undisclosed. Empty cursor answers immediately. wait_ms is 0..30000; permissions and lease expiry are rechecked while waiting. No activation occurs.</p>
+<h3><code>Observe</code></h3><p><code>request-response</code> <code>ApplicationPage</code></p><ul>
+<li>Argument 1: <code>string</code> <code>cursor</code> (required, including zero/false/empty)</li>
+<li>Argument 2: <code>i64</code> <code>wait_ms</code> (required, including zero/false/empty)</li>
+</ul>
+<p>Reuse a matching descriptor-program-bound presence or share one bounded authorized start attempt in this local runtime session. Requires application.activate on app:&lt;name&gt;. Only the operator-registered typed recipe executes; guidance and announcements remain inert. Caller cancellation stops its wait and never terminates or restarts the application.</p>
+<h3><code>Activate</code></h3><p><code>request-response</code> <code>ApplicationActivationResult</code></p><ul>
+<li>Argument 1: <code>string</code> <code>application</code> (required, including zero/false/empty)</li>
+</ul>
 <h2 id="encoding">Encoding <span class="tag">[DEF-E1]</span></h2>
 <div class="wrap"><table>
 <thead><tr><th>setting</th><th>value</th><th>rule</th></tr></thead>
@@ -30,10 +116,11 @@
 <div class="wrap"><table>
 <thead><tr><th>kind</th><th>types</th></tr></thead>
 <tbody>
-<tr><td>built in</td><td><code>BootstrapState</code> <code>ResolutionStatus</code> <code>Scope</code> <code>string</code></td></tr>
-<tr><td>declared below</td><td><code>BootstrapObservation</code> <code>ResolveRequest</code> <code>ResolveResult</code> <code>ServiceReference</code></td></tr>
+<tr><td>built in</td><td><code>Activation</code> <code>ApplicationActivationOutcome</code> <code>ApplicationOutcome</code> <code>BootstrapState</code> <code>CallerOutcome</code> <code>DeclarationEditOutcome</code> <code>DeclarationListOutcome</code> <code>DeclarationReadiness</code> <code>DeclarationTransport</code> <code>DescriptionOutcome</code> <code>ResolutionStatus</code> <code>Scope</code> <code>ServiceReadiness</code> <code>bool</code> <code>i64</code> <code>string</code></td></tr>
+<tr><td>declared below</td><td><code>ApplicationActivationRecipe</code> <code>ApplicationDescriptor</code> <code>ApplicationInterface</code> <code>BootstrapObservation</code> <code>Declaration</code> <code>RemoteTrust</code> <code>ResolveRequest</code> <code>ResolveResult</code> <code>ServiceReference</code></td></tr>
 <tr><td>container <span class="tag">[DEF-T3]</span></td><td><code>list&lt;string&gt;</code></td></tr>
-<tr><td>repeated record <span class="tag">[DEF-A9]</span></td><td><code>list&lt;CapabilityObservation&gt;</code></td></tr>
+<tr><td>repeated record <span class="tag">[DEF-A9]</span></td><td><code>list&lt;ApplicationContext&gt;</code> <code>list&lt;ApplicationEntry&gt;</code> <code>list&lt;ApplicationInstance&gt;</code> <code>list&lt;ApplicationInterface&gt;</code> <code>list&lt;CallerAttribute&gt;</code> <code>list&lt;CapabilityObservation&gt;</code> <code>list&lt;DeclarationState&gt;</code> <code>list&lt;ServiceState&gt;</code></td></tr>
+<tr><td>string map <span class="tag">[DEF-A10]</span></td><td><code>map&lt;string,string&gt;</code></td></tr>
 </tbody></table></div>
 <h2 id="structs">Structs <span class="tag">[DEF-T1]</span></h2>
 <p class="meta">A field is required, or says when it is omitted <span class="tag">[DEF-A4]</span>. Each struct says on its own what it does with a field name it has never heard of <span class="tag">[DEF-A7]</span>. A wire name never moves; where a language must spell it differently the field says so <span class="tag">[DEF-A2]</span>.</p>
@@ -92,46 +179,369 @@
 <tr><td>1</td><td><code>bootstrap</code></td><td><code>BootstrapObservation</code></td><td>required</td><td>—</td></tr>
 <tr><td>2</td><td><code>capabilities</code></td><td><code>list&lt;CapabilityObservation&gt;</code></td><td>required</td><td>—</td></tr>
 </tbody></table></div>
+<h3 id="struct-CallerAttribute"><code>CallerAttribute</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>attribute</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>proof</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>ceiling</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-CallerObservation"><code>CallerObservation</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>CallerOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>mechanism</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>account</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>program</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>pid</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+<tr><td>6</td><td><code>attributes</code></td><td><code>list&lt;CallerAttribute&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>7</td><td><code>platform</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>8</td><td><code>transport</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>9</td><td><code>bindable</code></td><td><code>bool</code></td><td>required</td><td>—</td></tr>
+<tr><td>10</td><td><code>stronger</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ServiceState"><code>ServiceState</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>contract</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>readiness</code></td><td><code>ServiceReadiness</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>why</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>guarantees</code></td><td><code>list&lt;string&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>capabilities</code></td><td><code>map&lt;string,string&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-Description"><code>Description</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>DescriptionOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>program</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>version</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>services</code></td><td><code>list&lt;ServiceState&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-RemoteTrust"><code>RemoteTrust</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>server_name</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>roots</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>certificate</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>key</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>credential</code></td><td><code>string</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-Declaration"><code>Declaration</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>name</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>program</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>arguments</code></td><td><code>list&lt;string&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>endpoint</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>transport</code></td><td><code>DeclarationTransport</code></td><td>required</td><td>—</td></tr>
+<tr><td>6</td><td><code>contracts</code></td><td><code>list&lt;string&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>7</td><td><code>guarantees</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>8</td><td><code>resources</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>9</td><td><code>activation</code></td><td><code>Activation</code></td><td>required</td><td>—</td></tr>
+<tr><td>10</td><td><code>remote</code></td><td><code>RemoteTrust</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+<tr><td>11</td><td><code>models</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-DeclarationState"><code>DeclarationState</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>declaration</code></td><td><code>Declaration</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>declared_by</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>declared_unix_ms</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>readiness</code></td><td><code>DeclarationReadiness</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>why</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>6</td><td><code>restarts</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+<tr><td>7</td><td><code>described</code></td><td><code>list&lt;ServiceState&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>8</td><td><code>accepted</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-DeclarationList"><code>DeclarationList</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>DeclarationListOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>revision</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>declarations</code></td><td><code>list&lt;DeclarationState&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-DeclarationChange"><code>DeclarationChange</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>DeclarationEditOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>revision</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>reason</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-DeclarationObservation"><code>DeclarationObservation</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>DeclarationListOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>cursor</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>declarations</code></td><td><code>list&lt;DeclarationState&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationInterface"><code>ApplicationInterface</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>name</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>protocol</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>contract</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationActivationRecipe"><code>ApplicationActivationRecipe</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>arguments</code></td><td><code>list&lt;string&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>readiness</code></td><td><code>ApplicationInterface</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>readiness_timeout_ms</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationDescriptor"><code>ApplicationDescriptor</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>name</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>program</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>title</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>start_guidance</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>activation</code></td><td><code>ApplicationActivationRecipe</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationContext"><code>ApplicationContext</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>name</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>title</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>revision</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationPresence"><code>ApplicationPresence</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>application</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>instance</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>interfaces</code></td><td><code>list&lt;ApplicationInterface&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>contexts</code></td><td><code>list&lt;ApplicationContext&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>5</td><td><code>lease_ms</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationInstance"><code>ApplicationInstance</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>instance</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>interfaces</code></td><td><code>list&lt;ApplicationInterface&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>contexts</code></td><td><code>list&lt;ApplicationContext&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>expires_unix_ms</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationEntry"><code>ApplicationEntry</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>descriptor</code></td><td><code>ApplicationDescriptor</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>instances</code></td><td><code>list&lt;ApplicationInstance&gt;</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>scope</code></td><td><code>Scope</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationChange"><code>ApplicationChange</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>ApplicationOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>instance</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>reason</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationPage"><code>ApplicationPage</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>ApplicationOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>cursor</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>applications</code></td><td><code>list&lt;ApplicationEntry&gt;</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-ApplicationActivationResult"><code>ApplicationActivationResult</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>outcome</code></td><td><code>ApplicationActivationOutcome</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>instance</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>started</code></td><td><code>bool</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>reason</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+</tbody></table></div>
 <h2 id="enums">Enumerations <span class="tag">[DEF-T5]</span></h2>
-<p>Enum fields carry JSON strings containing exact member names, never numeric IDs. Unknown names are preserved with grant and refused as bad_enum with refuse on read and write. Optional absent fields preserve presence separately from an empty string.</p>
+<p>Enum fields carry JSON strings containing exact member wire spellings, never numeric IDs. Unknown names are preserved with grant and refused as bad_enum with refuse on read and write. Optional absent fields preserve presence separately from an empty string.</p>
 <p class="meta">An enumeration is a closed vocabulary of wire names, and each one says on its own what a reader does with a member it has never heard of <span class="tag">[DEF-A5]</span>.</p>
 <h3 id="enum-Scope"><code>Scope</code></h3>
 <p class="meta">a member this reader does not know is <code>refuse</code></p>
 <div class="wrap"><table>
-<thead><tr><th>id</th><th>member</th></tr></thead>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><code>any</code></td></tr>
-<tr><td>2</td><td><code>local</code></td></tr>
-<tr><td>3</td><td><code>remote</code></td></tr>
+<tr><td>1</td><td><code>any</code></td><td><code>any</code></td></tr>
+<tr><td>2</td><td><code>local</code></td><td><code>local</code></td></tr>
+<tr><td>3</td><td><code>remote</code></td><td><code>remote</code></td></tr>
 </tbody></table></div>
 <h3 id="enum-ResolutionStatus"><code>ResolutionStatus</code></h3>
 <p class="meta">a member this reader does not know is <code>refuse</code></p>
 <div class="wrap"><table>
-<thead><tr><th>id</th><th>member</th></tr></thead>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><code>resolved</code></td></tr>
-<tr><td>2</td><td><code>unavailable</code></td></tr>
-<tr><td>3</td><td><code>forbidden</code></td></tr>
-<tr><td>4</td><td><code>incompatible</code></td></tr>
-<tr><td>5</td><td><code>unmet_requirements</code></td></tr>
-<tr><td>6</td><td><code>not_ready</code></td></tr>
-<tr><td>7</td><td><code>invalid_request</code></td></tr>
+<tr><td>1</td><td><code>resolved</code></td><td><code>resolved</code></td></tr>
+<tr><td>2</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+<tr><td>3</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>4</td><td><code>incompatible</code></td><td><code>incompatible</code></td></tr>
+<tr><td>5</td><td><code>unmet_requirements</code></td><td><code>unmet_requirements</code></td></tr>
+<tr><td>6</td><td><code>not_ready</code></td><td><code>not_ready</code></td></tr>
+<tr><td>7</td><td><code>invalid_request</code></td><td><code>invalid_request</code></td></tr>
 </tbody></table></div>
 <h3 id="enum-BootstrapState"><code>BootstrapState</code></h3>
 <p class="meta">a member this reader does not know is <code>refuse</code></p>
 <div class="wrap"><table>
-<thead><tr><th>id</th><th>member</th></tr></thead>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><code>unknown</code></td></tr>
-<tr><td>2</td><td><code>installed</code></td></tr>
-<tr><td>3</td><td><code>starting</code></td></tr>
-<tr><td>4</td><td><code>running</code></td></tr>
-<tr><td>5</td><td><code>unavailable</code></td></tr>
+<tr><td>1</td><td><code>unknown</code></td><td><code>unknown</code></td></tr>
+<tr><td>2</td><td><code>installed</code></td><td><code>installed</code></td></tr>
+<tr><td>3</td><td><code>starting</code></td><td><code>starting</code></td></tr>
+<tr><td>4</td><td><code>running</code></td><td><code>running</code></td></tr>
+<tr><td>5</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-CallerOutcome"><code>CallerOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>observed</code></td><td><code>observed</code></td></tr>
+<tr><td>2</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>3</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+<tr><td>4</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DescriptionOutcome"><code>DescriptionOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>described</code></td><td><code>described</code></td></tr>
+<tr><td>2</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>3</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+<tr><td>4</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-ServiceReadiness"><code>ServiceReadiness</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>ready</code></td><td><code>ready</code></td></tr>
+<tr><td>2</td><td><code>not_ready</code></td><td><code>not_ready</code></td></tr>
+<tr><td>3</td><td><code>unknown</code></td><td><code>unknown</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DeclarationTransport"><code>DeclarationTransport</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>native</code></td><td><code>oa-native@1</code></td></tr>
+<tr><td>2</td><td><code>remote</code></td><td><code>oa-remote@1</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-Activation"><code>Activation</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>on_demand</code></td><td><code>on_demand</code></td></tr>
+<tr><td>2</td><td><code>attach</code></td><td><code>attach</code></td></tr>
+<tr><td>3</td><td><code>remote</code></td><td><code>remote</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DeclarationReadiness"><code>DeclarationReadiness</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>ready</code></td><td><code>ready</code></td></tr>
+<tr><td>2</td><td><code>idle</code></td><td><code>idle</code></td></tr>
+<tr><td>3</td><td><code>starting</code></td><td><code>starting</code></td></tr>
+<tr><td>4</td><td><code>restarting</code></td><td><code>restarting</code></td></tr>
+<tr><td>5</td><td><code>refused</code></td><td><code>refused</code></td></tr>
+<tr><td>6</td><td><code>unreachable</code></td><td><code>unreachable</code></td></tr>
+<tr><td>7</td><td><code>not_ready</code></td><td><code>not_ready</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DeclarationListOutcome"><code>DeclarationListOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>page</code></td><td><code>page</code></td></tr>
+<tr><td>2</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+<tr><td>3</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>4</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DeclarationEditOutcome"><code>DeclarationEditOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>applied</code></td><td><code>applied</code></td></tr>
+<tr><td>2</td><td><code>conflict</code></td><td><code>conflict</code></td></tr>
+<tr><td>3</td><td><code>unknown</code></td><td><code>unknown</code></td></tr>
+<tr><td>4</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+<tr><td>5</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>6</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-ApplicationOutcome"><code>ApplicationOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>applied</code></td><td><code>applied</code></td></tr>
+<tr><td>2</td><td><code>page</code></td><td><code>page</code></td></tr>
+<tr><td>3</td><td><code>unknown</code></td><td><code>unknown</code></td></tr>
+<tr><td>4</td><td><code>stale</code></td><td><code>stale</code></td></tr>
+<tr><td>5</td><td><code>conflict</code></td><td><code>conflict</code></td></tr>
+<tr><td>6</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+<tr><td>7</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>8</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-ApplicationActivationOutcome"><code>ApplicationActivationOutcome</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>ready</code></td><td><code>ready</code></td></tr>
+<tr><td>2</td><td><code>unknown</code></td><td><code>unknown</code></td></tr>
+<tr><td>3</td><td><code>disabled</code></td><td><code>disabled</code></td></tr>
+<tr><td>4</td><td><code>forbidden</code></td><td><code>forbidden</code></td></tr>
+<tr><td>5</td><td><code>invalid</code></td><td><code>invalid</code></td></tr>
+<tr><td>6</td><td><code>launch_refused</code></td><td><code>launch_refused</code></td></tr>
+<tr><td>7</td><td><code>identity_refused</code></td><td><code>identity_refused</code></td></tr>
+<tr><td>8</td><td><code>not_ready</code></td><td><code>not_ready</code></td></tr>
+<tr><td>9</td><td><code>unavailable</code></td><td><code>unavailable</code></td></tr>
 </tbody></table></div>
 <h2 id="constants">Constants <span class="tag">[DEF-A6]</span></h2>
 <div class="wrap"><table>
 <thead><tr><th>name</th><th>type</th><th>value</th></tr></thead>
 <tbody>
+<tr><td><code>declaration_resource_kinds</code></td><td><code>list&lt;string&gt;</code></td><td><code>store, host, profile</code></td></tr>
+<tr><td><code>registry_actions</code></td><td><code>list&lt;string&gt;</code></td><td><code>abstraction.facade/provider.manage</code></td></tr>
 <tr><td><code>default_runtime_contracts</code></td><td><code>list&lt;string&gt;</code></td><td><code>abstraction.logging/sink@1, abstraction.config/reader@1, abstraction.job/acceptance@1, abstraction.job/operations@1, abstraction.config/editor@1</code></td></tr>
 </tbody></table></div>
 <h2 id="refusals">Refusal words <span class="tag">[DEF-R1]</span></h2>
@@ -150,15 +560,6 @@
 <tr><td>10</td><td><code>bad_enum</code></td><td><code>structure</code></td></tr>
 <tr><td>11</td><td><code>trailing_bytes</code></td><td><code>document</code></td></tr>
 </tbody></table></div>
-<h2 id="service-Resolver">Service <code>Resolver</code> <span class="tag">[DEF-S1]</span></h2>
-<p>Common provider resolution vocabulary. Authorization comes from the receiving boundary, never from request fields. See RESOLUTION.md for selection and refusal semantics.</p>
-<p>Wire identity: <code>abstraction.facade/resolver@1</code></p>
-<p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
-<p>Request-response methods use ExchangeFrame. Replies carry version, service, method, ok and payload; success payload contains typed value (or an empty object for void). Error payload contains nonempty code and message, which may be empty. ServiceError preserves unknown codes. Unexpected handler failures become handler_error without private details; invalid results become invalid_result. Clients validate reply identity and result before exposing it. A malformed frame or transport failure remains a local error; the transport must associate each response with its exchange. C++ dispatchers are pure protocol bindings, not listening servers.</p>
-<p>Find an authorized ready candidate satisfying an exact acceptable contract and all required guarantees. Does not submit work, activate an embedded provider, or transfer ownership.</p>
-<h3><code>Resolve</code></h3><p><code>request-response</code> <code>ResolveResult</code></p><ul>
-<li>Argument 1: <code>ResolveRequest</code> <code>request</code> (required, including zero/false/empty)</li>
-</ul>
 
 <footer>
 <p><a href="index.html">Overview</a> · <a href="cases.html">Cases</a> · <a href="reference.html">Reference</a> · <a href="evidence.html">Evidence</a> · <a href="coverage.html">Coverage</a> · <a href="adopt.html">Adopt</a> ·

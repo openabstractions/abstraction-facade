@@ -31,7 +31,7 @@ func (h *jobHandler) Reconcile(id api.RequestIdentity) (api.AcceptanceResult, er
 }
 func (h *jobHandler) CancelWork(api.RequestIdentity) (api.CancellationResult, error) {
 	h.cancels++
-	return api.CancellationResult{Outcome: "requested"}, nil
+	return api.CancellationResult{Outcome: api.CancellationOutcomeRequested}, nil
 }
 
 type jobTransport struct {
@@ -53,7 +53,7 @@ func (t *jobTransport) ExchangeFrameContext(ctx context.Context, frame []byte) (
 	return result, err
 }
 func receipt(id api.RequestIdentity) api.AcceptanceResult {
-	return api.AcceptanceResult{Outcome: "accepted", Receipt: &api.Receipt{Identity: id, LogicalOwner: "owner", OperationId: "operation", AcceptedGuarantees: []string{"bound", "explicit"}, HistoryRetentionMs: 1000}}
+	return api.AcceptanceResult{Outcome: api.AcceptanceOutcomeAccepted, Receipt: &api.Receipt{Identity: id, LogicalOwner: "owner", OperationID: "operation", AcceptedGuarantees: []string{"bound", "explicit"}, HistoryRetentionMs: 1000}}
 }
 func jobsFixture(t *testing.T) (*JobsClient, *jobHandler, *jobTransport) {
 	t.Helper()
@@ -95,7 +95,7 @@ func TestJobsUnknownReplyKeepsBindingAndFreshCallContext(t *testing.T) {
 		t.Fatal("canceled call performed I/O")
 	}
 	got, err := c.Reconcile(context.Background(), id)
-	if err != nil || got.Outcome != "accepted" || got.Receipt.OperationId != "operation" {
+	if err != nil || got.Outcome != api.AcceptanceOutcomeAccepted || got.Receipt.OperationID != "operation" {
 		t.Fatalf("fresh recovery: %+v %v", got, err)
 	}
 	if h.submits != 1 || h.cancels != 0 {
@@ -104,9 +104,11 @@ func TestJobsUnknownReplyKeepsBindingAndFreshCallContext(t *testing.T) {
 	if _, err = c.CancelWork(ctx, id); err != nil || h.cancels != 1 {
 		t.Fatalf("explicit cancel: %v", err)
 	}
-	h.result = func(api.RequestIdentity) api.AcceptanceResult { return api.AcceptanceResult{Outcome: "unknown"} }
+	h.result = func(api.RequestIdentity) api.AcceptanceResult {
+		return api.AcceptanceResult{Outcome: api.AcceptanceOutcomeUnknown}
+	}
 	got, err = c.Reconcile(ctx, id)
-	if err != nil || got.Outcome != "unknown" || api.CanResolveFresh(got) {
+	if err != nil || got.Outcome != api.AcceptanceOutcomeUnknown || api.CanResolveFresh(got) {
 		t.Fatalf("unknown reinterpreted: %+v %v", got, err)
 	}
 }
@@ -116,12 +118,12 @@ func TestJobsRejectsHostileReceipts(t *testing.T) {
 		"identity":    func(v *api.AcceptanceResult) { v.Receipt.Identity.Key = "other" },
 		"epoch":       func(v *api.AcceptanceResult) { v.Receipt.Identity.HistoryEpoch = "other" },
 		"owner":       func(v *api.AcceptanceResult) { v.Receipt.LogicalOwner = "other" },
-		"operation":   func(v *api.AcceptanceResult) { v.Receipt.OperationId = "" },
+		"operation":   func(v *api.AcceptanceResult) { v.Receipt.OperationID = "" },
 		"retention":   func(v *api.AcceptanceResult) { v.Receipt.HistoryRetentionMs = 0 },
 		"weak":        func(v *api.AcceptanceResult) { v.Receipt.AcceptedGuarantees = []string{"explicit"} },
 		"duplicate":   func(v *api.AcceptanceResult) { v.Receipt.AcceptedGuarantees = []string{"bound", "bound"} },
 		"empty":       func(v *api.AcceptanceResult) { v.Receipt.AcceptedGuarantees = []string{"bound", ""} },
-		"nonaccepted": func(v *api.AcceptanceResult) { v.Outcome = "unknown" },
+		"nonaccepted": func(v *api.AcceptanceResult) { v.Outcome = api.AcceptanceOutcomeUnknown },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {

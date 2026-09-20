@@ -1,13 +1,13 @@
 # Resolved logging from public C++ sources
 
-This example uses `Machine::ResolveLog()` to select a service, then submits a log
+This example uses `Machine::resolve_log()` to select a service, then submits a log
 frame. A missing resolver returns an error. The application owns no provider files.
 
 The exact six public GitHub revisions in [sources.lock](sources.lock) were fetched
 and built on 2026-09-12 with MSVC 19.51, Windows SDK 10.0.26100 and CMake 4.3.1-msvc1.
 They are a tested source set, not a latest-release claim. At this older facade
-revision `Log()` uses a conventional endpoint; this example deliberately calls
-`ResolveLog()`. Current development source also supports that explicit API.
+revision `log()` uses a conventional endpoint; this example deliberately calls
+`resolve_log()`. Current development source also supports that explicit API.
 
 ## Reproduce
 

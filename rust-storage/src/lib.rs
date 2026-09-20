@@ -47,7 +47,7 @@ impl<T: wire::FrameTransport + Clone> Client<T> {
     pub fn open(&self, d: &str) -> Result<wire::OpenResult, Error<T::Error>> {
         require(digest(d), "canonical SHA256 digest")?;
         let r = wire::ContentReaderClient::new(self.transport.clone())
-            .Open(d.into())
+            .open(d.into())
             .map_err(Error::Call)?;
         require(
             (r.outcome == "opened") == r.resource.is_some(),
@@ -69,7 +69,7 @@ impl<T: wire::FrameTransport + Clone> Client<T> {
             "read bounds",
         )?;
         let r = wire::ContentReaderClient::new(self.transport.clone())
-            .Read(v.handle.clone(), offset, max_bytes)
+            .read(v.handle.clone(), offset, max_bytes)
             .map_err(Error::Call)?;
         validate_read::<T::Error>(&r, v, offset, max_bytes)?;
         Ok(r)
@@ -77,7 +77,7 @@ impl<T: wire::FrameTransport + Clone> Client<T> {
     pub fn close(&self, v: &wire::Resource) -> Result<wire::CloseResult, Error<T::Error>> {
         require(resource(v), "resource")?;
         wire::ContentReaderClient::new(self.transport.clone())
-            .Close(v.handle.clone())
+            .close(v.handle.clone())
             .map_err(Error::Call)
     }
     /// Streams unverified bytes. Caller closes resource and verifies assembled digest.
@@ -90,7 +90,7 @@ impl<T: wire::FrameTransport + Clone> Client<T> {
         let result = (|| loop {
             let r = self.read(v, confirmed as i64, 65536)?;
             if r.outcome != "data" {
-                return Err(Error::Outcome(r.outcome));
+                return Err(Error::Outcome(r.outcome.to_string()));
             }
             let c = r.chunk.unwrap();
             let mut rest = c.data.as_slice();
@@ -187,7 +187,7 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
             "write request",
         )?;
         let r = wire::ContentWriterClient::new(self.transport.clone())
-            .Begin(request.into(), d.into(), size)
+            .begin(request.into(), d.into(), size)
             .map_err(Error::Call)?;
         validate_begin::<T::Error>(&r, d, size)?;
         Ok(r)
@@ -203,7 +203,7 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
             "append bounds",
         )?;
         let r = wire::ContentWriterClient::new(self.transport.clone())
-            .Append(u.handle.clone(), offset, data.to_vec())
+            .append(u.handle.clone(), offset, data.to_vec())
             .map_err(Error::Call)?;
         validate_append::<T::Error>(&r, u, offset, data.len() as i64)?;
         Ok(r)
@@ -211,7 +211,7 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
     pub fn commit(&self, u: &wire::Upload) -> Result<wire::CommitResult, Error<T::Error>> {
         require(upload(u), "upload")?;
         let r = wire::ContentWriterClient::new(self.transport.clone())
-            .Commit(u.handle.clone())
+            .commit(u.handle.clone())
             .map_err(Error::Call)?;
         validate_commit::<T::Error>(&r, u)?;
         Ok(r)
@@ -219,7 +219,7 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
     pub fn abort(&self, u: &wire::Upload) -> Result<wire::AbortResult, Error<T::Error>> {
         require(upload(u), "upload")?;
         wire::ContentWriterClient::new(self.transport.clone())
-            .Abort(u.handle.clone())
+            .abort(u.handle.clone())
             .map_err(Error::Call)
     }
     fn write_scoped(
@@ -233,7 +233,7 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
         match begun.outcome.as_str() {
             "committed" | "present" => return Ok(begun.stored.unwrap()),
             "started" => {}
-            _ => return Err(Error::Outcome(begun.outcome)),
+            _ => return Err(Error::Outcome(begun.outcome.to_string())),
         }
         let u = begun.upload.unwrap();
         let mut offset = u.received;
@@ -242,12 +242,12 @@ impl<T: wire::FrameTransport + Clone> Writer<T> {
             let a = self.append(&u, offset, &content[offset as usize..end])?;
             match a.outcome.as_str() {
                 "accepted" | "out_of_order" => offset = a.received,
-                _ => return Err(Error::Outcome(a.outcome)),
+                _ => return Err(Error::Outcome(a.outcome.to_string())),
             }
         }
         let c = self.commit(&u)?;
         if c.outcome != "committed" {
-            return Err(Error::Outcome(c.outcome));
+            return Err(Error::Outcome(c.outcome.to_string()));
         }
         Ok(c.stored.unwrap())
     }
@@ -337,7 +337,7 @@ impl<T: wire::FrameTransport + Clone> Changes<T> {
             "change request",
         )?;
         let p = wire::ContentChangesClient::new(self.transport.clone())
-            .Observe(from.into(), max_changes, wait_ms)
+            .observe(from.into(), max_changes, wait_ms)
             .map_err(Error::Call)?;
         check_change_page::<T::Error>(&p, from, max_changes)?;
         Ok(p)
@@ -345,7 +345,7 @@ impl<T: wire::FrameTransport + Clone> Changes<T> {
     pub fn list(&self, continuation: &str, limit: i64) -> Result<wire::ListingPage, Error<T::Error>> {
         require(cursor(continuation) && (1..=256).contains(&limit), "listing request")?;
         let p = wire::ContentChangesClient::new(self.transport.clone())
-            .List(continuation.into(), limit)
+            .list(continuation.into(), limit)
             .map_err(Error::Call)?;
         check_listing_page::<T::Error>(&p, limit)?;
         Ok(p)
@@ -357,7 +357,7 @@ impl<T: wire::FrameTransport + Clone> Changes<T> {
         loop {
             let p = self.list(&continuation, limit)?;
             if p.outcome != "page" {
-                return Err(Error::Outcome(p.outcome));
+                return Err(Error::Outcome(p.outcome.to_string()));
             }
             require(at.is_empty() || p.cursor == at, "snapshot cursor changed between pages")?;
             at = p.cursor;
@@ -383,25 +383,25 @@ pub trait StorageMachine<C: Connector> {
     fn resolve_storage_changes(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Changes<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     fn resolve_storage(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Client<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
     /// Every Begin, Append and Commit remains subject to the service write policy.
     fn resolve_storage_writer(
         &self,
         guarantees: Vec<String>,
-        scope: &str,
+        scope: abstraction_facade_service::wire::Scope,
     ) -> Result<Writer<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>>;
 }
 impl<C: Connector> StorageMachine<C> for Machine<C> {
     fn resolve_storage_changes(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Changes<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Changes::new(self.resolve_service(
             "abstraction.storage/content-changes@1",
@@ -412,7 +412,7 @@ impl<C: Connector> StorageMachine<C> for Machine<C> {
     fn resolve_storage(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Client<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Client::new(self.resolve_service(
             "abstraction.storage/content-reader@1",
@@ -423,7 +423,7 @@ impl<C: Connector> StorageMachine<C> for Machine<C> {
     fn resolve_storage_writer(
         &self,
         g: Vec<String>,
-        s: &str,
+        s: abstraction_facade_service::wire::Scope,
     ) -> Result<Writer<Binding<C>>, abstraction_facade_service::Error<TransportError<C>>> {
         Ok(Writer::new(self.resolve_service(
             "abstraction.storage/content-writer@1",
@@ -469,7 +469,7 @@ fn validate_append<E>(
 fn validate_commit<E>(r: &wire::CommitResult, u: &wire::Upload) -> Result<(), Error<E>> {
     require(
         (r.outcome == "committed") == r.stored.is_some()
-            && r.stored.as_ref().map_or(true, |s| {
+            && r.stored.as_ref().is_none_or(|s| {
                 s.digest == u.digest && s.size == u.size && s.evidence == "hashed"
             })
             && (r.outcome == "incomplete" || r.received == 0)
@@ -534,36 +534,38 @@ mod tests {
     const DIGEST: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
     #[test]
     fn change_and_listing_pages_keep_their_shapes() {
-        let change = |sequence: i64| {
-            let mut c = wire::Change::default();
-            c.sequence = sequence;
-            c.kind = "added".into();
-            c.digest = DIGEST.into();
-            c
+        let change = |sequence: i64| wire::Change {
+            sequence,
+            kind: wire::ChangeKind::Added,
+            digest: DIGEST.into(),
+            size: 0,
         };
-        let mut page = wire::ChangePage::default();
-        page.outcome = "page".into();
+        let empty = |outcome| wire::ChangePage { outcome, changes: vec![], next: String::new(), at_end: false };
+        let mut page = empty(wire::ChangePageOutcome::Page);
         page.next = "c2".into();
         page.changes = vec![change(1), change(2)];
         assert!(check_change_page::<()>(&page, "c1", 2).is_ok());
         assert!(check_change_page::<()>(&page, "c1", 1).is_err());
         page.changes = vec![change(2), change(1)];
         assert!(check_change_page::<()>(&page, "c1", 2).is_err());
-        let mut gap = wire::ChangePage::default();
-        gap.outcome = "gap".into();
+        let mut gap = empty(wire::ChangePageOutcome::Gap);
         gap.next = "c1".into();
         assert!(check_change_page::<()>(&gap, "c1", 16).is_ok());
         gap.next = "moved".into();
         assert!(check_change_page::<()>(&gap, "c1", 16).is_err());
-        let mut listing = wire::ListingPage::default();
-        listing.outcome = "forbidden".into();
+        let mut listing = wire::ListingPage {
+            outcome: wire::ListingOutcome::Forbidden,
+            objects: vec![],
+            continuation: String::new(),
+            complete: false,
+            cursor: String::new(),
+        };
         assert!(check_listing_page::<()>(&listing, 16).is_ok());
         listing.cursor = "leaked".into();
         assert!(check_listing_page::<()>(&listing, 16).is_err());
-        listing.outcome = "page".into();
+        listing.outcome = wire::ListingOutcome::Page;
         listing.complete = true;
-        let mut listed = wire::ListedObject::default();
-        listed.digest = DIGEST.into();
+        let listed = wire::ListedObject { digest: DIGEST.into(), ..Default::default() };
         listing.objects = vec![listed];
         assert!(check_listing_page::<()>(&listing, 16).is_ok());
         listing.complete = false;
@@ -581,7 +583,7 @@ mod tests {
         Some(wire::Stored {
             digest: DIGEST.into(),
             size,
-            evidence: evidence.into(),
+            evidence: wire::Evidence::from_wire(evidence).unwrap(),
         })
     }
     fn begin(
@@ -591,7 +593,7 @@ mod tests {
         limit: i64,
     ) -> wire::BeginResult {
         wire::BeginResult {
-            outcome: outcome.into(),
+            outcome: wire::BeginOutcome::from_wire(outcome).unwrap(),
             upload,
             stored,
             limit,
@@ -599,13 +601,13 @@ mod tests {
     }
     fn append(outcome: &str, received: i64) -> wire::AppendResult {
         wire::AppendResult {
-            outcome: outcome.into(),
+            outcome: wire::AppendOutcome::from_wire(outcome).unwrap(),
             received,
         }
     }
     fn commit(outcome: &str, stored: Option<wire::Stored>, received: i64) -> wire::CommitResult {
         wire::CommitResult {
-            outcome: outcome.into(),
+            outcome: wire::CommitOutcome::from_wire(outcome).unwrap(),
             stored,
             received,
         }
@@ -656,10 +658,10 @@ mod tests {
             handle: "opaque".into(),
             digest: format!("sha256:{}", "0".repeat(64)),
             size: 2,
-            verification: "unverified".into(),
+            verification: wire::Verification::Unverified,
         };
         let good = || wire::ReadResult {
-            outcome: "data".into(),
+            outcome: wire::ReadOutcome::Data,
             chunk: Some(wire::Chunk {
                 offset: 0,
                 total: 2,
@@ -671,7 +673,7 @@ mod tests {
         for which in 0..7 {
             let mut r = good();
             match which {
-                0 => r.outcome = "gap".into(),
+                0 => r.outcome = wire::ReadOutcome::Gap,
                 1 => r.chunk = None,
                 2 => r.chunk.as_mut().unwrap().offset = 1,
                 3 => r.chunk.as_mut().unwrap().total = 3,
