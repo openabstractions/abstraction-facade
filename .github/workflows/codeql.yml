@@ -39,7 +39,7 @@ jobs:
         if: matrix.language == 'c-cpp'
         with:
           repository: openabstractions/abstraction-identity
-          ref: b804c0cb1a2a9bb0705f20972db1942abd1c5822
+          ref: e2adfa0d160026141cdd34ef0eadd14a37d6b5f2
           path: abstraction-identity
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         if: matrix.language == 'c-cpp' && github.event.repository.name == 'abstraction-facade'
