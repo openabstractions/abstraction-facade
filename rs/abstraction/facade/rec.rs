@@ -413,17 +413,19 @@ impl PartialEq<&str> for ServiceReadiness {
 pub enum DeclarationTransport {
     Native,
     Remote,
+    Http,
 }
 
 impl DeclarationTransport {
     /// Every member, in declaration order.
-    pub const ALL: [Self; 2] = [Self::Native, Self::Remote];
+    pub const ALL: [Self; 3] = [Self::Native, Self::Remote, Self::Http];
 
     /// The member's name on the wire.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Native => "oa-native@1",
             Self::Remote => "oa-remote@1",
+            Self::Http => "http@1",
         }
     }
 
@@ -432,6 +434,7 @@ impl DeclarationTransport {
         match name {
             "oa-native@1" => Some(Self::Native),
             "oa-remote@1" => Some(Self::Remote),
+            "http@1" => Some(Self::Http),
             _ => None,
         }
     }
@@ -450,6 +453,56 @@ impl PartialEq<str> for DeclarationTransport {
 }
 
 impl PartialEq<&str> for DeclarationTransport {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+/// The closed vocabulary DeclarationRole. A reader refuses a name it does not list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DeclarationRole {
+    Provider,
+    Host,
+    Remote,
+}
+
+impl DeclarationRole {
+    /// Every member, in declaration order.
+    pub const ALL: [Self; 3] = [Self::Provider, Self::Host, Self::Remote];
+
+    /// The member's name on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::Host => "host",
+            Self::Remote => "remote",
+        }
+    }
+
+    /// The member a wire name spells, or `None` for a name this vocabulary refuses.
+    pub fn from_wire(name: &str) -> Option<Self> {
+        match name {
+            "provider" => Some(Self::Provider),
+            "host" => Some(Self::Host),
+            "remote" => Some(Self::Remote),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for DeclarationRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl PartialEq<str> for DeclarationRole {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for DeclarationRole {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
@@ -515,11 +568,12 @@ pub enum DeclarationReadiness {
     Refused,
     Unreachable,
     NotReady,
+    Disabled,
 }
 
 impl DeclarationReadiness {
     /// Every member, in declaration order.
-    pub const ALL: [Self; 7] = [Self::Ready, Self::Idle, Self::Starting, Self::Restarting, Self::Refused, Self::Unreachable, Self::NotReady];
+    pub const ALL: [Self; 8] = [Self::Ready, Self::Idle, Self::Starting, Self::Restarting, Self::Refused, Self::Unreachable, Self::NotReady, Self::Disabled];
 
     /// The member's name on the wire.
     pub fn as_str(self) -> &'static str {
@@ -531,6 +585,7 @@ impl DeclarationReadiness {
             Self::Refused => "refused",
             Self::Unreachable => "unreachable",
             Self::NotReady => "not_ready",
+            Self::Disabled => "disabled",
         }
     }
 
@@ -544,6 +599,7 @@ impl DeclarationReadiness {
             "refused" => Some(Self::Refused),
             "unreachable" => Some(Self::Unreachable),
             "not_ready" => Some(Self::NotReady),
+            "disabled" => Some(Self::Disabled),
             _ => None,
         }
     }
@@ -825,7 +881,7 @@ pub mod service_error_code {
     pub const ALL: [&str; 6] = [HANDLER_ERROR, INVALID_RESULT, UNKNOWN_VERSION, UNKNOWN_SERVICE, UNKNOWN_METHOD, WRONG_MODE];
 }
 
-pub const DECLARATION_RESOURCE_KINDS: [&str; 3] = ["store", "host", "profile"];
+pub const DECLARATION_RESOURCE_KINDS: [&str; 4] = ["store", "host", "profile", "card"];
 
 pub const REGISTRY_ACTIONS: [&str; 1] = ["abstraction.facade/provider.manage"];
 
@@ -985,21 +1041,58 @@ pub struct RemoteTrust {
     pub credential: String,
 }
 
-/// One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-/// unique. program is the absolute executable path the runtime launches and
-/// requires of the process serving endpoint; empty for a remote runtime.
-/// arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-/// replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of
-/// a-z 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1.
-/// transport is a DeclarationTransport member. contracts holds 1..16 distinct
-/// wire names of generated services the provider serves. guarantees holds 0..16
-/// distinct names its candidates advertise. resources holds 0..64 distinct
-/// <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ .
-/// -. models is the 0..64 distinct model names a native inference provider is
-/// trusted to serve, each 1..256 UTF-8 bytes without controls. on_demand
-/// launches program as a supervised child when a resolution first needs it;
-/// attach reads a provider something else started; remote is exactly the
-/// oa-remote@1 activation, and remote is present exactly then.
+/// The daily limits of the credential a host declaration names, per UTC day, in
+/// the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+/// in currency millionths, requests, images, audio seconds and characters. Zero
+/// or absent means no limit in that unit.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeclarationCeiling {
+    pub tokens_per_day: i64,
+    pub micros_per_day: i64,
+    pub requests_per_day: i64,
+    pub images_per_day: i64,
+    pub audio_seconds_per_day: i64,
+    pub characters_per_day: i64,
+}
+
+/// The foreign HTTP engine a declaration of role host names, the fields
+/// abstraction.inference/operator@1 HostEntry carries. base is its https or
+/// loopback http API root, with no user information, query or fragment. kind is
+/// the wire it speaks: an inference local_host_kinds member for a local engine,
+/// and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+/// is an engine on this machine, which carries no credential and no ceiling;
+/// hosted true is a provider endpoint off it, whose credential names the
+/// abstraction.credentials record the service applies and whose ceiling limits
+/// that credential. The profiles the host serves are its profile:<name>
+/// resources.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeclarationHost {
+    pub base: String,
+    pub kind: String,
+    pub hosted: bool,
+    pub credential: String,
+    pub ceiling: Option<DeclarationCeiling>,
+}
+
+/// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and
+/// unique. role names what it is, and each role validates its own fields
+/// (FAC-R6). A provider declares program, the absolute executable path the
+/// runtime launches and requires of the process serving endpoint, arguments of
+/// 0..64 strings of 1..4096 bytes with {endpoint} replaced by endpoint,
+/// endpoint a local endpoint name of 1..64 bytes of a-z 0-9 _ . -, transport
+/// oa-native@1, activation on_demand or attach, and contracts of 1..16 distinct
+/// wire names of generated services it serves. A remote declares transport
+/// oa-remote@1, activation remote, endpoint tls://<host>:<port>, the trust
+/// record in remote, and no program or arguments. A host declares transport
+/// http@1, activation attach, the engine in host, and no program, arguments,
+/// endpoint, contracts, guarantees, models or remote. guarantees holds 0..16
+/// distinct names a provider's candidates advertise. resources holds 0..64
+/// distinct <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of
+/// a-z 0-9 _ . -; profile:<name> is what a host or a remote serves. models is
+/// the 0..64 distinct model names a native inference provider is trusted to
+/// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
+/// as a supervised child when a resolution first needs it; attach reads a
+/// provider something else started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declaration {
     pub name: String,
@@ -1013,21 +1106,38 @@ pub struct Declaration {
     pub activation: Activation,
     pub remote: Option<RemoteTrust>,
     pub models: Vec<String>,
+    pub role: Option<DeclarationRole>,
+    pub host: Option<DeclarationHost>,
 }
 
-/// A declaration and the runtime's latest reading of it. declared_by is the
-/// operator program that declared it. ready means endpoint@1 Describe, over a
-/// connection requiring program as the server, listed every declared contract
-/// ready. idle is an on_demand provider nothing has needed yet; starting a
-/// launched child not yet ready; restarting a child that exited and waits out
-/// its backoff; refused a process at endpoint running another program (why
-/// program:<detail>); unreachable a provider whose Describe failed (why
-/// describe:<code or detail>); not_ready a provider whose Describe lists a
-/// declared contract not ready or absent (why contract:<wire name>:<reason>).
-/// described is the last Description's services. accepted holds the resources a
-/// capability accepted at the last reading, such as store:<name> described by
-/// an inventory source and permitted by inventory.provide. restarts counts
-/// launches after the first.
+/// The router's latest reading of a host declaration: whether its last survey
+/// reached the engine, and why it did not.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostReading {
+    pub up: bool,
+    pub why: String,
+}
+
+/// A declaration and the runtime's latest reading of it. role repeats the
+/// declaration's role, which the runtime resolves for a declaration that names
+/// none. declared_by is the operator program that declared it, the word
+/// installation for a declaration file the installation placed beside the
+/// runtime executable, or the product's own word for a host a product record
+/// declared. ready means endpoint@1 Describe, over a connection requiring
+/// program as the server, listed every declared contract ready; for a host it
+/// means the router's last survey reached it. idle is an on_demand provider
+/// nothing has needed yet; starting a launched child not yet ready; restarting
+/// a child that exited and waits out its backoff; refused a process at endpoint
+/// running another program (why program:<detail>); unreachable a provider whose
+/// Describe failed (why describe:<code or detail>), or a host the router did
+/// not reach (why host:<detail>); not_ready a provider whose Describe lists a
+/// declared contract not ready or absent (why contract:<wire name>:<reason>);
+/// disabled a declaration of the installation or a product an operator withdrew
+/// (why operator). described is the last Description's services, and host the
+/// router's reading of a host. accepted holds the resources a capability
+/// accepted at the last reading, such as store:<name> described by an inventory
+/// source and permitted by inventory.provide. restarts counts launches after
+/// the first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclarationState {
     pub declaration: Declaration,
@@ -1038,6 +1148,8 @@ pub struct DeclarationState {
     pub restarts: i64,
     pub described: Vec<ServiceState>,
     pub accepted: Vec<String>,
+    pub role: Option<DeclarationRole>,
+    pub host: Option<HostReading>,
 }
 
 /// page carries every declaration in name order, at most 64, and the
@@ -1496,6 +1608,119 @@ fn enc_remote_trust(out: &mut Vec<u8>, v: &RemoteTrust, depth: i32) {
     out.push(b'}');
 }
 
+fn enc_declaration_ceiling(out: &mut Vec<u8>, v: &DeclarationCeiling, depth: i32) {
+    out.push(b'{');
+    let mut first = true;
+    if v.tokens_per_day != 0 {
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "tokens_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.tokens_per_day);
+    }
+    if v.micros_per_day != 0 {
+        if !first {
+            out.push(b',');
+        }
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "micros_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.micros_per_day);
+    }
+    if v.requests_per_day != 0 {
+        if !first {
+            out.push(b',');
+        }
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "requests_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.requests_per_day);
+    }
+    if v.images_per_day != 0 {
+        if !first {
+            out.push(b',');
+        }
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "images_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.images_per_day);
+    }
+    if v.audio_seconds_per_day != 0 {
+        if !first {
+            out.push(b',');
+        }
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "audio_seconds_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.audio_seconds_per_day);
+    }
+    if v.characters_per_day != 0 {
+        if !first {
+            out.push(b',');
+        }
+        first = false;
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "characters_per_day");
+        out.extend_from_slice(b": ");
+        num(out, v.characters_per_day);
+    }
+    if !first {
+        out.push(b'\n');
+        pad(out, depth);
+    }
+    out.push(b'}');
+}
+
+fn enc_declaration_host(out: &mut Vec<u8>, v: &DeclarationHost, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "base");
+    out.extend_from_slice(b": ");
+    esc(out, &v.base);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "kind");
+    out.extend_from_slice(b": ");
+    esc(out, &v.kind);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "hosted");
+    out.extend_from_slice(b": ");
+    out.extend_from_slice(if v.hosted { b"true" } else { b"false" });
+    if !v.credential.is_empty() {
+        out.push(b',');
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "credential");
+        out.extend_from_slice(b": ");
+        esc(out, &v.credential);
+    }
+    if let Some(value) = &v.ceiling {
+        out.push(b',');
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "ceiling");
+        out.extend_from_slice(b": ");
+        enc_declaration_ceiling(out, value, depth + 1);
+    }
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
 fn enc_declaration(out: &mut Vec<u8>, v: &Declaration, depth: i32) {
     out.push(b'{');
     out.push(b'\n');
@@ -1570,6 +1795,22 @@ fn enc_declaration(out: &mut Vec<u8>, v: &Declaration, depth: i32) {
         esc(out, "models");
         out.extend_from_slice(b": ");
         strs(out, &v.models, depth + 1);
+    }
+    if let Some(value) = &v.role {
+        out.push(b',');
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "role");
+        out.extend_from_slice(b": ");
+        esc(out, value.as_str());
+    }
+    if let Some(value) = &v.host {
+        out.push(b',');
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "host");
+        out.extend_from_slice(b": ");
+        enc_declaration_host(out, value, depth + 1);
     }
     out.push(b'\n');
     pad(out, depth);
@@ -3094,6 +3335,192 @@ fn decode_remote_trust(r: &mut Reader) -> Result<RemoteTrust, Refusal> {
     })
 }
 
+fn decode_declaration_ceiling(r: &mut Reader) -> Result<DeclarationCeiling, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_tokens_per_day: i64 = Default::default();
+    let mut field_micros_per_day: i64 = Default::default();
+    let mut field_requests_per_day: i64 = Default::default();
+    let mut field_images_per_day: i64 = Default::default();
+    let mut field_audio_seconds_per_day: i64 = Default::default();
+    let mut field_characters_per_day: i64 = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "tokens_per_day" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_tokens_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "micros_per_day" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_micros_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "requests_per_day" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_requests_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "images_per_day" => {
+                    if seen & 8 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 8;
+                    field_images_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "audio_seconds_per_day" => {
+                    if seen & 16 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 16;
+                    field_audio_seconds_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "characters_per_day" => {
+                    if seen & 32 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 32;
+                    field_characters_per_day = r.integer(i64::MIN, i64::MAX)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    Ok(DeclarationCeiling {
+        tokens_per_day: field_tokens_per_day,
+        micros_per_day: field_micros_per_day,
+        requests_per_day: field_requests_per_day,
+        images_per_day: field_images_per_day,
+        audio_seconds_per_day: field_audio_seconds_per_day,
+        characters_per_day: field_characters_per_day,
+    })
+}
+
+fn decode_declaration_host(r: &mut Reader) -> Result<DeclarationHost, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_base: String = Default::default();
+    let mut field_kind: String = Default::default();
+    let mut field_hosted: bool = Default::default();
+    let mut field_credential: String = Default::default();
+    let mut field_ceiling: Option<DeclarationCeiling> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "base" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_base = r.string()?;
+                }
+                "kind" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_kind = r.string()?;
+                }
+                "hosted" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_hosted = r.boolean()?;
+                }
+                "credential" => {
+                    if seen & 8 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 8;
+                    field_credential = r.string()?;
+                }
+                "ceiling" => {
+                    if seen & 16 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 16;
+                    field_ceiling = Some(decode_declaration_ceiling(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 7 != 7 {
+        return r.refuse("missing_field");
+    }
+    Ok(DeclarationHost {
+        base: field_base,
+        kind: field_kind,
+        hosted: field_hosted,
+        credential: field_credential,
+        ceiling: field_ceiling,
+    })
+}
+
 fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
     if r.at() != b'{' {
         return r.refuse("wrong_type");
@@ -3111,6 +3538,8 @@ fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
     let mut field_activation: Option<String> = None;
     let mut field_remote: Option<RemoteTrust> = None;
     let mut field_models: Vec<String> = Default::default();
+    let mut field_role: Option<String> = None;
+    let mut field_host: Option<DeclarationHost> = None;
     let mut seen: u32 = 0;
     r.skip_ws();
     if r.at() != b'}' {
@@ -3204,6 +3633,20 @@ fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
                     seen |= 1024;
                     field_models = r.str_list()?;
                 }
+                "role" => {
+                    if seen & 2048 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2048;
+                    field_role = Some(r.string()?);
+                }
+                "host" => {
+                    if seen & 4096 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4096;
+                    field_host = Some(decode_declaration_host(r)?);
+                }
                 _ => {
                     return r.refuse("unknown_field");
                 }
@@ -3229,6 +3672,13 @@ fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
     let Some(field_activation) = field_activation.as_deref().and_then(Activation::from_wire) else {
         return r.refuse("bad_enum");
     };
+    let field_role = match field_role {
+        Some(name) => match DeclarationRole::from_wire(&name) {
+            Some(value) => Some(value),
+            None => return r.refuse("bad_enum"),
+        },
+        None => None,
+    };
     Ok(Declaration {
         name: field_name,
         program: field_program,
@@ -3241,6 +3691,71 @@ fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
         activation: field_activation,
         remote: field_remote,
         models: field_models,
+        role: field_role,
+        host: field_host,
+    })
+}
+
+fn decode_host_reading(r: &mut Reader) -> Result<HostReading, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_up: bool = Default::default();
+    let mut field_why: String = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "up" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_up = r.boolean()?;
+                }
+                "why" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_why = r.string()?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    Ok(HostReading {
+        up: field_up,
+        why: field_why,
     })
 }
 
@@ -3258,6 +3773,8 @@ fn decode_declaration_state(r: &mut Reader) -> Result<DeclarationState, Refusal>
     let mut field_restarts: i64 = Default::default();
     let mut field_described: Vec<ServiceState> = Default::default();
     let mut field_accepted: Vec<String> = Default::default();
+    let mut field_role: Option<String> = None;
+    let mut field_host: Option<HostReading> = None;
     let mut seen: u32 = 0;
     r.skip_ws();
     if r.at() != b'}' {
@@ -3330,6 +3847,20 @@ fn decode_declaration_state(r: &mut Reader) -> Result<DeclarationState, Refusal>
                     seen |= 128;
                     field_accepted = r.str_list()?;
                 }
+                "role" => {
+                    if seen & 256 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 256;
+                    field_role = Some(r.string()?);
+                }
+                "host" => {
+                    if seen & 512 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 512;
+                    field_host = Some(decode_host_reading(r)?);
+                }
                 _ => {
                     return r.refuse("unknown_field");
                 }
@@ -3355,6 +3886,13 @@ fn decode_declaration_state(r: &mut Reader) -> Result<DeclarationState, Refusal>
     let Some(field_readiness) = field_readiness.as_deref().and_then(DeclarationReadiness::from_wire) else {
         return r.refuse("bad_enum");
     };
+    let field_role = match field_role {
+        Some(name) => match DeclarationRole::from_wire(&name) {
+            Some(value) => Some(value),
+            None => return r.refuse("bad_enum"),
+        },
+        None => None,
+    };
     Ok(DeclarationState {
         declaration: field_declaration,
         declared_by: field_declared_by,
@@ -3364,6 +3902,8 @@ fn decode_declaration_state(r: &mut Reader) -> Result<DeclarationState, Refusal>
         restarts: field_restarts,
         described: field_described,
         accepted: field_accepted,
+        role: field_role,
+        host: field_host,
     })
 }
 
@@ -6041,9 +6581,23 @@ fn service_check_remote_trust(_v: &RemoteTrust) -> Result<(), Refusal> {
     Ok(())
 }
 
+fn service_check_declaration_ceiling(_v: &DeclarationCeiling) -> Result<(), Refusal> {
+    Ok(())
+}
+
+fn service_check_declaration_host(v: &DeclarationHost) -> Result<(), Refusal> {
+    if let Some(value) = &v.ceiling {
+        service_check_declaration_ceiling(value)?;
+    }
+    Ok(())
+}
+
 fn service_check_declaration(v: &Declaration) -> Result<(), Refusal> {
     if let Some(value) = &v.remote {
         service_check_remote_trust(value)?;
+    }
+    if let Some(value) = &v.host {
+        service_check_declaration_host(value)?;
     }
     Ok(())
 }
@@ -6334,12 +6888,14 @@ impl<T: FrameTransport> Endpoint for EndpointClient<T> {
     }
 }
 
-/// The runtime's provider declarations, for operator tools. Applications never
-/// read it; they resolve. Each call is a rights decision for the bound operator
-/// subject; same-account identity alone grants nothing. A decision point that
-/// cannot answer reads unavailable. The registry is local: a remote runtime's
-/// services come from its own endpoint@1 Describe, and no registry is read
-/// across machines.
+/// The runtime's one directory of the programs it knows, for operator tools:
+/// providers it launches or attaches to, foreign HTTP engines the router
+/// reaches, and other runtimes over mutual TLS. Applications never read it;
+/// they resolve. Each call is a rights decision for the bound operator subject;
+/// same-account identity alone grants nothing. A decision point that cannot
+/// answer reads unavailable. The registry is local: a remote runtime's services
+/// come from its own endpoint@1 Describe, and no registry is read across
+/// machines.
 pub trait Registry {
     type Error;
     /// Read every declaration and its reading. Gated by
@@ -6355,7 +6911,10 @@ pub trait Registry {
     fn declare(&self, expected_revision: String, declaration: Declaration) -> Result<DeclarationChange, Self::Error>;
     /// Conditionally remove one declaration: the runtime withdraws its
     /// candidates and hosts and ends a launched child. Gated by
-    /// provider.manage. Rules are left as they are.
+    /// provider.manage. A declaration the installation or a product declared is
+    /// disabled by name instead of removed, so a reinstall or a later probe
+    /// does not resurrect it, and a later Declare of that name enables it
+    /// again. Rules are left as they are.
     fn withdraw(&self, expected_revision: String, name: String) -> Result<DeclarationChange, Self::Error>;
     /// Wait up to wait_ms milliseconds for the declarations or their readings
     /// to differ from cursor, then read them. An empty cursor answers at once.

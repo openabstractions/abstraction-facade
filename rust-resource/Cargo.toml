@@ -1,0 +1,8 @@
+[package]
+name="abstraction-facade-resource"
+version="0.0.0"
+edition="2021"
+description="Optional typed resource table and leases access through shared facade resolution"
+[dependencies]
+abstraction-facade-service={path="../rust"}
+abstraction-resource-client={path="../../abstraction-resource/rust"}

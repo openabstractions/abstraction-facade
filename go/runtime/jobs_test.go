@@ -275,7 +275,25 @@ func TestRuntimeJobConfigurationPair(t *testing.T) {
 
 func TestRuntimeJobConnectionBoundAndClose(t *testing.T) {
 	o := jobOptions(t)
+	if assertDarwinNativeSocketRefusal(t, o) {
+		return
+	}
 	h, _ := runJobRuntime(t, o)
+	// Start a single-exchange frame but leave its one-byte body incomplete.
+	// Sessions classifies the connection from the first header byte before it
+	// delivers the call to jobHost.Serve; an idle raw socket is still waiting
+	// for that protocol byte and has not reached the job connection bound.
+	openIncompleteFrame := func() net.Conn {
+		c, err := listen.Dial(o.JobEndpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := c.Write([]byte{0, 0, 0, 1}); err != nil || n != 4 {
+			c.Close()
+			t.Fatalf("write incomplete frame header: wrote %d bytes: %v", n, err)
+		}
+		return c
+	}
 	var connections []net.Conn
 	defer func() {
 		for _, c := range connections {
@@ -283,11 +301,7 @@ func TestRuntimeJobConnectionBoundAndClose(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 64; i++ {
-		c, err := listen.Dial(o.JobEndpoint)
-		if err != nil {
-			t.Fatal(err)
-		}
-		connections = append(connections, c)
+		connections = append(connections, openIncompleteFrame())
 	}
 	deadline := time.Now().Add(time.Second)
 	for len(h.jobs.slots) != 64 {
@@ -296,10 +310,7 @@ func TestRuntimeJobConnectionBoundAndClose(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	extra, err := listen.Dial(o.JobEndpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
+	extra := openIncompleteFrame()
 	defer extra.Close()
 	extra.SetDeadline(time.Now().Add(time.Second))
 	var one [1]byte

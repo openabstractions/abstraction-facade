@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(facade_resource_consumer LANGUAGES CXX)
+find_package(abstraction_facade_resource CONFIG REQUIRED)
+add_executable(facade_resource_consumer main.cpp)
+target_link_libraries(facade_resource_consumer PRIVATE abstraction::facade_resource)
+enable_testing()
+add_test(NAME facade_resource_consumer COMMAND facade_resource_consumer)
+set_tests_properties(facade_resource_consumer PROPERTIES TIMEOUT 30)

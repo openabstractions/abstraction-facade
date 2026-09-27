@@ -11,10 +11,6 @@
 #ifdef _WIN32
 #include <abstraction/ipc/process.hpp>
 #endif
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#endif
-
 namespace abstraction::facade {
 
 inline std::string runtime_endpoint() { return ipc::runtime_endpoint(); }
@@ -25,17 +21,17 @@ inline constexpr std::string_view kInvalidResolution = "invalid_resolution";
 inline constexpr std::string_view kUnsupportedTransport = "unsupported_transport";
 
 // The platform this build targets when the runtime's platform declaration lists
-// it as unsupported: "android" or "macos". Empty on every other platform.
+// it as unsupported: "android". Empty on every other platform, including
+// "macos": macOS is declared but proceeds to installed-runtime selection
+// rather than this early refusal (RESOLUTION.md, "Unsupported platforms").
 // Defining ABSTRACTION_FACADE_TARGET_PLATFORM before the first include names
 // the target explicitly.
 inline std::string_view unsupported_platform() {
 #if defined(ABSTRACTION_FACADE_TARGET_PLATFORM)
     const std::string_view target = ABSTRACTION_FACADE_TARGET_PLATFORM;
-    return target == "android" || target == "macos" ? target : std::string_view();
+    return target == "android" ? target : std::string_view();
 #elif defined(__ANDROID__)
     return "android";
-#elif defined(__APPLE__) && TARGET_OS_OSX
-    return "macos";
 #else
     return {};
 #endif

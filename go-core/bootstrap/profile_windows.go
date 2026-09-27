@@ -35,16 +35,31 @@ func probeProfile(root string, create func(string) error) (ProfileView, error) {
 	}
 	name := fmt.Sprintf(".oa-profile-%d-%s", os.Getpid(), hex.EncodeToString(nonce))
 	probe := filepath.Join(root, name)
+	pattern := filepath.Join(root, "Packages", "*", "LocalCache", "Local", name)
+	// Deferred as one unconditional cleanup, before checking create's error:
+	// a create that fails after already creating the file (for example
+	// OpenFile succeeding and Close failing) still leaves a probe file, in
+	// root or in a package's redirected copy, and every exit below - the
+	// create error, a Glob error, the ambiguous->1 copy case, or a normal
+	// return - must remove whatever got created, not just the fully
+	// successful path. Removing a file that was never created, or an empty
+	// Glob match, is a harmless no-op.
+	defer func() {
+		//unchecked: see comment above — removing a file that was never created is a harmless no-op
+		os.Remove(probe)
+		if copies, err := filepath.Glob(pattern); err == nil {
+			for _, c := range copies {
+				//unchecked: see comment above — removing a file that was never created is a harmless no-op
+				os.Remove(c)
+			}
+		}
+	}()
 	if err := create(probe); err != nil {
 		return ProfileView{}, fmt.Errorf("bootstrap: profile view: %w", err)
 	}
-	defer os.Remove(probe)
-	copies, err := filepath.Glob(filepath.Join(root, "Packages", "*", "LocalCache", "Local", name))
+	copies, err := filepath.Glob(pattern)
 	if err != nil {
 		return ProfileView{}, fmt.Errorf("bootstrap: profile view: %w", err)
-	}
-	for _, c := range copies {
-		os.Remove(c)
 	}
 	switch len(copies) {
 	case 0:

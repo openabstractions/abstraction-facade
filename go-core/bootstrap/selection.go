@@ -17,7 +17,12 @@ var ErrUnsupportedSelection = errors.New("bootstrap: trusted installation select
 // different provider returned by that runtime. Keep selections immutable.
 type Selection struct {
 	Endpoint string
-	Server   listen.ServerExpectation
+	// EndpointFromEnvironment is true when ABSTRACTION_RUNTIME_ENDPOINT named
+	// Endpoint, instead of this installation's own registration. That name is
+	// the client's explicit choice: activation must report its absence as it
+	// is, never start the installation and wait on it.
+	EndpointFromEnvironment bool
+	Server                  listen.ServerExpectation
 }
 
 // SelectInstalled reads the current user's registered runtime installation.

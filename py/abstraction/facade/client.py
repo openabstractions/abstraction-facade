@@ -1,4 +1,5 @@
 """Typed service facade with shared native bootstrap; no provider fallback."""
+import dataclasses
 import sys
 import time
 from abstraction.ipc import FrameTransport, Library, FrameError, TIMEOUT, CANCELLED, ServerExpectation
@@ -9,12 +10,14 @@ RUNTIME_UNAVAILABLE = "runtime_unavailable"
 
 
 def unsupported_platform():
-    """Return "android" or "macos" when this process runs on a platform the
-    runtime's platform declaration lists as unsupported, otherwise None."""
+    """Return "android" when this process runs on Android, otherwise None.
+
+    "macos" (sys.platform "darwin") is a declared platform too, but returns
+    None here: macOS proceeds to installed-runtime selection rather than this
+    early refusal (RESOLUTION.md, "Unsupported platforms").
+    """
     if sys.platform == "android" or hasattr(sys, "getandroidapilevel"):
         return "android"
-    if sys.platform == "darwin":
-        return "macos"
     return None
 
 
@@ -38,6 +41,60 @@ class ResolutionError(RuntimeError):
         super().__init__(message)
         self.status, self.capability, self.contract, self.looked_for = status, capability, contract, looked_for
         self.platform = platform
+
+
+class Binding(FrameTransport):
+    """One resolved service: the transport a capability client calls through,
+    and the reference naming the provider that answered (CONTRACT.md FAC-B4).
+
+    A binding built from a caller-retained endpoint carries no reference.
+    A new waiting policy or call scope keeps the selected reference.
+    """
+
+    def __init__(self, library, endpoint, *, reference=None, **options):
+        super().__init__(library, endpoint, **options)
+        self._reference = reference
+
+    @property
+    def reference(self):
+        """The provider the runtime selected, with the capability, contract,
+        guarantees, scope, transport and endpoint it answered with, or None.
+
+        Read-only: each read returns an independent copy, and the reference
+        grants nothing."""
+        if self._reference is None:
+            return None
+        return dataclasses.replace(self._reference, guarantees=list(self._reference.guarantees))
+
+    def with_waiting(self, *, deadline=None, cancellation=None):
+        return Binding(self.library, self.endpoint.decode("utf-8"), reference=self._reference,
+                       timeout=self.timeout, deadline=deadline, cancellation=cancellation,
+                       max_frame=self.max_frame, server=self.server, sessions=self.sessions)
+
+    def call_scope(self):
+        deadline = self.deadline if self.deadline is not None else time.monotonic() + self.timeout
+        return Binding(self.library, self.endpoint.decode("utf-8"), reference=self._reference,
+                       timeout=self.timeout, deadline=deadline, cancellation=self.cancellation,
+                       max_frame=self.max_frame, server=self.server, sessions=self.sessions)
+
+
+def reference(binding):
+    """The reference the runtime returned for one resolved binding, or None.
+
+    binding is a Binding, or a capability client the facade built from one.
+    The reference names the provider that answered and grants nothing
+    (CONTRACT.md FAC-B4)."""
+    held = binding
+    for _ in range(4):
+        if isinstance(held, Binding):
+            return held.reference
+        following = getattr(held, "_transport", None)
+        if following is None:
+            following = getattr(held, "_binding", None)
+        if following is None:
+            return None
+        held = following
+    return None
 
 
 class Machine:
@@ -193,6 +250,38 @@ class Machine:
         from abstraction.storage.content.client import Changes
         return Changes(self._bind("abstraction.storage", "abstraction.storage/content-changes@1", guarantees, scope))
 
+    def resolve_service(self, contract, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Bind one exact versioned contract identity and return the Binding.
+
+        The capability is the contract's own prefix, as
+        abstraction.facade/resolver@1 names it. The binding carries the
+        reference naming the provider that answered; the capability accessors
+        above bind the same way and construct their typed client."""
+        capability, separator, profile = contract.partition("/") if isinstance(contract, str) else ("", "", "")
+        if not capability or not separator or not profile:
+            raise ValueError("invalid resolution requirements")
+        return self._bind(capability, contract, guarantees, scope)
+
+    def resolve_resource_table(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Read who holds a scarce resource on this machine.
+
+        Every read remains subject to abstraction.resource/table.read on resource
+        account, which narrows a refused caller to its own program's rows rather
+        than refusing the call (abstraction-resource CONTRACT.md RES-T4).
+        """
+        import abstraction.resource as resource
+        return resource.TableClient(self._bind("abstraction.resource", "abstraction.resource/table@1", guarantees, scope))
+
+    def resolve_resource_leases(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Hold a scarce resource, and be asked for it back.
+
+        Every Acquire remains subject to abstraction.resource/hold on the resource
+        asked for, which refuses a program with no rule rather than narrowing
+        anything (RES-L1).
+        """
+        import abstraction.resource as resource
+        return resource.LeasesClient(self._bind("abstraction.resource", "abstraction.resource/leases@1", guarantees, scope))
+
     def _bind(self, capability, contract, guarantees, scope):
         guarantees = list(guarantees)
         if not isinstance(scope, Scope) or any(
@@ -250,7 +339,8 @@ class Machine:
                 raise ValueError("provider_trust must return independent server expectation")
         if time.monotonic() >= end:
             raise FrameError(TIMEOUT, "resolution deadline expired")
-        return FrameTransport(self._library, ref.endpoint, server=server, max_frame=2*1024*1024 if capability == "abstraction.job" else 1024*1024, **self._options)
+        return Binding(self._library, ref.endpoint, reference=ref, server=server,
+                       max_frame=2*1024*1024 if capability == "abstraction.job" else 1024*1024, **self._options)
 
 
 _EVALUATED = ("permitted", "denied", "not_granted", "unknown_action")

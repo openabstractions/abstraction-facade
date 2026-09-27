@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	config "github.com/openabstractions/abstraction-config/go/client"
@@ -76,17 +78,21 @@ func (m *Machine) WithProviderTrust(policy resolution.ProviderTrust) *Machine {
 }
 
 func (m *Machine) resolver(ctx context.Context) (*resolution.Client, error) {
-	resolver, _, _, err := m.resolverSelection(ctx)
+	resolver, _, _, _, err := m.resolverSelection(ctx)
 	return resolver, err
 }
 
 // resolverSelection also names what it looked for, so a failure can say it.
-func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *listen.ServerExpectation, string, error) {
+// The reported bool is true only when the selected installation's endpoint
+// came from ABSTRACTION_RUNTIME_ENDPOINT rather than its own registration;
+// resolveActivating treats that endpoint as explicit, like m.server and
+// m.unverified, and never activates on its absence.
+func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *listen.ServerExpectation, bool, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, "", err
+		return nil, nil, false, "", err
 	}
 	if m.server != nil {
-		return resolution.NewVerifiedClient(m.endpoint, 2*time.Second, *m.server), m.server, "the explicit endpoint " + m.endpoint, nil
+		return resolution.NewVerifiedClient(m.endpoint, 2*time.Second, *m.server), m.server, false, "the explicit endpoint " + m.endpoint, nil
 	}
 	if m.unverified {
 		endpoint := m.endpoint
@@ -94,11 +100,11 @@ func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *l
 			var err error
 			endpoint, err = resolution.CheckedDefaultEndpoint()
 			if err != nil {
-				return nil, nil, "the installed runtime", err
+				return nil, nil, false, "the installed runtime", err
 			}
-			return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, "the installed runtime at " + endpoint, nil
+			return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, false, "the installed runtime at " + endpoint, nil
 		}
-		return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, "the explicit endpoint " + endpoint, nil
+		return resolution.NewUnverifiedClient(endpoint, 2*time.Second), nil, false, "the explicit endpoint " + endpoint, nil
 	}
 	selectInstalled := m.selectInstalled
 	if selectInstalled == nil {
@@ -106,14 +112,52 @@ func (m *Machine) resolverSelection(ctx context.Context) (*resolution.Client, *l
 	}
 	selected, err := selectInstalled(ctx)
 	if err != nil {
-		return nil, nil, "the installed runtime", err
+		return nil, nil, false, "the installed runtime", err
 	}
-	return resolution.NewVerifiedClient(selected.Endpoint, 2*time.Second, selected.Server), &selected.Server, "the installed runtime at " + selected.Endpoint, nil
+	return resolution.NewVerifiedClient(selected.Endpoint, 2*time.Second, selected.Server), &selected.Server, selected.EndpointFromEnvironment, "the installed runtime at " + selected.Endpoint, nil
 }
 
 func (m *Machine) resolve(ctx context.Context, capability, contract string, need Requirements) (listen.FrameClient, error) {
 	endpoint, _, err := m.resolveReference(ctx, capability, contract, need)
 	return endpoint, err
+}
+
+// Binding is one resolved service: the transport a capability client calls
+// through, and the reference naming the provider that answered (CONTRACT.md
+// FAC-B4).
+type Binding struct {
+	transport listen.FrameClient
+	reference wire.ServiceReference
+}
+
+// Transport is the bound connection a capability client is constructed with.
+func (b Binding) Transport() listen.FrameClient { return b.transport }
+
+// Reference names the provider the runtime selected for this binding, with the
+// capability, contract, guarantees, scope, transport and endpoint it answered
+// with. It is read-only: each call returns an independent copy, and the
+// reference grants nothing (CONTRACT.md FAC-B4).
+func (b Binding) Reference() wire.ServiceReference {
+	reference := b.reference
+	reference.Guarantees = slices.Clone(b.reference.Guarantees)
+	return reference
+}
+
+// ResolveService binds one exact versioned contract identity and returns the
+// binding with the reference the runtime returned. The capability is the
+// contract's own prefix, as abstraction.facade/resolver@1 names it. Use it
+// where an application names the provider that served it; the capability
+// accessors below bind the same way and construct their typed client.
+func (m *Machine) ResolveService(ctx context.Context, contract string, need Requirements) (Binding, error) {
+	capability, profile, found := strings.Cut(contract, "/")
+	if !found || capability == "" || profile == "" {
+		return Binding{}, errors.New("invalid resolution requirements")
+	}
+	transport, reference, err := m.resolveReference(ctx, capability, contract, need)
+	if err != nil {
+		return Binding{}, err
+	}
+	return Binding{transport: transport, reference: reference}, nil
 }
 
 // resolveReference also returns the selected reference, for bindings whose
@@ -129,7 +173,7 @@ func (m *Machine) resolveReference(caller context.Context, capability, contract 
 	}
 	ctx, cancel := context.WithTimeout(caller, 2*time.Second)
 	defer cancel()
-	resolver, server, lookedFor, err := m.resolverSelection(ctx)
+	resolver, server, environmentEndpoint, lookedFor, err := m.resolverSelection(ctx)
 	if err != nil {
 		return listen.FrameClient{}, wire.ServiceReference{}, resolution.Unreachable(caller, err, capability, contract, lookedFor)
 	}
@@ -138,7 +182,7 @@ func (m *Machine) resolveReference(caller context.Context, capability, contract 
 		need.Scope = wire.ScopeAny
 	}
 	request := wire.ResolveRequest{Capability: capability, Contracts: []string{contract}, Guarantees: need.Guarantees, Scope: need.Scope}
-	result, ctx, cancelActivated, err := m.resolveActivating(caller, ctx, resolver, server, request, capability, contract, lookedFor)
+	result, ctx, cancelActivated, err := m.resolveActivating(caller, ctx, resolver, server, environmentEndpoint, request, capability, contract, lookedFor)
 	defer cancelActivated()
 	var activation *ResolutionError
 	if errors.As(err, &activation) && activation.Status == UpgradeInProgress {
@@ -161,14 +205,14 @@ func (m *Machine) resolveReference(caller context.Context, capability, contract 
 // ResolveLog binds only the selected compatible provider. A later call failure
 // remains a failure of that binding; it never reroutes potentially accepted work.
 func (m *Machine) ResolveLog(ctx context.Context, need Requirements) (*logging.Client, error) {
-	ep, err := m.resolve(ctx, "abstraction.logging", "abstraction.logging/sink@1", need)
+	ep, err := m.resolve(ctx, "abstraction.logging", LogContract, need)
 	if err != nil {
 		return nil, err
 	}
 	return logging.NewWithTransport(ep), nil
 }
 func (m *Machine) ResolveConfig(ctx context.Context, need Requirements) (*config.Client, error) {
-	ep, err := m.resolve(ctx, "abstraction.config", "abstraction.config/reader@1", need)
+	ep, err := m.resolve(ctx, "abstraction.config", ConfigContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -178,14 +222,14 @@ func (m *Machine) ResolveConfig(ctx context.Context, need Requirements) (*config
 // ResolveConfigEditor binds user-setting mutations to the configuration service.
 // The service owns persistence and checks the revision at the write boundary.
 func (m *Machine) ResolveConfigEditor(ctx context.Context, need Requirements) (*config.Editor, error) {
-	ep, err := m.resolve(ctx, "abstraction.config", "abstraction.config/editor@1", need)
+	ep, err := m.resolve(ctx, "abstraction.config", ConfigEditorContract, need)
 	if err != nil {
 		return nil, err
 	}
 	return config.NewEditorWithTransport(ep), nil
 }
 func (m *Machine) ResolveRouter(ctx context.Context, need Requirements) (*router.Client, error) {
-	ep, err := m.resolve(ctx, "abstraction.router", "abstraction.router/router@1", need)
+	ep, err := m.resolve(ctx, "abstraction.router", RouterContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +238,7 @@ func (m *Machine) ResolveRouter(ctx context.Context, need Requirements) (*router
 
 // ResolveLogReader selects a provider advertising retained history.
 func (m *Machine) ResolveLogReader(ctx context.Context, need Requirements) (*logging.Reader, error) {
-	ep, err := m.resolve(ctx, "abstraction.logging", "abstraction.logging/reader@1", need)
+	ep, err := m.resolve(ctx, "abstraction.logging", LogReaderContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +247,7 @@ func (m *Machine) ResolveLogReader(ctx context.Context, need Requirements) (*log
 
 // ResolveLogObserver binds bounded long-poll history at the selected provider.
 func (m *Machine) ResolveLogObserver(ctx context.Context, need Requirements) (*logging.Observer, error) {
-	ep, err := m.resolve(ctx, "abstraction.logging", "abstraction.logging/observer@1", need)
+	ep, err := m.resolve(ctx, "abstraction.logging", LogObserverContract, need)
 	if err != nil {
 		return nil, err
 	}

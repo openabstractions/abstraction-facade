@@ -8,7 +8,7 @@ import (
 
 func TestDeclaredUnsupportedPlatforms(t *testing.T) {
 	for goos, want := range map[string]string{
-		"android": "android", "darwin": "macos", "linux": "", "windows": "", "freebsd": "",
+		"android": "android", "darwin": "", "linux": "", "windows": "", "freebsd": "",
 	} {
 		if got := UnsupportedPlatform(goos); got != want {
 			t.Errorf("UnsupportedPlatform(%q) = %q, want %q", goos, got, want)

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	jobapi "github.com/openabstractions/abstraction-job/go/abstraction/job/acceptance"
+	resourceservice "github.com/openabstractions/abstraction-resource/go/service"
 	rightspolicy "github.com/openabstractions/abstraction-rights/go"
 	routerservice "github.com/openabstractions/abstraction-router/go/service"
 )
@@ -24,7 +25,8 @@ const (
 // definitions do not yet, and their names are listed here.
 func ResourceRightsActions() []string {
 	actions := []string{ContentReadAction, ContentWriteAction, ContentObserveAction, ConfigEditAction,
-		LogHistoryAction, ModelLookupAction, routerservice.ActionInventory, routerservice.ActionRoute}
+		LogHistoryAction, ModelLookupAction, routerservice.ActionInventory, routerservice.ActionRoute,
+		resourceservice.ActionTableRead}
 	actions = append(actions, jobapi.ResourceActions...)
 	actions = append(actions, slices.Collect(maps.Values(JobRightsActions))...)
 	slices.Sort(actions)

@@ -1,5 +1,7 @@
 # Resolved logging from public C++ sources
 
+Install status: source checkout only — this example fetches pinned public commits and builds with CMake; no package registry ships this at 0.3.0 or after.
+
 This example uses `Machine::resolve_log()` to select a service, then submits a log
 frame. A missing resolver returns an error. The application owns no provider files.
 

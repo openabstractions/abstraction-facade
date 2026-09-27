@@ -36,6 +36,40 @@ const (
 type JobsClient = client.JobsClient
 type JobsOptions = client.JobsOptions
 
+// Contract identities requested by the typed Machine accessors.
+const (
+	ApplicationsContract       = client.ApplicationsContract
+	AsksContract               = client.AsksContract
+	AsksOperatorContract       = client.AsksOperatorContract
+	ConfigContract             = client.ConfigContract
+	ConfigEditorContract       = client.ConfigEditorContract
+	ConfigObserverContract     = client.ConfigObserverContract
+	CredentialsContract        = client.CredentialsContract
+	CredentialsApplierContract = client.CredentialsApplierContract
+	EmbeddingsContract         = client.EmbeddingsContract
+	InferenceContract          = client.InferenceContract
+	InferenceOperatorContract  = client.InferenceOperatorContract
+	JobInventoryContract       = client.JobInventoryContract
+	JobOperationsContract      = client.JobOperationsContract
+	JobOperatorContract        = client.JobOperatorContract
+	JobsContract               = client.JobsContract
+	LendingContract            = client.LendingContract
+	LogContract                = client.LogContract
+	LogObserverContract        = client.LogObserverContract
+	LogReaderContract          = client.LogReaderContract
+	ModelContract              = client.ModelContract
+	RegistryContract           = client.RegistryContract
+	ResourceLeasesContract     = client.ResourceLeasesContract
+	ResourceTableContract      = client.ResourceTableContract
+	RightsContract             = client.RightsContract
+	RightsOperatorContract     = client.RightsOperatorContract
+	RouterContract             = client.RouterContract
+	StorageContract            = client.StorageContract
+	StorageChangesContract     = client.StorageChangesContract
+	StorageInventoryContract   = client.StorageInventoryContract
+	StorageWriterContract      = client.StorageWriterContract
+)
+
 // DefaultStatusRequests supplies the generated baseline for Machine.Observe.
 // Applications may instead request only the capabilities they use.
 func DefaultStatusRequests() []wire.ResolveRequest { return client.DefaultStatusRequests() }

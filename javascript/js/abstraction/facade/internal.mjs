@@ -189,6 +189,13 @@ export const ServiceReadiness = Object.freeze({
 export const DeclarationTransport = Object.freeze({
   Native: "oa-native@1",
   Remote: "oa-remote@1",
+  Http: "http@1",
+});
+
+export const DeclarationRole = Object.freeze({
+  Provider: "provider",
+  Host: "host",
+  Remote: "remote",
 });
 
 export const Activation = Object.freeze({
@@ -205,6 +212,7 @@ export const DeclarationReadiness = Object.freeze({
   Refused: "refused",
   Unreachable: "unreachable",
   NotReady: "not_ready",
+  Disabled: "disabled",
 });
 
 export const DeclarationListOutcome = Object.freeze({
@@ -255,7 +263,7 @@ export const ServiceErrorCode = Object.freeze({
   WrongMode: "wrong_mode",
 });
 
-export const declarationResourceKinds = ["store", "host", "profile"];
+export const declarationResourceKinds = ["store", "host", "profile", "card"];
 
 export const registryActions = ["abstraction.facade/provider.manage"];
 
@@ -625,11 +633,115 @@ function writeRemoteTrust(out, v, depth) {
   out.byte(0x7d);
 }
 
+function writeDeclarationCeiling(out, v, depth) {
+  out.byte(0x7b);
+  let first = true;
+  if (v.tokensPerDay !== 0n) {
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "tokens_per_day");
+    out.ascii(": ");
+    num(out, v.tokensPerDay);
+  }
+  if (v.microsPerDay !== 0n) {
+    if (!first) out.byte(0x2c);
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "micros_per_day");
+    out.ascii(": ");
+    num(out, v.microsPerDay);
+  }
+  if (v.requestsPerDay !== 0n) {
+    if (!first) out.byte(0x2c);
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "requests_per_day");
+    out.ascii(": ");
+    num(out, v.requestsPerDay);
+  }
+  if (v.imagesPerDay !== 0n) {
+    if (!first) out.byte(0x2c);
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "images_per_day");
+    out.ascii(": ");
+    num(out, v.imagesPerDay);
+  }
+  if (v.audioSecondsPerDay !== 0n) {
+    if (!first) out.byte(0x2c);
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "audio_seconds_per_day");
+    out.ascii(": ");
+    num(out, v.audioSecondsPerDay);
+  }
+  if (v.charactersPerDay !== 0n) {
+    if (!first) out.byte(0x2c);
+    first = false;
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "characters_per_day");
+    out.ascii(": ");
+    num(out, v.charactersPerDay);
+  }
+  if (!first) { out.byte(0x0a); pad(out, depth); }
+  out.byte(0x7d);
+}
+
+function writeDeclarationHost(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "base");
+  out.ascii(": ");
+  esc(out, v.base);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "kind");
+  out.ascii(": ");
+  esc(out, v.kind);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "hosted");
+  out.ascii(": ");
+  out.ascii(v.hosted ? "true" : "false");
+  if (v.credential !== "") {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "credential");
+    out.ascii(": ");
+    esc(out, v.credential);
+  }
+  if (v.ceiling !== undefined && v.ceiling !== null) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "ceiling");
+    out.ascii(": ");
+    writeDeclarationCeiling(out, v.ceiling, depth + 1);
+  }
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
 function writeDeclaration(out, v, depth) {
     if (typeof v.transport !== "string") throw new Refusal("wrong_type",0);
-    if (v.transport !== "oa-native@1" && v.transport !== "oa-remote@1") { throw new Refusal("bad_enum",0); }
+    if (v.transport !== "oa-native@1" && v.transport !== "oa-remote@1" && v.transport !== "http@1") { throw new Refusal("bad_enum",0); }
     if (typeof v.activation !== "string") throw new Refusal("wrong_type",0);
     if (v.activation !== "on_demand" && v.activation !== "attach" && v.activation !== "remote") { throw new Refusal("bad_enum",0); }
+    if (v.role !== "") {
+    if (typeof v.role !== "string") throw new Refusal("wrong_type",0);
+    if (v.role !== "provider" && v.role !== "host" && v.role !== "remote") { throw new Refusal("bad_enum",0); }
+    }
   out.byte(0x7b);
   out.byte(0x0a);
   pad(out, depth + 1);
@@ -704,6 +816,40 @@ function writeDeclaration(out, v, depth) {
     out.ascii(": ");
     strs(out, v.models, depth + 1);
   }
+  if (v.role !== "") {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "role");
+    out.ascii(": ");
+    esc(out, v.role);
+  }
+  if (v.host !== undefined && v.host !== null) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "host");
+    out.ascii(": ");
+    writeDeclarationHost(out, v.host, depth + 1);
+  }
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeHostReading(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "up");
+  out.ascii(": ");
+  out.ascii(v.up ? "true" : "false");
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "why");
+  out.ascii(": ");
+  esc(out, v.why);
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -711,7 +857,11 @@ function writeDeclaration(out, v, depth) {
 
 function writeDeclarationState(out, v, depth) {
     if (typeof v.readiness !== "string") throw new Refusal("wrong_type",0);
-    if (v.readiness !== "ready" && v.readiness !== "idle" && v.readiness !== "starting" && v.readiness !== "restarting" && v.readiness !== "refused" && v.readiness !== "unreachable" && v.readiness !== "not_ready") { throw new Refusal("bad_enum",0); }
+    if (v.readiness !== "ready" && v.readiness !== "idle" && v.readiness !== "starting" && v.readiness !== "restarting" && v.readiness !== "refused" && v.readiness !== "unreachable" && v.readiness !== "not_ready" && v.readiness !== "disabled") { throw new Refusal("bad_enum",0); }
+    if (v.role !== "") {
+    if (typeof v.role !== "string") throw new Refusal("wrong_type",0);
+    if (v.role !== "provider" && v.role !== "host" && v.role !== "remote") { throw new Refusal("bad_enum",0); }
+    }
   out.byte(0x7b);
   out.byte(0x0a);
   pad(out, depth + 1);
@@ -761,6 +911,22 @@ function writeDeclarationState(out, v, depth) {
     esc(out, "accepted");
     out.ascii(": ");
     strs(out, v.accepted, depth + 1);
+  }
+  if (v.role !== "") {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "role");
+    out.ascii(": ");
+    esc(out, v.role);
+  }
+  if (v.host !== undefined && v.host !== null) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "host");
+    out.ascii(": ");
+    writeHostReading(out, v.host, depth + 1);
   }
   out.byte(0x0a);
   pad(out, depth);
@@ -1976,40 +2142,79 @@ export function newRemoteTrust() {
   return { serverName: "", roots: "", certificate: "", key: "", credential: "" };
 }
 
-// One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-// unique. program is the absolute executable path the runtime launches and
-// requires of the process serving endpoint; empty for a remote runtime.
-// arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-// replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of a-z
-// 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1. transport
-// is a DeclarationTransport member. contracts holds 1..16 distinct wire names
-// of generated services the provider serves. guarantees holds 0..16 distinct
-// names its candidates advertise. resources holds 0..64 distinct <kind>:<name>
-// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -. models is
-// the 0..64 distinct model names a native inference provider is trusted to
-// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-// as a supervised child when a resolution first needs it; attach reads a
-// provider something else started; remote is exactly the oa-remote@1
-// activation, and remote is present exactly then.
-export function newDeclaration() {
-  return { name: "", program: "", arguments: [], endpoint: "", transport: "", contracts: [], guarantees: [], resources: [], activation: "", remote: null, models: [] };
+// The daily limits of the credential a host declaration names, per UTC day, in
+// the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+// in currency millionths, requests, images, audio seconds and characters. Zero
+// or absent means no limit in that unit.
+export function newDeclarationCeiling() {
+  return { tokensPerDay: 0n, microsPerDay: 0n, requestsPerDay: 0n, imagesPerDay: 0n, audioSecondsPerDay: 0n, charactersPerDay: 0n };
 }
 
-// A declaration and the runtime's latest reading of it. declared_by is the
-// operator program that declared it. ready means endpoint@1 Describe, over a
-// connection requiring program as the server, listed every declared contract
-// ready. idle is an on_demand provider nothing has needed yet; starting a
-// launched child not yet ready; restarting a child that exited and waits out
-// its backoff; refused a process at endpoint running another program (why
-// program:<detail>); unreachable a provider whose Describe failed (why
-// describe:<code or detail>); not_ready a provider whose Describe lists a
-// declared contract not ready or absent (why contract:<wire name>:<reason>).
-// described is the last Description's services. accepted holds the resources a
-// capability accepted at the last reading, such as store:<name> described by an
-// inventory source and permitted by inventory.provide. restarts counts launches
-// after the first.
+// The foreign HTTP engine a declaration of role host names, the fields
+// abstraction.inference/operator@1 HostEntry carries. base is its https or
+// loopback http API root, with no user information, query or fragment. kind is
+// the wire it speaks: an inference local_host_kinds member for a local engine,
+// and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+// is an engine on this machine, which carries no credential and no ceiling;
+// hosted true is a provider endpoint off it, whose credential names the
+// abstraction.credentials record the service applies and whose ceiling limits
+// that credential. The profiles the host serves are its profile:<name>
+// resources.
+export function newDeclarationHost() {
+  return { base: "", kind: "", hosted: false, credential: "", ceiling: null };
+}
+
+// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
+// role names what it is, and each role validates its own fields (FAC-R6). A
+// provider declares program, the absolute executable path the runtime launches
+// and requires of the process serving endpoint, arguments of 0..64 strings of
+// 1..4096 bytes with {endpoint} replaced by endpoint, endpoint a local endpoint
+// name of 1..64 bytes of a-z 0-9 _ . -, transport oa-native@1, activation
+// on_demand or attach, and contracts of 1..16 distinct wire names of generated
+// services it serves. A remote declares transport oa-remote@1, activation
+// remote, endpoint tls://<host>:<port>, the trust record in remote, and no
+// program or arguments. A host declares transport http@1, activation attach,
+// the engine in host, and no program, arguments, endpoint, contracts,
+// guarantees, models or remote. guarantees holds 0..16 distinct names a
+// provider's candidates advertise. resources holds 0..64 distinct <kind>:<name>
+// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
+// profile:<name> is what a host or a remote serves. models is the 0..64
+// distinct model names a native inference provider is trusted to serve, each
+// 1..256 UTF-8 bytes without controls. on_demand launches program as a
+// supervised child when a resolution first needs it; attach reads a provider
+// something else started.
+export function newDeclaration() {
+  return { name: "", program: "", arguments: [], endpoint: "", transport: "", contracts: [], guarantees: [], resources: [], activation: "", remote: null, models: [], role: "", host: null };
+}
+
+// The router's latest reading of a host declaration: whether its last survey
+// reached the engine, and why it did not.
+export function newHostReading() {
+  return { up: false, why: "" };
+}
+
+// A declaration and the runtime's latest reading of it. role repeats the
+// declaration's role, which the runtime resolves for a declaration that names
+// none. declared_by is the operator program that declared it, the word
+// installation for a declaration file the installation placed beside the
+// runtime executable, or the product's own word for a host a product record
+// declared. ready means endpoint@1 Describe, over a connection requiring
+// program as the server, listed every declared contract ready; for a host it
+// means the router's last survey reached it. idle is an on_demand provider
+// nothing has needed yet; starting a launched child not yet ready; restarting a
+// child that exited and waits out its backoff; refused a process at endpoint
+// running another program (why program:<detail>); unreachable a provider whose
+// Describe failed (why describe:<code or detail>), or a host the router did not
+// reach (why host:<detail>); not_ready a provider whose Describe lists a
+// declared contract not ready or absent (why contract:<wire name>:<reason>);
+// disabled a declaration of the installation or a product an operator withdrew
+// (why operator). described is the last Description's services, and host the
+// router's reading of a host. accepted holds the resources a capability
+// accepted at the last reading, such as store:<name> described by an inventory
+// source and permitted by inventory.provide. restarts counts launches after the
+// first.
 export function newDeclarationState() {
-  return { declaration: newDeclaration(), declaredBy: "", declaredUnixMs: 0n, readiness: "", why: "", restarts: 0n, described: [], accepted: [] };
+  return { declaration: newDeclaration(), declaredBy: "", declaredUnixMs: 0n, readiness: "", why: "", restarts: 0n, described: [], accepted: [], role: "", host: null };
 }
 
 // page carries every declaration in name order, at most 64, and the
@@ -2778,6 +2983,111 @@ function readRemoteTrust(r) {
   return v;
 }
 
+function readDeclarationCeiling(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationCeiling();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "tokens_per_day") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.tokensPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "micros_per_day") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.microsPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "requests_per_day") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.requestsPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "images_per_day") {
+        if (seen & 8) throw r.refuse("duplicate_field");
+        seen |= 8;
+        v.imagesPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "audio_seconds_per_day") {
+        if (seen & 16) throw r.refuse("duplicate_field");
+        seen |= 16;
+        v.audioSecondsPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "characters_per_day") {
+        if (seen & 32) throw r.refuse("duplicate_field");
+        seen |= 32;
+        v.charactersPerDay = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  return v;
+}
+
+function readDeclarationHost(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationHost();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "base") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.base = r.string();
+      } else if (key === "kind") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.kind = r.string();
+      } else if (key === "hosted") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.hosted = r.boolean();
+      } else if (key === "credential") {
+        if (seen & 8) throw r.refuse("duplicate_field");
+        seen |= 8;
+        v.credential = r.string();
+      } else if (key === "ceiling") {
+        if (seen & 16) throw r.refuse("duplicate_field");
+        seen |= 16;
+        v.ceiling = readDeclarationCeiling(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 7) >>> 0) !== 7) throw r.refuse("missing_field");
+  return v;
+}
+
 function readDeclaration(r) {
   if (r.at() !== 0x7b) throw r.refuse("wrong_type");
   r.enter();
@@ -2838,6 +3148,14 @@ function readDeclaration(r) {
         if (seen & 1024) throw r.refuse("duplicate_field");
         seen |= 1024;
         v.models = r.strList();
+      } else if (key === "role") {
+        if (seen & 2048) throw r.refuse("duplicate_field");
+        seen |= 2048;
+        v.role = r.string();
+      } else if (key === "host") {
+        if (seen & 4096) throw r.refuse("duplicate_field");
+        seen |= 4096;
+        v.host = readDeclarationHost(r);
       } else {
         throw r.refuse("unknown_field");
       }
@@ -2850,8 +3168,50 @@ function readDeclaration(r) {
   r.pos++;
   r.depth--;
   if (((seen & 319) >>> 0) !== 319) throw r.refuse("missing_field");
-    if (v.transport !== "oa-native@1" && v.transport !== "oa-remote@1") { throw r.refuse("bad_enum"); }
+    if (v.transport !== "oa-native@1" && v.transport !== "oa-remote@1" && v.transport !== "http@1") { throw r.refuse("bad_enum"); }
     if (v.activation !== "on_demand" && v.activation !== "attach" && v.activation !== "remote") { throw r.refuse("bad_enum"); }
+    if ((seen & 2048) !== 0) {
+    if (v.role !== "provider" && v.role !== "host" && v.role !== "remote") { throw r.refuse("bad_enum"); }
+    }
+  return v;
+}
+
+function readHostReading(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newHostReading();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "up") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.up = r.boolean();
+      } else if (key === "why") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.why = r.string();
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
   return v;
 }
 
@@ -2903,6 +3263,14 @@ function readDeclarationState(r) {
         if (seen & 128) throw r.refuse("duplicate_field");
         seen |= 128;
         v.accepted = r.strList();
+      } else if (key === "role") {
+        if (seen & 256) throw r.refuse("duplicate_field");
+        seen |= 256;
+        v.role = r.string();
+      } else if (key === "host") {
+        if (seen & 512) throw r.refuse("duplicate_field");
+        seen |= 512;
+        v.host = readHostReading(r);
       } else {
         throw r.refuse("unknown_field");
       }
@@ -2915,7 +3283,10 @@ function readDeclarationState(r) {
   r.pos++;
   r.depth--;
   if (((seen & 127) >>> 0) !== 127) throw r.refuse("missing_field");
-    if (v.readiness !== "ready" && v.readiness !== "idle" && v.readiness !== "starting" && v.readiness !== "restarting" && v.readiness !== "refused" && v.readiness !== "unreachable" && v.readiness !== "not_ready") { throw r.refuse("bad_enum"); }
+    if (v.readiness !== "ready" && v.readiness !== "idle" && v.readiness !== "starting" && v.readiness !== "restarting" && v.readiness !== "refused" && v.readiness !== "unreachable" && v.readiness !== "not_ready" && v.readiness !== "disabled") { throw r.refuse("bad_enum"); }
+    if ((seen & 256) !== 0) {
+    if (v.role !== "provider" && v.role !== "host" && v.role !== "remote") { throw r.refuse("bad_enum"); }
+    }
   return v;
 }
 
@@ -4644,8 +5015,11 @@ _serviceRecords["CallerObservation"] = [["outcome","string","never"],["mechanism
 _serviceRecords["ServiceState"] = [["contract","string","never"],["readiness","string","never"],["why","string","never"],["guarantees","list<string>","never"],["capabilities","map<string,string>","never"],];
 _serviceRecords["Description"] = [["outcome","string","never"],["program","string","never"],["version","string","never"],["services","list<ServiceState>","never"],];
 _serviceRecords["RemoteTrust"] = [["serverName","string","never"],["roots","string","never"],["certificate","string","never"],["key","string","never"],["credential","string","zero"],];
-_serviceRecords["Declaration"] = [["name","string","never"],["program","string","never"],["arguments","list<string>","never"],["endpoint","string","never"],["transport","string","never"],["contracts","list<string>","never"],["guarantees","list<string>","zero"],["resources","list<string>","zero"],["activation","string","never"],["remote","RemoteTrust","absent"],["models","list<string>","zero"],];
-_serviceRecords["DeclarationState"] = [["declaration","Declaration","never"],["declaredBy","string","never"],["declaredUnixMs","i64","never"],["readiness","string","never"],["why","string","never"],["restarts","i64","never"],["described","list<ServiceState>","never"],["accepted","list<string>","zero"],];
+_serviceRecords["DeclarationCeiling"] = [["tokensPerDay","i64","zero"],["microsPerDay","i64","zero"],["requestsPerDay","i64","zero"],["imagesPerDay","i64","zero"],["audioSecondsPerDay","i64","zero"],["charactersPerDay","i64","zero"],];
+_serviceRecords["DeclarationHost"] = [["base","string","never"],["kind","string","never"],["hosted","bool","never"],["credential","string","zero"],["ceiling","DeclarationCeiling","absent"],];
+_serviceRecords["Declaration"] = [["name","string","never"],["program","string","never"],["arguments","list<string>","never"],["endpoint","string","never"],["transport","string","never"],["contracts","list<string>","never"],["guarantees","list<string>","zero"],["resources","list<string>","zero"],["activation","string","never"],["remote","RemoteTrust","absent"],["models","list<string>","zero"],["role","string","zero"],["host","DeclarationHost","absent"],];
+_serviceRecords["HostReading"] = [["up","bool","never"],["why","string","never"],];
+_serviceRecords["DeclarationState"] = [["declaration","Declaration","never"],["declaredBy","string","never"],["declaredUnixMs","i64","never"],["readiness","string","never"],["why","string","never"],["restarts","i64","never"],["described","list<ServiceState>","never"],["accepted","list<string>","zero"],["role","string","zero"],["host","HostReading","absent"],];
 _serviceRecords["DeclarationList"] = [["outcome","string","never"],["revision","string","never"],["declarations","list<DeclarationState>","never"],];
 _serviceRecords["DeclarationChange"] = [["outcome","string","never"],["revision","string","never"],["reason","string","never"],];
 _serviceRecords["DeclarationObservation"] = [["outcome","string","never"],["cursor","string","never"],["declarations","list<DeclarationState>","never"],];

@@ -1,8 +1,8 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package bootstrap
 
 import "context"
 
-// systemd and launchd start and restart the installed runtime; the SDK does not.
+// The platform has no supported installed-runtime activation route.
 func activateInstalled(context.Context, Selection) error { return ErrActivationUnsupported }

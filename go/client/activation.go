@@ -20,13 +20,14 @@ const UpgradeInProgress = resolution.UpgradeInProgress
 // resolveActivating is the resolver call of default discovery. On Windows,
 // when an installation was selected and its resolver endpoint does not exist,
 // it runs that installation's `openabstractions start` once within the
-// caller's budget and asks again. An explicit endpoint, a missing installation,
-// a refused connection and an untrusted server are reported as they are. The
-// returned context bounds the rest of the resolution.
-func (m *Machine) resolveActivating(caller, ctx context.Context, resolver *resolution.Client, server *listen.ServerExpectation,
+// caller's budget and asks again. An explicit endpoint (including one named by
+// ABSTRACTION_RUNTIME_ENDPOINT), a missing installation, a refused connection
+// and an untrusted server are reported as they are. The returned context
+// bounds the rest of the resolution.
+func (m *Machine) resolveActivating(caller, ctx context.Context, resolver *resolution.Client, server *listen.ServerExpectation, environmentEndpoint bool,
 	request wire.ResolveRequest, capability, contract, lookedFor string) (wire.ResolveResult, context.Context, context.CancelFunc, error) {
 	result, err := resolver.Resolve(ctx, request)
-	if err == nil || !m.activates(caller, server, err) {
+	if err == nil || !m.activates(caller, server, environmentEndpoint, err) {
 		return result, ctx, func() {}, err
 	}
 	activate := m.activate
@@ -51,9 +52,11 @@ func (m *Machine) resolveActivating(caller, ctx context.Context, resolver *resol
 }
 
 // activates reports an absent resolver endpoint of a selected installation, on
-// the platform whose SDK starts the installed runtime.
-func (m *Machine) activates(caller context.Context, server *listen.ServerExpectation, err error) bool {
-	if m.server != nil || m.unverified || server == nil || caller.Err() != nil {
+// the platform whose SDK starts the installed runtime. An endpoint named by
+// ABSTRACTION_RUNTIME_ENDPOINT is the client's explicit choice, like m.server
+// and m.unverified: its absence is reported at once, never activated.
+func (m *Machine) activates(caller context.Context, server *listen.ServerExpectation, environmentEndpoint bool, err error) bool {
+	if m.server != nil || m.unverified || server == nil || caller.Err() != nil || environmentEndpoint {
 		return false
 	}
 	if m.activate == nil && runtime.GOOS != "windows" {

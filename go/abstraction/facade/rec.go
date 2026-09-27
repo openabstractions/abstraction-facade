@@ -80,6 +80,7 @@ type DeclarationTransport = canonical.DeclarationTransport
 
 const DeclarationTransportNative = canonical.DeclarationTransportNative
 const DeclarationTransportRemote = canonical.DeclarationTransportRemote
+const DeclarationTransportHTTP = canonical.DeclarationTransportHTTP
 
 func ParseDeclarationTransport(word string) (DeclarationTransport, bool) {
 	return canonical.ParseDeclarationTransport(word)
@@ -87,6 +88,17 @@ func ParseDeclarationTransport(word string) (DeclarationTransport, bool) {
 func DeclarationTransportValues() []DeclarationTransport {
 	return canonical.DeclarationTransportValues()
 }
+
+type DeclarationRole = canonical.DeclarationRole
+
+const DeclarationRoleProvider = canonical.DeclarationRoleProvider
+const DeclarationRoleHost = canonical.DeclarationRoleHost
+const DeclarationRoleRemote = canonical.DeclarationRoleRemote
+
+func ParseDeclarationRole(word string) (DeclarationRole, bool) {
+	return canonical.ParseDeclarationRole(word)
+}
+func DeclarationRoleValues() []DeclarationRole { return canonical.DeclarationRoleValues() }
 
 type Activation = canonical.Activation
 
@@ -106,6 +118,7 @@ const DeclarationReadinessRestarting = canonical.DeclarationReadinessRestarting
 const DeclarationReadinessRefused = canonical.DeclarationReadinessRefused
 const DeclarationReadinessUnreachable = canonical.DeclarationReadinessUnreachable
 const DeclarationReadinessNotReady = canonical.DeclarationReadinessNotReady
+const DeclarationReadinessDisabled = canonical.DeclarationReadinessDisabled
 
 func ParseDeclarationReadiness(word string) (DeclarationReadiness, bool) {
 	return canonical.ParseDeclarationReadiness(word)
@@ -205,7 +218,10 @@ type CallerObservation = canonical.CallerObservation
 type ServiceState = canonical.ServiceState
 type Description = canonical.Description
 type RemoteTrust = canonical.RemoteTrust
+type DeclarationCeiling = canonical.DeclarationCeiling
+type DeclarationHost = canonical.DeclarationHost
 type Declaration = canonical.Declaration
+type HostReading = canonical.HostReading
 type DeclarationState = canonical.DeclarationState
 type DeclarationList = canonical.DeclarationList
 type DeclarationChange = canonical.DeclarationChange

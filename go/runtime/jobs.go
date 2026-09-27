@@ -63,13 +63,13 @@ func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*ident
 	if err != nil {
 		return nil, err
 	}
-	l, err := listen.Listen(endpoint)
+	l, err := listen.ListenFramed(endpoint, listen.Program)
 	if err != nil {
 		return nil, err
 	}
 	keep = true
 	ctx, cancel := context.WithCancel(context.Background())
-	return &jobHost{rootLease: lease, listener: l, provider: p, owner: osOwner, policy: policy, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 64), execution: executor != nil}, nil
+	return &jobHost{rootLease: lease, listener: listen.Sessions(l, listen.SessionOptions{MaxSessions: 64}), provider: p, owner: osOwner, policy: policy, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 64), execution: executor != nil}, nil
 }
 
 func (h *jobHost) candidate(endpoint string) resolution.Candidate {
@@ -108,6 +108,32 @@ func (h *jobHost) authorize(peer *identity.Peer) (string, error) {
 		return "", errors.New("runtime jobs: program refused by policy")
 	}
 	return OwnerProgramScope(user.Kind, principal, path)
+}
+
+func (h *jobHost) authorizeBinding(peer *identity.Peer) (acceptanceprovider.Binding, error) {
+	scope, err := h.authorize(peer)
+	if err != nil {
+		return acceptanceprovider.Binding{}, err
+	}
+	user, err := peer.User.AtLeast(listen.Program.User)
+	if err != nil {
+		return acceptanceprovider.Binding{}, err
+	}
+	account := user.SID
+	if user.Kind == "posix" {
+		account = strconv.Itoa(user.UID)
+	}
+	path, err := peer.Path.AtLeast(listen.Program.Path)
+	if err != nil {
+		return acceptanceprovider.Binding{}, err
+	}
+	program, err := identity.SubjectProgram(peer, listen.Program.Path)
+	if err != nil {
+		return acceptanceprovider.Binding{}, err
+	}
+	return acceptanceprovider.Binding{Scope: scope, Origin: "local", Subject: &acceptanceprovider.AuthenticatedSubject{
+		AccountKind: user.Kind, Account: account, Executable: filepath.Clean(path), Program: program,
+	}}, nil
 }
 
 // OwnerProgramScope is the caller scope the job host binds for an authenticated
@@ -221,7 +247,7 @@ func (h *jobHost) Serve(ctx context.Context) error {
 			defer conn.Close()
 			request, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 			defer cancel()
-			err := acceptanceprovider.HandleConnectionWithPolicy(request, conn, h.provider, h.authorize, h.methodPolicy)
+			err := acceptanceprovider.HandleConnectionWithBindingPolicy(request, conn, h.provider, h.authorizeBinding, h.methodPolicy)
 			if err != nil && h.onError != nil && h.ctx.Err() == nil {
 				h.onError(err)
 			}

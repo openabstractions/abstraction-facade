@@ -3,23 +3,42 @@ package bootstrap_test
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/openabstractions/abstraction-facade/go-core/bootstrap"
 	"github.com/openabstractions/abstraction-facade/go-core/resolution"
 )
 
-// The outside C++ consumer supplies independent implementation evidence for
-// both the current-user convention and the explicit environment override.
+// The outside C++ consumer supplies independent implementation evidence. On
+// macOS its default client uses the fixed installed LaunchAgent endpoint. Other
+// platforms share the generic convention and its explicit environment address.
 func TestCppRuntimeBootstrapAgreement(t *testing.T) {
 	probe := os.Getenv("OA_CPP_BOOTSTRAP_PROBE")
 	if probe == "" {
 		t.Skip("set OA_CPP_BOOTSTRAP_PROBE to the outside C++ bootstrap probe")
 	}
 	for _, override := range []string{"", "explicit-runtime-override"} {
-		t.Run("endpoint="+override, func(t *testing.T) {
+		contract := "generic-default"
+		if override != "" {
+			contract = "generic-environment-override"
+		}
+		if runtime.GOOS == "darwin" {
+			contract = "installed-default"
+			if override != "" {
+				contract = "installed-ignores-environment-override"
+			}
+		}
+		t.Run(contract, func(t *testing.T) {
 			t.Setenv("ABSTRACTION_RUNTIME_ENDPOINT", override)
-			want, err := resolution.CheckedDefaultEndpoint()
+			var want string
+			var err error
+			if runtime.GOOS == "darwin" {
+				want, err = bootstrap.InstalledEndpoint("runtime-v1")
+			} else {
+				want, err = resolution.CheckedDefaultEndpoint()
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

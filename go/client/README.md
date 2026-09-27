@@ -1,10 +1,31 @@
 # Go facade client
 
+Install status: published; every module in the tree pins `go/v0.5.0`, in place since 2026-09-20, and `go get github.com/openabstractions/abstraction-facade/go@v0.5.0` fetches it. 0.3.0 tags `go/v0.6.0`.
+
 Package `client` binds an application to capability services through the
 installed runtime. `Discover` authenticates the runtime from installation
 evidence; `NewVerified` takes an explicit endpoint and server expectation.
 `ResolveJobs` and `ResolveJobOperations` return a `JobsClient` for recoverable
 job acceptance, observation and result reads.
+
+## Naming the provider that served you
+
+`ResolveService` binds one exact versioned contract identity and returns a
+`Binding`. `Binding.Reference()` names the provider that answered, read-only, so
+an application can say which provider served it (CONTRACT.md `FAC-B4`). It is the
+resolver's `ServiceReference`: `Provider`, `Capability`, `Contract`,
+`Guarantees` (a guarantee is a contract-specific promise; see the
+[reference vocabulary](https://openabstractions.org/reference.html#vocabulary)), `Scope`, `Transport` and `Endpoint`. Each call returns an
+independent copy, and the reference grants nothing.
+
+```go
+binding, err := client.Discover().ResolveService(ctx, "abstraction.storage/content-reader@1", client.Requirements{})
+if err != nil {
+	return err
+}
+log.Printf("reused from %s", binding.Reference().Provider)
+reader := storage.NewWithTransport(binding.Transport())
+```
 
 ## Who owns a job
 
@@ -15,7 +36,9 @@ facts it observes on the connection:
 - the absolute path of the calling program's executable, as the operating system
   reports it for the running process.
 
-Request fields, process IDs and code signatures play no part. Identity keys,
+Caller scope is this job-filing identity. `Requirements.Scope` names placement
+(`local`, `remote` or `any`), a separate field on a separate type. Request
+fields, process IDs and code signatures play no part. Identity keys,
 receipts, observation and result bytes are visible only inside the scope that
 submitted them. `runtime.OwnerProgramScope` defines the scope value.
 
@@ -49,7 +72,10 @@ shares a scope.
    installation directory, where reinstall leaves them.
 3. After a restart or reinstall, restore the binding and continue with the saved
    identity. `RestoreJobs` authenticates the saved endpoint through the machine's
-   trust, refuses a different logical owner and never resubmits.
+   trust, refuses a different logical owner and never resubmits. This is Go's
+   form of resuming work after restart; in C++ it is client reconstruction, in
+   Python it is `Jobs.restore_installed()` / `Jobs.restore()`, and in Rust it
+   is `Jobs::restore()`.
 
 ```go
 jobs, err := client.Discover().RestoreJobs(ctx, saved.Binding)

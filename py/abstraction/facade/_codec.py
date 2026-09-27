@@ -222,6 +222,13 @@ class ServiceReadiness(_StrEnum):
 class DeclarationTransport(_StrEnum):
     NATIVE = "oa-native@1"
     REMOTE = "oa-remote@1"
+    HTTP = "http@1"
+
+
+class DeclarationRole(_StrEnum):
+    PROVIDER = "provider"
+    HOST = "host"
+    REMOTE = "remote"
 
 
 class Activation(_StrEnum):
@@ -238,6 +245,7 @@ class DeclarationReadiness(_StrEnum):
     REFUSED = "refused"
     UNREACHABLE = "unreachable"
     NOT_READY = "not_ready"
+    DISABLED = "disabled"
 
 
 class DeclarationListOutcome(_StrEnum):
@@ -288,7 +296,7 @@ class ServiceErrorCode(_StrEnum):
     WRONG_MODE = "wrong_mode"
 
 
-DECLARATION_RESOURCE_KINDS = ["store", "host", "profile"]
+DECLARATION_RESOURCE_KINDS = ["store", "host", "profile", "card"]
 
 
 REGISTRY_ACTIONS = ["abstraction.facade/provider.manage"]
@@ -463,22 +471,61 @@ class RemoteTrust:
 
 
 @dataclasses.dataclass(kw_only=True)
+class DeclarationCeiling:
+    """The daily limits of the credential a host declaration names, per UTC day, in
+    the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+    in currency millionths, requests, images, audio seconds and characters. Zero
+    or absent means no limit in that unit."""
+
+    tokens_per_day: int = 0
+    micros_per_day: int = 0
+    requests_per_day: int = 0
+    images_per_day: int = 0
+    audio_seconds_per_day: int = 0
+    characters_per_day: int = 0
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeclarationHost:
+    """The foreign HTTP engine a declaration of role host names, the fields
+    abstraction.inference/operator@1 HostEntry carries. base is its https or
+    loopback http API root, with no user information, query or fragment. kind is
+    the wire it speaks: an inference local_host_kinds member for a local engine,
+    and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+    is an engine on this machine, which carries no credential and no ceiling;
+    hosted true is a provider endpoint off it, whose credential names the
+    abstraction.credentials record the service applies and whose ceiling limits
+    that credential. The profiles the host serves are its profile:<name>
+    resources."""
+
+    base: str = ""
+    kind: str = ""
+    hosted: bool = False
+    credential: str = ""
+    ceiling: DeclarationCeiling | None = None
+
+
+@dataclasses.dataclass(kw_only=True)
 class Declaration:
-    """One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-    unique. program is the absolute executable path the runtime launches and
-    requires of the process serving endpoint; empty for a remote runtime.
-    arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-    replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of
-    a-z 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1.
-    transport is a DeclarationTransport member. contracts holds 1..16 distinct
-    wire names of generated services the provider serves. guarantees holds 0..16
-    distinct names its candidates advertise. resources holds 0..64 distinct
-    <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ .
-    -. models is the 0..64 distinct model names a native inference provider is
-    trusted to serve, each 1..256 UTF-8 bytes without controls. on_demand
-    launches program as a supervised child when a resolution first needs it;
-    attach reads a provider something else started; remote is exactly the
-    oa-remote@1 activation, and remote is present exactly then."""
+    """One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and
+    unique. role names what it is, and each role validates its own fields
+    (FAC-R6). A provider declares program, the absolute executable path the
+    runtime launches and requires of the process serving endpoint, arguments of
+    0..64 strings of 1..4096 bytes with {endpoint} replaced by endpoint,
+    endpoint a local endpoint name of 1..64 bytes of a-z 0-9 _ . -, transport
+    oa-native@1, activation on_demand or attach, and contracts of 1..16 distinct
+    wire names of generated services it serves. A remote declares transport
+    oa-remote@1, activation remote, endpoint tls://<host>:<port>, the trust
+    record in remote, and no program or arguments. A host declares transport
+    http@1, activation attach, the engine in host, and no program, arguments,
+    endpoint, contracts, guarantees, models or remote. guarantees holds 0..16
+    distinct names a provider's candidates advertise. resources holds 0..64
+    distinct <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of
+    a-z 0-9 _ . -; profile:<name> is what a host or a remote serves. models is
+    the 0..64 distinct model names a native inference provider is trusted to
+    serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
+    as a supervised child when a resolution first needs it; attach reads a
+    provider something else started."""
 
     name: str = ""
     program: str = ""
@@ -491,23 +538,41 @@ class Declaration:
     activation: Activation | None = None
     remote: RemoteTrust | None = None
     models: list[str] = dataclasses.field(default_factory=list)
+    role: DeclarationRole | None = None
+    host: DeclarationHost | None = None
+
+
+@dataclasses.dataclass(kw_only=True)
+class HostReading:
+    """The router's latest reading of a host declaration: whether its last survey
+    reached the engine, and why it did not."""
+
+    up: bool = False
+    why: str = ""
 
 
 @dataclasses.dataclass(kw_only=True)
 class DeclarationState:
-    """A declaration and the runtime's latest reading of it. declared_by is the
-    operator program that declared it. ready means endpoint@1 Describe, over a
-    connection requiring program as the server, listed every declared contract
-    ready. idle is an on_demand provider nothing has needed yet; starting a
-    launched child not yet ready; restarting a child that exited and waits out
-    its backoff; refused a process at endpoint running another program (why
-    program:<detail>); unreachable a provider whose Describe failed (why
-    describe:<code or detail>); not_ready a provider whose Describe lists a
-    declared contract not ready or absent (why contract:<wire name>:<reason>).
-    described is the last Description's services. accepted holds the resources a
-    capability accepted at the last reading, such as store:<name> described by
-    an inventory source and permitted by inventory.provide. restarts counts
-    launches after the first."""
+    """A declaration and the runtime's latest reading of it. role repeats the
+    declaration's role, which the runtime resolves for a declaration that names
+    none. declared_by is the operator program that declared it, the word
+    installation for a declaration file the installation placed beside the
+    runtime executable, or the product's own word for a host a product record
+    declared. ready means endpoint@1 Describe, over a connection requiring
+    program as the server, listed every declared contract ready; for a host it
+    means the router's last survey reached it. idle is an on_demand provider
+    nothing has needed yet; starting a launched child not yet ready; restarting
+    a child that exited and waits out its backoff; refused a process at endpoint
+    running another program (why program:<detail>); unreachable a provider whose
+    Describe failed (why describe:<code or detail>), or a host the router did
+    not reach (why host:<detail>); not_ready a provider whose Describe lists a
+    declared contract not ready or absent (why contract:<wire name>:<reason>);
+    disabled a declaration of the installation or a product an operator withdrew
+    (why operator). described is the last Description's services, and host the
+    router's reading of a host. accepted holds the resources a capability
+    accepted at the last reading, such as store:<name> described by an inventory
+    source and permitted by inventory.provide. restarts counts launches after
+    the first."""
 
     declaration: Declaration = dataclasses.field(default_factory=Declaration)
     declared_by: str = ""
@@ -517,6 +582,8 @@ class DeclarationState:
     restarts: int = 0
     described: list[ServiceState] = dataclasses.field(default_factory=list)
     accepted: list[str] = dataclasses.field(default_factory=list)
+    role: DeclarationRole | None = None
+    host: HostReading | None = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -1208,9 +1275,110 @@ def _write_remote_trust(out, v, depth):
     out += b"}"
 
 
+def _write_declaration_ceiling(out, v, depth):
+    out += b"{"
+    first = True
+    if v.tokens_per_day != 0:
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "tokens_per_day")
+        out += b": "
+        _num(out, v.tokens_per_day)
+    if v.micros_per_day != 0:
+        if not first:
+            out += b","
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "micros_per_day")
+        out += b": "
+        _num(out, v.micros_per_day)
+    if v.requests_per_day != 0:
+        if not first:
+            out += b","
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "requests_per_day")
+        out += b": "
+        _num(out, v.requests_per_day)
+    if v.images_per_day != 0:
+        if not first:
+            out += b","
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "images_per_day")
+        out += b": "
+        _num(out, v.images_per_day)
+    if v.audio_seconds_per_day != 0:
+        if not first:
+            out += b","
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "audio_seconds_per_day")
+        out += b": "
+        _num(out, v.audio_seconds_per_day)
+    if v.characters_per_day != 0:
+        if not first:
+            out += b","
+        first = False
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "characters_per_day")
+        out += b": "
+        _num(out, v.characters_per_day)
+    if not first:
+        out += b"\n"
+        _pad(out, depth)
+    out += b"}"
+
+
+def _write_declaration_host(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "base")
+    out += b": "
+    _esc(out, v.base)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "kind")
+    out += b": "
+    _esc(out, v.kind)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "hosted")
+    out += b": "
+    out += b"true" if v.hosted else b"false"
+    if v.credential:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "credential")
+        out += b": "
+        _esc(out, v.credential)
+    if v.ceiling is not None:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "ceiling")
+        out += b": "
+        _write_declaration_ceiling(out, v.ceiling, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
 def _write_declaration(out, v, depth):
     _closed_enum(DeclarationTransport, v.transport)
     _closed_enum(Activation, v.activation)
+    if v.role:
+        _closed_enum(DeclarationRole, v.role)
     out += b"{"
     out += b"\n"
     _pad(out, depth + 1)
@@ -1281,6 +1449,38 @@ def _write_declaration(out, v, depth):
         _esc(out, "models")
         out += b": "
         _strs(out, v.models, depth + 1)
+    if v.role:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "role")
+        out += b": "
+        _esc(out, v.role)
+    if v.host is not None:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "host")
+        out += b": "
+        _write_declaration_host(out, v.host, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_host_reading(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "up")
+    out += b": "
+    out += b"true" if v.up else b"false"
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "why")
+    out += b": "
+    _esc(out, v.why)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -1288,6 +1488,8 @@ def _write_declaration(out, v, depth):
 
 def _write_declaration_state(out, v, depth):
     _closed_enum(DeclarationReadiness, v.readiness)
+    if v.role:
+        _closed_enum(DeclarationRole, v.role)
     out += b"{"
     out += b"\n"
     _pad(out, depth + 1)
@@ -1337,6 +1539,20 @@ def _write_declaration_state(out, v, depth):
         _esc(out, "accepted")
         out += b": "
         _strs(out, v.accepted, depth + 1)
+    if v.role:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "role")
+        out += b": "
+        _esc(out, v.role)
+    if v.host is not None:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "host")
+        out += b": "
+        _write_host_reading(out, v.host, depth + 1)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -2157,6 +2373,17 @@ class _Reader:
     def string(self):
         if self.at() != _QUOTE:
             raise self.refuse("wrong_type")
+        # Most wire keys and values contain no escapes. Search and validate
+        # those bytes in C; retain the bytewise path for escapes and refusals.
+        end = self.buf.find(b'"', self.pos + 1)
+        if end >= 0:
+            chunk = self.buf[self.pos + 1:end]
+            if b"\\" not in chunk and (not chunk or min(chunk) >= 0x20):
+                self.pos = end + 1
+                try:
+                    return chunk.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise self.refuse("bad_string") from None
         self.pos += 1
         out = bytearray()
         while True:
@@ -3091,6 +3318,127 @@ def _read_remote_trust(r):
     return v
 
 
+def _read_declaration_ceiling(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationCeiling()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "tokens_per_day":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.tokens_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "micros_per_day":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.micros_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "requests_per_day":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.requests_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "images_per_day":
+                if seen & 8:
+                    raise r.refuse("duplicate_field")
+                seen |= 8
+                v.images_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "audio_seconds_per_day":
+                if seen & 16:
+                    raise r.refuse("duplicate_field")
+                seen |= 16
+                v.audio_seconds_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "characters_per_day":
+                if seen & 32:
+                    raise r.refuse("duplicate_field")
+                seen |= 32
+                v.characters_per_day = r.integer(-9223372036854775808, 9223372036854775807)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    return v
+
+
+def _read_declaration_host(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationHost()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "base":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.base = r.string()
+            elif key == "kind":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.kind = r.string()
+            elif key == "hosted":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.hosted = r.boolean()
+            elif key == "credential":
+                if seen & 8:
+                    raise r.refuse("duplicate_field")
+                seen |= 8
+                v.credential = r.string()
+            elif key == "ceiling":
+                if seen & 16:
+                    raise r.refuse("duplicate_field")
+                seen |= 16
+                v.ceiling = _read_declaration_ceiling(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 7 != 7:
+        raise r.refuse("missing_field")
+    return v
+
+
 def _read_declaration(r):
     if r.at() != _LBRACE:
         raise r.refuse("wrong_type")
@@ -3165,6 +3513,16 @@ def _read_declaration(r):
                     raise r.refuse("duplicate_field")
                 seen |= 1024
                 v.models = r.str_list()
+            elif key == "role":
+                if seen & 2048:
+                    raise r.refuse("duplicate_field")
+                seen |= 2048
+                v.role = r.string()
+            elif key == "host":
+                if seen & 4096:
+                    raise r.refuse("duplicate_field")
+                seen |= 4096
+                v.host = _read_declaration_host(r)
             else:
                 raise r.refuse("unknown_field")
             r.ws()
@@ -3185,6 +3543,55 @@ def _read_declaration(r):
         v.activation = Activation(v.activation)
     except ValueError:
         raise r.refuse("bad_enum") from None
+    if seen & 2048:
+        try:
+            v.role = DeclarationRole(v.role)
+        except ValueError:
+            raise r.refuse("bad_enum") from None
+    return v
+
+
+def _read_host_reading(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = HostReading()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "up":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.up = r.boolean()
+            elif key == "why":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.why = r.string()
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
     return v
 
 
@@ -3247,6 +3654,16 @@ def _read_declaration_state(r):
                     raise r.refuse("duplicate_field")
                 seen |= 128
                 v.accepted = r.str_list()
+            elif key == "role":
+                if seen & 256:
+                    raise r.refuse("duplicate_field")
+                seen |= 256
+                v.role = r.string()
+            elif key == "host":
+                if seen & 512:
+                    raise r.refuse("duplicate_field")
+                seen |= 512
+                v.host = _read_host_reading(r)
             else:
                 raise r.refuse("unknown_field")
             r.ws()
@@ -3263,6 +3680,11 @@ def _read_declaration_state(r):
         v.readiness = DeclarationReadiness(v.readiness)
     except ValueError:
         raise r.refuse("bad_enum") from None
+    if seen & 256:
+        try:
+            v.role = DeclarationRole(v.role)
+        except ValueError:
+            raise r.refuse("bad_enum") from None
     return v
 
 
@@ -5284,8 +5706,11 @@ _SERVICE_RECORDS = {
     "ServiceState": (ServiceState, [("contract", "string", "never"), ("readiness", "enum", "never"), ("why", "string", "never"), ("guarantees", "list<string>", "never"), ("capabilities", "map<string,string>", "never"), ]),
     "Description": (Description, [("outcome", "enum", "never"), ("program", "string", "never"), ("version", "string", "never"), ("services", "list<ServiceState>", "never"), ]),
     "RemoteTrust": (RemoteTrust, [("server_name", "string", "never"), ("roots", "string", "never"), ("certificate", "string", "never"), ("key", "string", "never"), ("credential", "string", "zero"), ]),
-    "Declaration": (Declaration, [("name", "string", "never"), ("program", "string", "never"), ("arguments", "list<string>", "never"), ("endpoint", "string", "never"), ("transport", "enum", "never"), ("contracts", "list<string>", "never"), ("guarantees", "list<string>", "zero"), ("resources", "list<string>", "zero"), ("activation", "enum", "never"), ("remote", "RemoteTrust", "absent"), ("models", "list<string>", "zero"), ]),
-    "DeclarationState": (DeclarationState, [("declaration", "Declaration", "never"), ("declared_by", "string", "never"), ("declared_unix_ms", "i64", "never"), ("readiness", "enum", "never"), ("why", "string", "never"), ("restarts", "i64", "never"), ("described", "list<ServiceState>", "never"), ("accepted", "list<string>", "zero"), ]),
+    "DeclarationCeiling": (DeclarationCeiling, [("tokens_per_day", "i64", "zero"), ("micros_per_day", "i64", "zero"), ("requests_per_day", "i64", "zero"), ("images_per_day", "i64", "zero"), ("audio_seconds_per_day", "i64", "zero"), ("characters_per_day", "i64", "zero"), ]),
+    "DeclarationHost": (DeclarationHost, [("base", "string", "never"), ("kind", "string", "never"), ("hosted", "bool", "never"), ("credential", "string", "zero"), ("ceiling", "DeclarationCeiling", "absent"), ]),
+    "Declaration": (Declaration, [("name", "string", "never"), ("program", "string", "never"), ("arguments", "list<string>", "never"), ("endpoint", "string", "never"), ("transport", "enum", "never"), ("contracts", "list<string>", "never"), ("guarantees", "list<string>", "zero"), ("resources", "list<string>", "zero"), ("activation", "enum", "never"), ("remote", "RemoteTrust", "absent"), ("models", "list<string>", "zero"), ("role", "enum", "zero"), ("host", "DeclarationHost", "absent"), ]),
+    "HostReading": (HostReading, [("up", "bool", "never"), ("why", "string", "never"), ]),
+    "DeclarationState": (DeclarationState, [("declaration", "Declaration", "never"), ("declared_by", "string", "never"), ("declared_unix_ms", "i64", "never"), ("readiness", "enum", "never"), ("why", "string", "never"), ("restarts", "i64", "never"), ("described", "list<ServiceState>", "never"), ("accepted", "list<string>", "zero"), ("role", "enum", "zero"), ("host", "HostReading", "absent"), ]),
     "DeclarationList": (DeclarationList, [("outcome", "enum", "never"), ("revision", "string", "never"), ("declarations", "list<DeclarationState>", "never"), ]),
     "DeclarationChange": (DeclarationChange, [("outcome", "enum", "never"), ("revision", "string", "never"), ("reason", "string", "never"), ]),
     "DeclarationObservation": (DeclarationObservation, [("outcome", "enum", "never"), ("cursor", "string", "never"), ("declarations", "list<DeclarationState>", "never"), ]),
@@ -5421,12 +5846,14 @@ class EndpointClient(Endpoint):
 
 
 class Registry:
-    """The runtime's provider declarations, for operator tools. Applications never
-    read it; they resolve. Each call is a rights decision for the bound operator
-    subject; same-account identity alone grants nothing. A decision point that
-    cannot answer reads unavailable. The registry is local: a remote runtime's
-    services come from its own endpoint@1 Describe, and no registry is read
-    across machines."""
+    """The runtime's one directory of the programs it knows, for operator tools:
+    providers it launches or attaches to, foreign HTTP engines the router
+    reaches, and other runtimes over mutual TLS. Applications never read it;
+    they resolve. Each call is a rights decision for the bound operator subject;
+    same-account identity alone grants nothing. A decision point that cannot
+    answer reads unavailable. The registry is local: a remote runtime's services
+    come from its own endpoint@1 Describe, and no registry is read across
+    machines."""
 
     def declarations(self) -> DeclarationList:
         """Read every declaration and its reading. Gated by
@@ -5446,7 +5873,10 @@ class Registry:
     def withdraw(self, expected_revision: str, name: str) -> DeclarationChange:
         """Conditionally remove one declaration: the runtime withdraws its
         candidates and hosts and ends a launched child. Gated by
-        provider.manage. Rules are left as they are."""
+        provider.manage. A declaration the installation or a product declared is
+        disabled by name instead of removed, so a reinstall or a later probe
+        does not resurrect it, and a later Declare of that name enables it
+        again. Rules are left as they are."""
         raise NotImplementedError
 
     def observe(self, cursor: str, wait_ms: int) -> DeclarationObservation:

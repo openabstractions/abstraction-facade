@@ -3,10 +3,13 @@ import {EndpointClient,RegistryClient,ResolverClient} from './js/abstraction/fac
 export const runtimeUnavailable='runtime_unavailable';
 /**
  * The platform the runtime's platform declaration lists as unsupported, for a
- * Node.js `process.platform` value: `android` or `macos`; otherwise null.
+ * Node.js `process.platform` value: `android`; otherwise null. `"macos"`
+ * (`process.platform` `darwin`) is declared too, but returns null here:
+ * macOS proceeds to installed-runtime selection rather than this early
+ * refusal (RESOLUTION.md, "Unsupported platforms").
  */
 export function unsupportedPlatform(platform) {
-  return platform==='android'?'android':platform==='darwin'?'macos':null;
+  return platform==='android'?'android':null;
 }
 /**
  * A resolve call produced no usable service; a transport failure is `cause`.

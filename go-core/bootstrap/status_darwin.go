@@ -6,9 +6,7 @@ import (
 	"errors"
 	wire "github.com/openabstractions/abstraction-facade/go-core/go/abstraction/facade"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -17,18 +15,11 @@ const runtimeAgent = "com.openabstractions.runtime"
 
 func hideStatusCommand(*exec.Cmd) {}
 func observeInstalled(ctx context.Context) wire.BootstrapObservation {
-	home, err := os.UserHomeDir()
+	selected, err := selectInstalled(ctx)
 	if err != nil {
-		return statusEvidence(wire.BootstrapStateUnknown, "user home unavailable")
+		return statusEvidence(wire.BootstrapStateUnknown, "trusted current-user LaunchAgent registration unavailable: "+err.Error())
 	}
-	raw, err := readAgent(filepath.Join(home, "Library", "LaunchAgents", runtimeAgent+".plist"))
-	if err != nil {
-		return statusEvidence(wire.BootstrapStateUnknown, "current-user LaunchAgent registration unavailable")
-	}
-	if err = ValidateRuntimeAgent(raw, filepath.Join(home, ".local", "bin", "openabstractions")); err != nil {
-		return statusEvidence(wire.BootstrapStateUnknown, err.Error())
-	}
-	out, err := statusCommand(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+runtimeAgent)
+	out, err := statusCommand(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(selected.Server.Principal.UID)+"/"+runtimeAgent)
 	if err != nil {
 		return statusEvidence(wire.BootstrapStateInstalled, "validated current-user LaunchAgent exists; supervision could not be observed")
 	}
@@ -129,6 +120,7 @@ func ValidateRuntimeAgent(raw []byte, executable string) error {
 	seen := map[string]bool{}
 	label, program := "", ""
 	var args []string
+	machServices := map[string]bool{}
 	for {
 		t, e := next()
 		if e != nil {
@@ -199,6 +191,42 @@ func ValidateRuntimeAgent(raw []byte, executable string) error {
 				}
 				args = append(args, v)
 			}
+		case "MachServices":
+			if value.Name != (xml.Name{Local: "dict"}) {
+				return bad()
+			}
+			for {
+				t, e := next()
+				if e != nil {
+					return e
+				}
+				if end, ok := t.(xml.EndElement); ok {
+					if end.Name != value.Name {
+						return bad()
+					}
+					break
+				}
+				keyEl, ok := t.(xml.StartElement)
+				if !ok || keyEl.Name != (xml.Name{Local: "key"}) {
+					return bad()
+				}
+				service, e := text(keyEl)
+				if e != nil || machServices[service] {
+					return bad()
+				}
+				t, e = next()
+				if e != nil {
+					return e
+				}
+				trueEl, ok := t.(xml.StartElement)
+				if !ok || trueEl.Name != (xml.Name{Local: "true"}) {
+					return bad()
+				}
+				if err := expect("true", true); err != nil {
+					return err
+				}
+				machServices[service] = true
+			}
 		default:
 			if err := d.Skip(); err != nil {
 				return err
@@ -211,8 +239,12 @@ func ValidateRuntimeAgent(raw []byte, executable string) error {
 	if _, err := next(); err != io.EOF {
 		return bad()
 	}
-	if label != runtimeAgent || len(args) != 3 || args[0] != executable || args[1] != "serve" || args[2] != "runtime" || (seen["Program"] && program != executable) {
-		return errors.New("start unsupported: installed LaunchAgent does not host the shared runtime; update the package")
+	validServices := len(machServices) == len(installedXPCServices)
+	for service := range installedXPCServices {
+		validServices = validServices && machServices[installedXPCPrefix+service]
+	}
+	if label != runtimeAgent || len(args) != 4 || args[0] != executable || args[1] != "serve" || args[2] != "runtime" || args[3] != "--xpc" || (seen["Program"] && program != executable) || !validServices {
+		return errors.New("start unsupported: installed LaunchAgent does not host the shared XPC runtime; update the package")
 	}
 	return nil
 }

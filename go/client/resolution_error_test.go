@@ -96,6 +96,22 @@ func TestRuntimeWithoutTheServiceIsTheResolversRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err := resolution.Listen(endpoint, catalog, func(*identity.Peer, wire.ServiceReference) bool { return true })
+	if runtime.GOOS == "darwin" {
+		if h != nil {
+			h.Close()
+			t.Fatal("insufficiently proven caller created a resolver")
+		}
+		if !errors.Is(err, identity.ErrNotProven) {
+			t.Fatalf("expected startup proof refusal, got %v", err)
+		}
+		for _, path := range []string{endpoint, endpoint + ".lock"} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("proof refusal created endpoint artifact %q: %v", path, err)
+			}
+		}
+		t.Skip("native Darwin sockets refuse Program at startup; resolver service refusal needs a running XPC host")
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,25 +128,6 @@ func TestRuntimeWithoutTheServiceIsTheResolversRefusal(t *testing.T) {
 	defer func() { cancel(); h.Close(); <-done }()
 
 	_, err = NewUnverified(endpoint).ResolveLog(ctx, Requirements{})
-	if runtime.GOOS == "darwin" {
-		// A resolver asks for listen.Program before it reads a request, and a
-		// Unix socket on Darwin cannot prove the caller's process. The resolver
-		// closes the connection without an answer, so the caller cannot reach it.
-		refused := resolutionError(t, err, RuntimeUnavailable, "the explicit endpoint "+endpoint)
-		if _, ok := refused.Refusal(); ok || refused.Err == nil {
-			t.Fatalf("unproven caller got a resolver answer: %+v", refused)
-		}
-		select {
-		case hostErr := <-hostErrors:
-			if !errors.Is(hostErr, identity.ErrNotProven) {
-				t.Fatalf("resolver closed the call for another reason: %v", hostErr)
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-		t.Log("UNPROVEN resolver refusal on Darwin: the caller cannot meet Program proof; the identity refusal is verified")
-		return
-	}
 	refused := resolutionError(t, err, ResolutionErrorStatus(wire.ResolutionStatusUnavailable.String()), "the explicit endpoint "+endpoint)
 	if status, ok := refused.Refusal(); !ok || status != wire.ResolutionStatusUnavailable || refused.Err != nil {
 		t.Fatalf("resolver refusal %+v", refused)
@@ -147,6 +144,23 @@ func TestRuntimeWithoutTheServiceIsTheResolversRefusal(t *testing.T) {
 	if client, err := NewUnverified(endpoint).ResolveLog(ctx, Requirements{}); err != nil || client == nil {
 		t.Fatalf("registered service: %v", err)
 	}
+}
+
+// An endpoint ABSTRACTION_RUNTIME_ENDPOINT named is the client's explicit
+// choice, like NewVerified/NewUnverified: SDK activation never starts the
+// selected installation to wait on it, and its absence is reported at once.
+func TestEnvironmentNamedEndpointIsNeverActivated(t *testing.T) {
+	endpoint := unusedEndpoint(t, "environment-named")
+	m := Discover()
+	m.selectInstalled = func(context.Context) (bootstrap.Selection, error) {
+		return bootstrap.Selection{Endpoint: endpoint, EndpointFromEnvironment: true}, nil
+	}
+	m.activate = func(context.Context, bootstrap.Selection) error {
+		t.Fatal("environment-named endpoint activated")
+		return nil
+	}
+	_, err := m.ResolveLog(context.Background(), Requirements{})
+	resolutionError(t, err, RuntimeUnavailable, "the installed runtime at "+endpoint)
 }
 
 func TestCallerCancellationStaysTheContextError(t *testing.T) {

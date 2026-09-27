@@ -895,6 +895,7 @@ type DeclarationTransport uint32
 const (
 	DeclarationTransportNative DeclarationTransport = 1
 	DeclarationTransportRemote DeclarationTransport = 2
+	DeclarationTransportHTTP   DeclarationTransport = 3
 )
 
 // String returns v's exact wire word, or the empty string for an invalid value.
@@ -910,6 +911,8 @@ func (v DeclarationTransport) WireName() (string, bool) {
 		return "oa-native@1", true
 	case DeclarationTransportRemote:
 		return "oa-remote@1", true
+	case DeclarationTransportHTTP:
+		return "http@1", true
 	}
 	return "", false
 }
@@ -921,6 +924,8 @@ func ParseDeclarationTransport(word string) (DeclarationTransport, bool) {
 		return DeclarationTransportNative, true
 	case "oa-remote@1":
 		return DeclarationTransportRemote, true
+	case "http@1":
+		return DeclarationTransportHTTP, true
 	}
 	return DeclarationTransport(0), false
 }
@@ -978,11 +983,115 @@ func (v *DeclarationTransport) UnmarshalJSON(data []byte) error {
 
 // DeclarationTransportValues returns every member of DeclarationTransport in declaration order, in a new slice.
 func DeclarationTransportValues() []DeclarationTransport {
-	return []DeclarationTransport{DeclarationTransportNative, DeclarationTransportRemote}
+	return []DeclarationTransport{DeclarationTransportNative, DeclarationTransportRemote, DeclarationTransportHTTP}
 }
 
 // Known reports whether v is a member of DeclarationTransport.
 func (v DeclarationTransport) Known() bool {
+	_, ok := v.WireName()
+	return ok
+}
+
+// DeclarationRole is a closed vocabulary. Its numeric values are private implementation
+// tags; String and ParseDeclarationRole preserve the exact wire words.
+type DeclarationRole uint32
+
+const (
+	DeclarationRoleProvider DeclarationRole = 1
+	DeclarationRoleHost     DeclarationRole = 2
+	DeclarationRoleRemote   DeclarationRole = 3
+)
+
+// String returns v's exact wire word, or the empty string for an invalid value.
+func (v DeclarationRole) String() string {
+	word, _ := v.WireName()
+	return word
+}
+
+// WireName returns v's exact wire word and whether v names a member.
+func (v DeclarationRole) WireName() (string, bool) {
+	switch v {
+	case DeclarationRoleProvider:
+		return "provider", true
+	case DeclarationRoleHost:
+		return "host", true
+	case DeclarationRoleRemote:
+		return "remote", true
+	}
+	return "", false
+}
+
+// ParseDeclarationRole returns the member named by an exact wire word.
+func ParseDeclarationRole(word string) (DeclarationRole, bool) {
+	switch word {
+	case "provider":
+		return DeclarationRoleProvider, true
+	case "host":
+		return DeclarationRoleHost, true
+	case "remote":
+		return DeclarationRoleRemote, true
+	}
+	return DeclarationRole(0), false
+}
+
+// MarshalText preserves the member's exact wire word for standard text users,
+// including JSON object keys. Invalid and zero values are refused.
+func (v DeclarationRole) MarshalText() ([]byte, error) {
+	word, ok := v.WireName()
+	if !ok {
+		return nil, &Refusal{Word: "bad_enum", Offset: 0}
+	}
+	return []byte(word), nil
+}
+
+// UnmarshalText accepts an exact wire word and refuses unknown text.
+func (v *DeclarationRole) UnmarshalText(text []byte) error {
+	word, ok := ParseDeclarationRole(string(text))
+	if !ok {
+		return &Refusal{Word: "bad_enum", Offset: 0}
+	}
+	*v = word
+	return nil
+}
+
+// MarshalJSON keeps closed vocabularies as JSON strings rather than their
+// private numeric implementation tags.
+func (v DeclarationRole) MarshalJSON() ([]byte, error) {
+	word, ok := v.WireName()
+	if !ok {
+		return nil, &Refusal{Word: "bad_enum", Offset: 0}
+	}
+	return esc(nil, word), nil
+}
+
+// UnmarshalJSON accepts only an exact JSON string member. Numbers, null and
+// unknown strings are refused by the same codec rules as generated records.
+func (v *DeclarationRole) UnmarshalJSON(data []byte) error {
+	r := reader{buf: data}
+	r.ws()
+	word, err := r.str()
+	if err != nil {
+		return err
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		return r.refuse("trailing_bytes")
+	}
+	parsed, ok := ParseDeclarationRole(word)
+	if !ok {
+		return r.refuse("bad_enum")
+	}
+	*v = parsed
+	return nil
+}
+
+// DeclarationRoleValues returns every member of DeclarationRole in declaration order, in a new slice.
+func DeclarationRoleValues() []DeclarationRole {
+	return []DeclarationRole{DeclarationRoleProvider, DeclarationRoleHost, DeclarationRoleRemote}
+}
+
+// Known reports whether v is a member of DeclarationRole.
+func (v DeclarationRole) Known() bool {
 	_, ok := v.WireName()
 	return ok
 }
@@ -1103,6 +1212,7 @@ const (
 	DeclarationReadinessRefused     DeclarationReadiness = 5
 	DeclarationReadinessUnreachable DeclarationReadiness = 6
 	DeclarationReadinessNotReady    DeclarationReadiness = 7
+	DeclarationReadinessDisabled    DeclarationReadiness = 8
 )
 
 // String returns v's exact wire word, or the empty string for an invalid value.
@@ -1128,6 +1238,8 @@ func (v DeclarationReadiness) WireName() (string, bool) {
 		return "unreachable", true
 	case DeclarationReadinessNotReady:
 		return "not_ready", true
+	case DeclarationReadinessDisabled:
+		return "disabled", true
 	}
 	return "", false
 }
@@ -1149,6 +1261,8 @@ func ParseDeclarationReadiness(word string) (DeclarationReadiness, bool) {
 		return DeclarationReadinessUnreachable, true
 	case "not_ready":
 		return DeclarationReadinessNotReady, true
+	case "disabled":
+		return DeclarationReadinessDisabled, true
 	}
 	return DeclarationReadiness(0), false
 }
@@ -1206,7 +1320,7 @@ func (v *DeclarationReadiness) UnmarshalJSON(data []byte) error {
 
 // DeclarationReadinessValues returns every member of DeclarationReadiness in declaration order, in a new slice.
 func DeclarationReadinessValues() []DeclarationReadiness {
-	return []DeclarationReadiness{DeclarationReadinessReady, DeclarationReadinessIdle, DeclarationReadinessStarting, DeclarationReadinessRestarting, DeclarationReadinessRefused, DeclarationReadinessUnreachable, DeclarationReadinessNotReady}
+	return []DeclarationReadiness{DeclarationReadinessReady, DeclarationReadinessIdle, DeclarationReadinessStarting, DeclarationReadinessRestarting, DeclarationReadinessRefused, DeclarationReadinessUnreachable, DeclarationReadinessNotReady, DeclarationReadinessDisabled}
 }
 
 // Known reports whether v is a member of DeclarationReadiness.
@@ -1734,7 +1848,7 @@ func (v ServiceErrorCode) Known() bool {
 	return false
 }
 
-var DeclarationResourceKinds = []string{"store", "host", "profile"}
+var DeclarationResourceKinds = []string{"store", "host", "profile", "card"}
 
 var RegistryActions = []string{"abstraction.facade/provider.manage"}
 
@@ -1883,21 +1997,56 @@ type RemoteTrust struct {
 	Credential  string
 }
 
-// One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-// unique. program is the absolute executable path the runtime launches and
-// requires of the process serving endpoint; empty for a remote runtime.
-// arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-// replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of a-z
-// 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1. transport
-// is a DeclarationTransport member. contracts holds 1..16 distinct wire names
-// of generated services the provider serves. guarantees holds 0..16 distinct
-// names its candidates advertise. resources holds 0..64 distinct <kind>:<name>
-// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -. models is
-// the 0..64 distinct model names a native inference provider is trusted to
-// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-// as a supervised child when a resolution first needs it; attach reads a
-// provider something else started; remote is exactly the oa-remote@1
-// activation, and remote is present exactly then.
+// The daily limits of the credential a host declaration names, per UTC day, in
+// the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+// in currency millionths, requests, images, audio seconds and characters. Zero
+// or absent means no limit in that unit.
+type DeclarationCeiling struct {
+	TokensPerDay       int64
+	MicrosPerDay       int64
+	RequestsPerDay     int64
+	ImagesPerDay       int64
+	AudioSecondsPerDay int64
+	CharactersPerDay   int64
+}
+
+// The foreign HTTP engine a declaration of role host names, the fields
+// abstraction.inference/operator@1 HostEntry carries. base is its https or
+// loopback http API root, with no user information, query or fragment. kind is
+// the wire it speaks: an inference local_host_kinds member for a local engine,
+// and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+// is an engine on this machine, which carries no credential and no ceiling;
+// hosted true is a provider endpoint off it, whose credential names the
+// abstraction.credentials record the service applies and whose ceiling limits
+// that credential. The profiles the host serves are its profile:<name>
+// resources.
+type DeclarationHost struct {
+	Base       string
+	Kind       string
+	Hosted     bool
+	Credential string
+	Ceiling    *DeclarationCeiling
+}
+
+// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
+// role names what it is, and each role validates its own fields (FAC-R6). A
+// provider declares program, the absolute executable path the runtime launches
+// and requires of the process serving endpoint, arguments of 0..64 strings of
+// 1..4096 bytes with {endpoint} replaced by endpoint, endpoint a local endpoint
+// name of 1..64 bytes of a-z 0-9 _ . -, transport oa-native@1, activation
+// on_demand or attach, and contracts of 1..16 distinct wire names of generated
+// services it serves. A remote declares transport oa-remote@1, activation
+// remote, endpoint tls://<host>:<port>, the trust record in remote, and no
+// program or arguments. A host declares transport http@1, activation attach,
+// the engine in host, and no program, arguments, endpoint, contracts,
+// guarantees, models or remote. guarantees holds 0..16 distinct names a
+// provider's candidates advertise. resources holds 0..64 distinct <kind>:<name>
+// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
+// profile:<name> is what a host or a remote serves. models is the 0..64
+// distinct model names a native inference provider is trusted to serve, each
+// 1..256 UTF-8 bytes without controls. on_demand launches program as a
+// supervised child when a resolution first needs it; attach reads a provider
+// something else started.
 type Declaration struct {
 	Name       string
 	Program    string
@@ -1910,21 +2059,37 @@ type Declaration struct {
 	Activation Activation
 	Remote     *RemoteTrust
 	Models     []string
+	Role       DeclarationRole
+	Host       *DeclarationHost
 }
 
-// A declaration and the runtime's latest reading of it. declared_by is the
-// operator program that declared it. ready means endpoint@1 Describe, over a
-// connection requiring program as the server, listed every declared contract
-// ready. idle is an on_demand provider nothing has needed yet; starting a
-// launched child not yet ready; restarting a child that exited and waits out
-// its backoff; refused a process at endpoint running another program (why
-// program:<detail>); unreachable a provider whose Describe failed (why
-// describe:<code or detail>); not_ready a provider whose Describe lists a
-// declared contract not ready or absent (why contract:<wire name>:<reason>).
-// described is the last Description's services. accepted holds the resources a
-// capability accepted at the last reading, such as store:<name> described by an
-// inventory source and permitted by inventory.provide. restarts counts launches
-// after the first.
+// The router's latest reading of a host declaration: whether its last survey
+// reached the engine, and why it did not.
+type HostReading struct {
+	Up  bool
+	Why string
+}
+
+// A declaration and the runtime's latest reading of it. role repeats the
+// declaration's role, which the runtime resolves for a declaration that names
+// none. declared_by is the operator program that declared it, the word
+// installation for a declaration file the installation placed beside the
+// runtime executable, or the product's own word for a host a product record
+// declared. ready means endpoint@1 Describe, over a connection requiring
+// program as the server, listed every declared contract ready; for a host it
+// means the router's last survey reached it. idle is an on_demand provider
+// nothing has needed yet; starting a launched child not yet ready; restarting a
+// child that exited and waits out its backoff; refused a process at endpoint
+// running another program (why program:<detail>); unreachable a provider whose
+// Describe failed (why describe:<code or detail>), or a host the router did not
+// reach (why host:<detail>); not_ready a provider whose Describe lists a
+// declared contract not ready or absent (why contract:<wire name>:<reason>);
+// disabled a declaration of the installation or a product an operator withdrew
+// (why operator). described is the last Description's services, and host the
+// router's reading of a host. accepted holds the resources a capability
+// accepted at the last reading, such as store:<name> described by an inventory
+// source and permitted by inventory.provide. restarts counts launches after the
+// first.
 type DeclarationState struct {
 	Declaration    Declaration
 	DeclaredBy     string
@@ -1934,6 +2099,8 @@ type DeclarationState struct {
 	Restarts       int64
 	Described      []ServiceState
 	Accepted       []string
+	Role           DeclarationRole
+	Host           *HostReading
 }
 
 // page carries every declaration in name order, at most 64, and the
@@ -2587,12 +2754,134 @@ func encRemoteTrust(out []byte, v *RemoteTrust, depth int) []byte {
 	return append(out, '}')
 }
 
+func encDeclarationCeiling(out []byte, v *DeclarationCeiling, depth int) []byte {
+	out = append(out, '{')
+	first := true
+	if v.TokensPerDay != 0 {
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "tokens_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.TokensPerDay)
+	}
+	if v.MicrosPerDay != 0 {
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "micros_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.MicrosPerDay)
+	}
+	if v.RequestsPerDay != 0 {
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "requests_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.RequestsPerDay)
+	}
+	if v.ImagesPerDay != 0 {
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "images_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.ImagesPerDay)
+	}
+	if v.AudioSecondsPerDay != 0 {
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "audio_seconds_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.AudioSecondsPerDay)
+	}
+	if v.CharactersPerDay != 0 {
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "characters_per_day")
+		out = append(out, ':', ' ')
+		out = num(out, v.CharactersPerDay)
+	}
+	if !first {
+		out = append(out, '\n')
+		out = pad(out, depth)
+	}
+	return append(out, '}')
+}
+
+func encDeclarationHost(out []byte, v *DeclarationHost, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "base")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Base)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "kind")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Kind)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "hosted")
+	out = append(out, ':', ' ')
+	if v.Hosted {
+		out = append(out, 't', 'r', 'u', 'e')
+	} else {
+		out = append(out, 'f', 'a', 'l', 's', 'e')
+	}
+	if v.Credential != "" {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "credential")
+		out = append(out, ':', ' ')
+		out = esc(out, v.Credential)
+	}
+	if v.Ceiling != nil {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "ceiling")
+		out = append(out, ':', ' ')
+		out = encDeclarationCeiling(out, v.Ceiling, depth+1)
+	}
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
 func encDeclaration(out []byte, v *Declaration, depth int) []byte {
 	if !(v.Transport).Known() {
 		panic(&Refusal{Word: "bad_enum", Offset: 0})
 	}
 	if !(v.Activation).Known() {
 		panic(&Refusal{Word: "bad_enum", Offset: 0})
+	}
+	if v.Role != 0 {
+		if !(v.Role).Known() {
+			panic(&Refusal{Word: "bad_enum", Offset: 0})
+		}
 	}
 	out = append(out, '{')
 	out = append(out, '\n')
@@ -2668,6 +2957,44 @@ func encDeclaration(out []byte, v *Declaration, depth int) []byte {
 		out = append(out, ':', ' ')
 		out = strs(out, v.Models, depth+1)
 	}
+	if v.Role != 0 {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "role")
+		out = append(out, ':', ' ')
+		out = esc(out, v.Role.String())
+	}
+	if v.Host != nil {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "host")
+		out = append(out, ':', ' ')
+		out = encDeclarationHost(out, v.Host, depth+1)
+	}
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encHostReading(out []byte, v *HostReading, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "up")
+	out = append(out, ':', ' ')
+	if v.Up {
+		out = append(out, 't', 'r', 'u', 'e')
+	} else {
+		out = append(out, 'f', 'a', 'l', 's', 'e')
+	}
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "why")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Why)
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -2676,6 +3003,11 @@ func encDeclaration(out []byte, v *Declaration, depth int) []byte {
 func encDeclarationState(out []byte, v *DeclarationState, depth int) []byte {
 	if !(v.Readiness).Known() {
 		panic(&Refusal{Word: "bad_enum", Offset: 0})
+	}
+	if v.Role != 0 {
+		if !(v.Role).Known() {
+			panic(&Refusal{Word: "bad_enum", Offset: 0})
+		}
 	}
 	out = append(out, '{')
 	out = append(out, '\n')
@@ -2726,6 +3058,22 @@ func encDeclarationState(out []byte, v *DeclarationState, depth int) []byte {
 		out = esc(out, "accepted")
 		out = append(out, ':', ' ')
 		out = strs(out, v.Accepted, depth+1)
+	}
+	if v.Role != 0 {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "role")
+		out = append(out, ':', ' ')
+		out = esc(out, v.Role.String())
+	}
+	if v.Host != nil {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "host")
+		out = append(out, ':', ' ')
+		out = encHostReading(out, v.Host, depth+1)
 	}
 	out = append(out, '\n')
 	out = pad(out, depth)
@@ -5129,6 +5477,211 @@ func (r *reader) decodeRemoteTrust() (*RemoteTrust, error) {
 	return v, nil
 }
 
+func (r *reader) decodeDeclarationCeiling() (*DeclarationCeiling, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationCeiling{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "tokens_per_day":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.TokensPerDay = x
+			case "micros_per_day":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.MicrosPerDay = x
+			case "requests_per_day":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.RequestsPerDay = x
+			case "images_per_day":
+				if seen&8 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 8
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.ImagesPerDay = x
+			case "audio_seconds_per_day":
+				if seen&16 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 16
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.AudioSecondsPerDay = x
+			case "characters_per_day":
+				if seen&32 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 32
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.CharactersPerDay = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	return v, nil
+}
+
+func (r *reader) decodeDeclarationHost() (*DeclarationHost, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationHost{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "base":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Base = x
+			case "kind":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Kind = x
+			case "hosted":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := r.boolean()
+				if err != nil {
+					return nil, err
+				}
+				v.Hosted = x
+			case "credential":
+				if seen&8 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 8
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Credential = x
+			case "ceiling":
+				if seen&16 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 16
+				x, err := r.decodeDeclarationCeiling()
+				if err != nil {
+					return nil, err
+				}
+				v.Ceiling = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&7 != 7 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
 func (r *reader) decodeDeclaration() (*Declaration, error) {
 	if r.at() != '{' {
 		return nil, r.refuse("wrong_type")
@@ -5275,6 +5828,30 @@ func (r *reader) decodeDeclaration() (*Declaration, error) {
 					return nil, err
 				}
 				v.Models = x
+			case "role":
+				if seen&2048 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2048
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				word, ok := ParseDeclarationRole(x)
+				if !ok {
+					return nil, r.refuse("bad_enum")
+				}
+				v.Role = word
+			case "host":
+				if seen&4096 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4096
+				x, err := r.decodeDeclarationHost()
+				if err != nil {
+					return nil, err
+				}
+				v.Host = x
 			default:
 				return nil, r.refuse("unknown_field")
 			}
@@ -5298,6 +5875,80 @@ func (r *reader) decodeDeclaration() (*Declaration, error) {
 	}
 	if !(v.Activation).Known() {
 		return nil, r.refuse("bad_enum")
+	}
+	if (seen & 2048) != 0 {
+		if !(v.Role).Known() {
+			return nil, r.refuse("bad_enum")
+		}
+	}
+	return v, nil
+}
+
+func (r *reader) decodeHostReading() (*HostReading, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &HostReading{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "up":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.boolean()
+				if err != nil {
+					return nil, err
+				}
+				v.Up = x
+			case "why":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Why = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
+		return nil, r.refuse("missing_field")
 	}
 	return v, nil
 }
@@ -5414,6 +6065,30 @@ func (r *reader) decodeDeclarationState() (*DeclarationState, error) {
 					return nil, err
 				}
 				v.Accepted = x
+			case "role":
+				if seen&256 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 256
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				word, ok := ParseDeclarationRole(x)
+				if !ok {
+					return nil, r.refuse("bad_enum")
+				}
+				v.Role = word
+			case "host":
+				if seen&512 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 512
+				x, err := r.decodeHostReading()
+				if err != nil {
+					return nil, err
+				}
+				v.Host = x
 			default:
 				return nil, r.refuse("unknown_field")
 			}
@@ -5434,6 +6109,11 @@ func (r *reader) decodeDeclarationState() (*DeclarationState, error) {
 	}
 	if !(v.Readiness).Known() {
 		return nil, r.refuse("bad_enum")
+	}
+	if (seen & 256) != 0 {
+		if !(v.Role).Known() {
+			return nil, r.refuse("bad_enum")
+		}
 	}
 	return v, nil
 }
@@ -8546,8 +9226,17 @@ func DescribeEndpoint(frame []byte, program, version string, services ...Describ
 	for i, service := range services {
 		contract, ready, why := service.DescribeService()
 		readiness := "ready"
-		if !ready {
+		if ready {
+			why = ""
+		} else {
 			readiness = "not_ready"
+		}
+		var guarantees []string
+		var capabilities map[string]string
+		if described, ok := service.(interface {
+			DescribeServiceMetadata() ([]string, map[string]string)
+		}); ok {
+			guarantees, capabilities = described.DescribeServiceMetadata()
 		}
 		if i > 0 {
 			out = append(out, ',')
@@ -8556,7 +9245,23 @@ func DescribeEndpoint(frame []byte, program, version string, services ...Describ
 		out = esc(out, contract)
 		out = append(out, ",\"readiness\":\""+readiness+"\",\"why\":"...)
 		out = esc(out, why)
-		out = append(out, ",\"guarantees\":[],\"capabilities\":{}}"...)
+		out = append(out, ",\"guarantees\":["...)
+		for j, guarantee := range guarantees {
+			if j > 0 {
+				out = append(out, ',')
+			}
+			out = esc(out, guarantee)
+		}
+		out = append(out, "],\"capabilities\":{"...)
+		for j, key := range sortedKeys(capabilities) {
+			if j > 0 {
+				out = append(out, ',')
+			}
+			out = esc(out, key)
+			out = append(out, ':')
+			out = esc(out, capabilities[key])
+		}
+		out = append(out, "}}"...)
 	}
 	return serviceReply(v, Raw(append(out, "]}}"...)), nil)
 }
@@ -8661,6 +9366,17 @@ func (d *ResolverDispatcher) DescribeService() (contract string, ready bool, why
 		return "abstraction.facade/resolver@1", ready, why
 	}
 	return "abstraction.facade/resolver@1", true, ""
+}
+
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *ResolverDispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
 }
 
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
@@ -8809,6 +9525,17 @@ func (d *CallerDispatcher) DescribeService() (contract string, ready bool, why s
 	return "abstraction.facade/caller@1", true, ""
 }
 
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *CallerDispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
+}
+
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
 func (d *CallerDispatcher) ServiceContract() string { return "abstraction.facade/caller@1" }
 func (d *CallerDispatcher) WriteFrame(frame []byte) error {
@@ -8953,6 +9680,17 @@ func (d *EndpointDispatcher) DescribeService() (contract string, ready bool, why
 		return "abstraction.facade/endpoint@1", ready, why
 	}
 	return "abstraction.facade/endpoint@1", true, ""
+}
+
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *EndpointDispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
 }
 
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
@@ -9225,6 +9963,17 @@ func (d *RegistryDispatcher) DescribeService() (contract string, ready bool, why
 		return "abstraction.facade/registry@1", ready, why
 	}
 	return "abstraction.facade/registry@1", true, ""
+}
+
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *RegistryDispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
 }
 
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
@@ -9729,6 +10478,17 @@ func (d *ApplicationsDispatcher) DescribeService() (contract string, ready bool,
 		return "abstraction.facade/applications@1", ready, why
 	}
 	return "abstraction.facade/applications@1", true, ""
+}
+
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *ApplicationsDispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
 }
 
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.

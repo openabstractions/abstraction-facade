@@ -71,10 +71,10 @@ func (c *JobsClient) Binding() JobsBinding {
 // by explicit choice. RestoreJobs obtains one history window, which proves the
 // server identity at connection and refuses a different logical owner.
 func (m *Machine) RestoreJobs(ctx context.Context, saved JobsBinding) (*JobsClient, error) {
-	if saved.Endpoint == "" || saved.LogicalOwner == "" || (saved.Contract != "abstraction.job/acceptance@1" && saved.Contract != "abstraction.job/operations@1") {
+	if saved.Endpoint == "" || saved.LogicalOwner == "" || (saved.Contract != JobsContract && saved.Contract != JobOperationsContract) {
 		return nil, jobError("invalid_binding", "saved endpoint, logical owner and job contract required")
 	}
-	_, server, lookedFor, err := m.resolverSelection(ctx)
+	_, server, _, lookedFor, err := m.resolverSelection(ctx)
 	if err != nil {
 		return nil, resolution.Unreachable(ctx, err, "abstraction.job", saved.Contract, lookedFor)
 	}
@@ -136,7 +136,7 @@ func (c *JobsClient) Endpoint() string { return c.endpoint }
 // ResolveJobs binds once. Call failures and unknown acceptance never trigger
 // another resolution or weaker requirements.
 func (m *Machine) ResolveJobs(ctx context.Context, need Requirements) (*JobsClient, error) {
-	return m.resolveJobs(ctx, "abstraction.job/acceptance@1", need)
+	return m.resolveJobs(ctx, JobsContract, need)
 }
 
 type jobCall struct {
@@ -332,7 +332,7 @@ func (c *JobsClient) validateRead(result api.ResultRead, id api.RequestIdentity,
 // ResolveJobOperations requires observation/result support during new discovery.
 // Already accepted work remains bound to its retained endpoint and owner.
 func (m *Machine) ResolveJobOperations(ctx context.Context, need Requirements) (*JobsClient, error) {
-	return m.resolveJobs(ctx, "abstraction.job/operations@1", need)
+	return m.resolveJobs(ctx, JobOperationsContract, need)
 }
 
 // CopyResult copies a complete result with one bounded chunk in memory. It pins

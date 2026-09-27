@@ -83,7 +83,7 @@ func (m *Machine) ObserveCaller(ctx context.Context) (CallerObservation, error) 
 		defer cancel()
 	}
 	const capability, contract = "abstraction.facade", "abstraction.facade/caller@1"
-	resolver, _, lookedFor, err := m.resolverSelection(ctx)
+	resolver, _, _, lookedFor, err := m.resolverSelection(ctx)
 	if err != nil {
 		return wire.CallerObservation{}, resolution.Unreachable(ctx, err, capability, contract, lookedFor)
 	}

@@ -1,9 +1,69 @@
 # C++ resolution bindings
 
+Install status: source checkout only — clone the sibling repositories and build with CMake; no package registry ships this at 0.3.0 or after.
+
 `abstraction::facade_client` supplies service resolution through every Machine
 capability accessor. `abstraction::facade_protocol` remains
 independently installable with `ABSTRACTION_FACADE_BUILD_AGGREGATE=OFF` and has no
 capability or transport dependencies.
+
+## Build and install
+
+For a fixed, publicly obtainable revision set, use the [resolved logging example](examples/logging/README.md). Its lock file and commands require no revision selection. The instructions below describe development source builds.
+
+Requirements: CMake 3.16 or newer, a C++17 compiler and the platform SDK. Windows
+uses the native Windows SDK; Linux and macOS use their native compiler and SDK.
+These commands build libraries and an outside consumer. They install no OS service.
+
+Place reviewed public source checkouts beside one another:
+`abstraction-facade`, `abstraction-identity`, `abstraction-job`,
+`abstraction-logging`, `abstraction-config`, `abstraction-router`, `abstraction-model`,
+and `abstraction-download`.
+Each is available at `https://github.com/openabstractions/<name>`.
+Record `git rev-parse HEAD` for all eight. Select revisions containing the APIs in
+this README and use that same set for deployment; untagged development changes
+may need a coordinated release before those revisions are publicly obtainable.
+CMake uses installed dependencies or these sibling checkouts and fetches nothing.
+The resolved logging example needs only the first six; its lock names them.
+
+From their common parent, set `PREFIX` to an absolute writable path and run
+these commands in Bash (including Git Bash on Windows):
+
+```sh
+PREFIX="C:/work/logging-example/prefix" # edit once; on Unix use an absolute Unix path
+cmake -S abstraction-facade/cpp -B build/facade -DCMAKE_BUILD_TYPE=Release -DABSTRACTION_FACADE_BUILD_AGGREGATE=ON -DCMAKE_INSTALL_PREFIX="$PREFIX"
+cmake --build build/facade --config Release
+cmake --install build/facade --config Release
+```
+
+The installed prefix contains the facade and its transitive client/protocol
+packages: `abstraction_ipc` from `abstraction-identity/cpp`,
+`abstraction_job_acceptance` from `abstraction-job/cpp`, the logging, config,
+router and model clients, and `abstraction_download_request` from
+`abstraction-download/cpp`, which the model client requires. The download
+request encoder for job submissions therefore needs no separate install.
+
+On Windows these libraries use CMake's default MSVC runtime library, the DLL CRT
+(`/MD`). An application built with the static CRT (`/MT`) needs libraries built
+the same way: add `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` to the first
+`cmake` command (`MultiThreadedDebug` for a Debug application). Git Bash rewrites
+arguments that look like paths, such as `/m`; pass MSBuild options as `-m`.
+
+Put the README's `main.cpp` and `CMakeLists.txt` in a separate `my-app`
+directory, then build using only that prefix:
+
+```sh
+cmake -S my-app -B build/my-app -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PREFIX"
+cmake --build build/my-app --config Release
+```
+
+A compatible runtime must be installed before executing the application. On
+Windows a stopped installed runtime is started once by default discovery; on other
+platforms the service manager starts it. An absent resolver fails the accessor.
+Provider installation stays with the operator. The repository's `.github/workflows/facade-binding.yml` records the
+same installed-package approach and the exact dependency revisions for each run.
+
+## Resolve a capability
 
 ```cpp
 #include <abstraction/facade/client.hpp>
@@ -14,13 +74,17 @@ logger.log(1, "connected through resolution");
 auto config = machine.config().read();
 ```
 
+An application calls `machine.log()` for the default binding: no required
+guarantees (a guarantee is a contract-specific promise; see the
+[reference vocabulary](https://openabstractions.org/reference.html#vocabulary)), scope `any`. `resolve_log` is the same call named explicitly, and
+takes the guarantees, scope and optional deadline `log()` omits.
 `resolve_log`, `resolve_config` and `resolve_router` accept required guarantee names
 and a scope (`any` by default). Each accessor asks the runtime for the exact
 supported capability contract, validates the result and creates the existing
 capability client at the selected endpoint. A client already returned keeps that
 endpoint; it does not silently reselect or replay work when an operation fails.
 `Log`, `Config` and `Router` delegate to these resolvers with no required
-guarantees and scope `any`. They now require an available runtime and can throw
+guarantees and scope `any`. They require an available runtime and can throw
 typed resolution refusals during accessor evaluation. Applications deliberately
 supplying a provider endpoint can construct `logging::Logger(endpoint)`,
 `config::Client(endpoint)` or `router::Client(endpoint)` directly.
@@ -57,8 +121,10 @@ token through resolution and the returned capability client. Direct `logging::Lo
 
 `Machine(explicit_runtime_endpoint)` and `ResolutionClient(endpoint, timeout_ms)`
 select a custom address. Supply independent server expectations for trusted
-custom hosts. `ABSTRACTION_RUNTIME_ENDPOINT` and the platform endpoint convention
-supply addresses; neither supplies installation authority.
+custom hosts. On Windows and Linux, `ABSTRACTION_RUNTIME_ENDPOINT` and the
+platform endpoint convention supply addresses. On macOS, default clients use
+the installed LaunchAgent's fixed XPC endpoint and ignore that environment
+variable. Endpoint names supply no installation authority.
 Default `Machine` and `ResolutionClient` select independent installed-runtime
 identity on their first call through the shared native selector. Selection uses
 the same deadline and cancellation token as resolution. The owned account/program
@@ -119,68 +185,14 @@ and reads config. Runtime integration tests can provide this executable through
 `OA_CPP_RESOLUTION_PROBE` and verify their retained sink received that event.
 
 
-## Build and install
-
-For a fixed, publicly obtainable revision set, use the [resolved logging example](examples/logging/README.md). Its lock file and commands require no revision selection. The instructions below describe development source builds.
-
-Requirements: CMake 3.16 or newer, a C++17 compiler and the platform SDK. Windows
-uses the native Windows SDK; Linux and macOS use their native compiler and SDK.
-These commands build libraries and an outside consumer. They install no OS service.
-
-Place reviewed public source checkouts beside one another:
-`abstraction-facade`, `abstraction-identity`, `abstraction-job`,
-`abstraction-logging`, `abstraction-config`, `abstraction-router`, `abstraction-model`,
-and `abstraction-download`.
-Each is available at `https://github.com/openabstractions/<name>`.
-Record `git rev-parse HEAD` for all eight. Select revisions containing the APIs in
-this README and use that same set for deployment; untagged development changes
-may need a coordinated release before those revisions are publicly obtainable.
-CMake uses installed dependencies or these sibling checkouts and fetches nothing.
-The resolved logging example needs only the first six; its lock names them.
-
-From their common parent, set `PREFIX` to an absolute writable path and run
-these commands in Bash (including Git Bash on Windows):
-
-```sh
-PREFIX="C:/work/logging-example/prefix" # edit once; on Unix use an absolute Unix path
-cmake -S abstraction-facade/cpp -B build/facade -DCMAKE_BUILD_TYPE=Release -DABSTRACTION_FACADE_BUILD_AGGREGATE=ON -DCMAKE_INSTALL_PREFIX="$PREFIX"
-cmake --build build/facade --config Release
-cmake --install build/facade --config Release
-```
-
-The installed prefix contains the facade and its transitive client/protocol
-packages: `abstraction_ipc` from `abstraction-identity/cpp`,
-`abstraction_job_acceptance` from `abstraction-job/cpp`, the logging, config,
-router and model clients, and `abstraction_download_request` from
-`abstraction-download/cpp`, which the model client requires. The download
-request encoder for job submissions therefore needs no separate install.
-
-On Windows these libraries use CMake's default MSVC runtime library, the DLL CRT
-(`/MD`). An application built with the static CRT (`/MT`) needs libraries built
-the same way: add `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` to the first
-`cmake` command (`MultiThreadedDebug` for a Debug application). Git Bash rewrites
-arguments that look like paths, such as `/m`; pass MSBuild options as `-m`.
-
-Put the README's `main.cpp` and `CMakeLists.txt` in a separate `my-app`
-directory, then build using only that prefix:
-
-```sh
-cmake -S my-app -B build/my-app -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PREFIX"
-cmake --build build/my-app --config Release
-```
-
-A compatible runtime must be installed before executing the application. On
-Windows a stopped installed runtime is started once by default discovery; on other
-platforms the service manager starts it. An absent resolver fails the accessor.
-Provider installation stays with the operator. The repository's `.github/workflows/facade-binding.yml` records the
-same installed-package approach and the exact dependency revisions for each run.
-
 ## Run against a runtime you started
 
-Default `Machine` and `ResolutionClient` select the installed runtime. Setting
-`ABSTRACTION_RUNTIME_ENDPOINT` changes the address they connect to, and they
-still require the installed runtime's identity. With the variable set and no
-installed runtime, resolution throws
+Default `Machine` and `ResolutionClient` select the installed runtime. On
+Windows and Linux, setting `ABSTRACTION_RUNTIME_ENDPOINT` changes the address
+they connect to while retaining the installed runtime's identity requirement.
+On macOS the installed address is the fixed LaunchAgent XPC service; use an
+explicit endpoint constructor for an isolated socket runtime. With an override
+on a platform that supports it and no installed runtime, resolution throws
 `select installed runtime: no trusted runtime installation (untrusted)`. Go
 `facade.Discover()` and Python `Machine()` behave the same way.
 
@@ -201,10 +213,13 @@ PowerShell or cmd, since Git Bash can rewrite `\\.\pipe\` arguments. Pass the
 endpoint to an explicit client:
 
 ```cpp
-// Reads ABSTRACTION_RUNTIME_ENDPOINT, or pass the printed value directly.
-abstraction::facade::Machine machine(abstraction::facade::runtime_endpoint());
+// Read the value printed by the isolated runtime explicitly.
+const char* configured = std::getenv("ABSTRACTION_RUNTIME_ENDPOINT");
+if (!configured || !*configured) throw std::runtime_error("runtime endpoint required");
+const std::string endpoint(configured);
+abstraction::facade::Machine machine(endpoint);
 auto jobs = abstraction::facade::resolve_job_operations(
-    abstraction::facade::ResolutionClient(abstraction::facade::runtime_endpoint()));
+    abstraction::facade::ResolutionClient(endpoint));
 ```
 
 An explicit endpoint without `with_server_expectation` is unverified transport. An
@@ -289,7 +304,10 @@ constructor instead of resolving an existing operation to another provider.
 
 The runtime files each accepted submission under a caller scope: the
 authenticated account (Windows SID or POSIX UID) and the absolute path of the
-calling executable as the operating system reports it. Identity keys, receipts,
+calling executable as the operating system reports it. Caller scope is this
+job-filing identity. The `scope` parameter passed to `resolve_jobs`/
+`resolve_job_operations` is a separate `abstraction::facade::Scope` value
+(`Local`, `Remote` or `Any`) on a separate type. Identity keys, receipts,
 observation and result bytes are visible only inside that scope. Restarting the
 application, rebooting and upgrading the runtime keep the scope. Reinstalling the
 application at the same path keeps it for processes started afterwards. Moving
@@ -323,6 +341,10 @@ auto jobs = JobsClient(saved.endpoint, 5000, saved.required_guarantees, saved.lo
                 .with_server_expectation(resolver.server());
 auto recovered = jobs.reconcile(saved.identity);
 ```
+
+This client reconstruction is how C++ resumes work after restart. In Go this
+is `RestoreJobs`; in Python it is `Jobs.restore_installed()` / `Jobs.restore()`;
+in Rust it is `Jobs::restore()`.
 
 The runtime has no transfer of work between program scopes. The Go client
 [README](../go/client/README.md) lists the same model event by event.
@@ -507,6 +529,16 @@ the same factory. The returned owning binding can move safely; the client reache
 through operator-> is borrowed for that binding's lifetime. Default bindings use
 fresh per-call timeouts. The overload accepting an absolute IPC deadline preserves
 that deadline through resolution and calls. Resolver cancellation is retained.
+
+`BoundService::reference()` names the provider that answered, read-only, so an
+application can say which provider served it (CONTRACT.md `FAC-B4`). It is the
+resolver's `ServiceReference`: `provider`, `capability`, `contract`,
+`guarantees`, `scope`, `transport` and `endpoint`. It grants nothing, and a
+`BoundService` is constructed from a reference, so it always has one.
+
+```cpp
+std::printf("reused from %s\n", observer.reference().provider.c_str());
+```
 
 `bind_service<Descriptor>(reference, transport, guarantees, scope)` accepts an
 explicit alternative transport and validates the same reference requirements.

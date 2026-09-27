@@ -58,11 +58,13 @@ pub trait Connector: Clone {
 }
 
 /// The platform the runtime's platform declaration lists as unsupported for an
-/// operating system named as `std::env::consts::OS` names it: `android` or `macos`.
+/// operating system named as `std::env::consts::OS` names it: `android`.
+/// `"macos"` is declared too, but this returns `None` for it: macOS proceeds
+/// to installed-runtime selection rather than this early refusal
+/// (RESOLUTION.md, "Unsupported platforms").
 pub fn unsupported_platform(os: &str) -> Option<&'static str> {
     match os {
         "android" => Some("android"),
-        "macos" => Some("macos"),
         _ => None,
     }
 }
@@ -113,7 +115,7 @@ pub struct ResolutionError<E> {
     /// The selection or transport failure, for `RuntimeUnavailable`.
     pub cause: Option<E>,
     /// The platform the runtime declares unsupported, for `RuntimeUnavailable`
-    /// before any selection: `android` or `macos`.
+    /// before any selection: `android`.
     pub platform: Option<&'static str>,
 }
 impl<E> std::fmt::Display for ResolutionError<E> {

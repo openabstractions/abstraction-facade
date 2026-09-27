@@ -28,6 +28,7 @@ import (
 	logservice "github.com/openabstractions/abstraction-logging/go/service"
 	model "github.com/openabstractions/abstraction-model/go"
 	modelservice "github.com/openabstractions/abstraction-model/go/service"
+	resourceservice "github.com/openabstractions/abstraction-resource/go/service"
 	rights "github.com/openabstractions/abstraction-rights/go"
 	rightsservice "github.com/openabstractions/abstraction-rights/go/authorization"
 	router "github.com/openabstractions/abstraction-router/go"
@@ -71,6 +72,18 @@ type Options struct {
 	RouterEndpoint string
 	// RouterPolicy narrows inventory and routing, for example RouterPolicyFromRights.
 	RouterPolicy routerservice.Policy
+	// ResourceTable explicitly selects the resource table provider, which says
+	// who holds a scarce resource on this machine. Nil leaves the table absent.
+	ResourceTable         *resourceservice.Table
+	ResourceTableEndpoint string
+	// ResourceLeases serves abstraction.resource/leases@1 beside the table on
+	// the same endpoint: grants of a resource, asked back on demand. It
+	// requires ResourceTable, and nil leaves the endpoint read-only.
+	ResourceLeases *resourceservice.Book
+	// ResourceTablePolicy gates reading other programs' rows, for example
+	// ResourceTablePolicyFromRights. Without it every bound caller reads every
+	// row; with it a refused caller still reads its own (RES-T4).
+	ResourceTablePolicy resourceservice.Policy
 	// Storage exposes content only through the explicitly supplied digest policy.
 	Storage         storage.Store
 	StoragePolicy   storageservice.Policy
@@ -93,6 +106,13 @@ type Options struct {
 	StorageChangesPolicy   storageservice.Policy
 	StorageChangesInterval time.Duration
 	StorageChangesCapacity int
+	// StorageInventoryPolicy adds abstraction.storage/inventory@1 on the storage
+	// endpoint, gated by abstraction.storage/inventory.read on
+	// storageservice.InventoryResource; StoragePolicy filters every composed
+	// record by the digests it carries. StorageInventorySources supplies the
+	// designated sources the runtime accepted, and both are required together.
+	StorageInventoryPolicy  storageservice.Policy
+	StorageInventorySources storageservice.Sources
 	// QuestionBook is a separately owned application-profile question store.
 	QuestionBook     *asks.Book
 	QuestionEndpoint string
@@ -131,6 +151,10 @@ type Options struct {
 	// Registry explicitly adds the provider registry profile; nil omits it.
 	Registry         RegistryService
 	RegistryEndpoint string
+	// Lending explicitly adds the abstraction.storage/lend@1 profile over a
+	// declared lending provider; nil omits it.
+	Lending         LendingService
+	LendingEndpoint string
 	// Applications supplies the experimental application directory profile.
 	Applications         ApplicationsService
 	ApplicationsEndpoint string
@@ -159,6 +183,8 @@ type Host struct {
 	modelIndex          int
 	router              *routerservice.Host
 	routerIndex         int
+	resourceTable       *resourceservice.Host
+	resourceTableIndex  int
 	storage             *storageservice.Host
 	storageIndex        int
 	questions           *asksservice.Host
@@ -174,6 +200,8 @@ type Host struct {
 	providers           DeclaredProviders
 	registry            RegistryService
 	registryIndex       int
+	lending             LendingService
+	lendingIndex        int
 	applications        ApplicationsService
 	applicationsIndex   int
 	mu                  sync.Mutex
@@ -225,6 +253,12 @@ func configureEndpoints(options Options) (Options, error) {
 			return Options{}, err
 		}
 	}
+	if options.ResourceTable != nil && options.ResourceTableEndpoint == "" {
+		options.ResourceTableEndpoint, err = bootstrap.Endpoint("resource-table-v1")
+		if err != nil {
+			return Options{}, err
+		}
+	}
 	if options.ModelRegistry != nil && options.ModelEndpoint == "" {
 		options.ModelEndpoint, err = bootstrap.Endpoint("model-v1")
 		if err != nil {
@@ -268,6 +302,9 @@ func Listen(options Options) (*Host, error) {
 	if err := validateRegistry(options); err != nil {
 		return nil, err
 	}
+	if err := validateLending(options); err != nil {
+		return nil, err
+	}
 	if err := validateInference(options); err != nil {
 		return nil, err
 	}
@@ -289,11 +326,18 @@ func Listen(options Options) (*Host, error) {
 		(options.Storage == nil || options.StorageChangesPolicy == nil || options.StorageChangesInterval < 0 || options.StorageChangesCapacity < 0) {
 		return nil, errors.New("runtime: storage change observation requires a provider, explicit observe policy and nonnegative bounds")
 	}
+	if (options.StorageInventoryPolicy != nil) != (options.StorageInventorySources != nil) ||
+		options.StorageInventoryPolicy != nil && options.Storage == nil {
+		return nil, errors.New("runtime: the storage inventory requires a provider, an explicit read gate and designated sources")
+	}
 	if options.ModelPolicy != nil && options.ModelRegistry == nil {
 		return nil, errors.New("runtime: model policy requires an explicit model registry")
 	}
 	if options.Router == nil && (options.RouterEndpoint != "" || options.RouterPolicy != nil) {
 		return nil, errors.New("runtime: router configuration requires an explicit router provider")
+	}
+	if options.ResourceTable == nil && (options.ResourceTableEndpoint != "" || options.ResourceTablePolicy != nil || options.ResourceLeases != nil) {
+		return nil, errors.New("runtime: resource table configuration requires an explicit table provider")
 	}
 	jobsConfigured := options.JobRoot != "" || options.JobOwner != "" || options.JobEndpoint != "" || options.JobExecutor != nil || options.ManagedJobs
 	if jobsConfigured && (options.JobRoot == "" || (options.JobOwner == "") != options.ManagedJobs) {
@@ -310,7 +354,7 @@ func Listen(options Options) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{onError: options.OnError, modelIndex: -1, routerIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1, rightsOperatorIndex: -1}
+	h := &Host{onError: options.OnError, modelIndex: -1, routerIndex: -1, resourceTableIndex: -1, storageIndex: -1, questionIndex: -1, rightsIndex: -1, rightsOperatorIndex: -1}
 	var startupErrors []error
 	var l *logservice.Host
 	if options.Sink == nil {
@@ -398,6 +442,24 @@ func Listen(options Options) (*Host, error) {
 			}
 		}
 	}
+	if options.ResourceTable != nil {
+		h.resourceTable, err = resourceservice.Listen(options.ResourceTableEndpoint, options.ResourceTable)
+		if err != nil {
+			startupErrors = append(startupErrors, fmt.Errorf("runtime resource table startup: %w", err))
+		} else {
+			h.resourceTable.OnError = options.OnError
+			if options.ResourceTablePolicy != nil {
+				if err := h.resourceTable.EnablePolicy(options.ResourceTablePolicy); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.ResourceLeases != nil {
+				if err := h.resourceTable.EnableLeases(options.ResourceLeases); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+		}
+	}
 	if options.Storage != nil {
 		h.storage, err = storageservice.Listen(options.StorageEndpoint, options.Storage, options.StoragePolicy)
 		if err != nil {
@@ -422,6 +484,11 @@ func Listen(options Options) (*Host, error) {
 					capacity = storageservice.DefaultChangeCapacity
 				}
 				if err := h.storage.EnableChanges(options.StorageChangesPolicy, interval, capacity); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.StorageInventoryPolicy != nil {
+				if err := h.storage.EnableInventory(options.StorageInventoryPolicy, options.StorageInventorySources); err != nil {
 					return nil, errors.Join(err, h.Close())
 				}
 			}
@@ -529,6 +596,19 @@ func Listen(options Options) (*Host, error) {
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.router", Contract: "abstraction.router/router@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RouterEndpoint, Guarantees: []string{},
 		}})
 	}
+	if options.ResourceTable != nil {
+		h.resourceTableIndex = len(h.candidates)
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.resourceTable != nil, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.resource", Contract: "abstraction.resource/table@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.ResourceTableEndpoint, Guarantees: []string{},
+		}})
+	}
+	if options.ResourceLeases != nil {
+		// Leases share the table's endpoint and its readiness lifetime: they
+		// are the same service seen from the writing side.
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.resourceTable != nil, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.resource", Contract: "abstraction.resource/leases@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.ResourceTableEndpoint, Guarantees: []string{},
+		}})
+	}
 	if options.Storage != nil {
 		h.storageIndex = len(h.candidates)
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil, Reference: wire.ServiceReference{
@@ -539,6 +619,12 @@ func Listen(options Options) (*Host, error) {
 		// Change observation shares the storage endpoint and its readiness lifetime.
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil && h.storage.ChangesAvailable(), Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.storage", Contract: "abstraction.storage/content-changes@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.StorageEndpoint, Guarantees: []string{},
+		}})
+	}
+	if options.StorageInventoryPolicy != nil {
+		// The composition shares the storage endpoint and its readiness lifetime.
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.storage != nil && h.storage.InventoryAvailable(), Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.storage", Contract: "abstraction.storage/inventory@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.StorageEndpoint, Guarantees: []string{},
 		}})
 	}
 	if options.StorageWritePolicy != nil {
@@ -577,6 +663,7 @@ func Listen(options Options) (*Host, error) {
 	h.addCredentialCandidates(options)
 	h.addInferenceCandidate(options)
 	h.addRegistryCandidate(options)
+	h.addLendingCandidate(options)
 	h.addApplicationsCandidate(options)
 	h.providers = options.Providers
 	catalog, err := h.catalogue()
@@ -626,6 +713,9 @@ func Listen(options Options) (*Host, error) {
 	if h.router != nil {
 		h.router.OnStopped = func() { h.stopped(h.routerIndex, nil) }
 	}
+	if h.resourceTable != nil {
+		h.resourceTable.OnStopped = func() { h.stopped(h.resourceTableIndex, nil) }
+	}
 	if l != nil {
 		l.OnStopped = func() { h.stopped(0, nil) }
 	}
@@ -664,6 +754,9 @@ func (h *Host) Close() error {
 	if h.router != nil {
 		errs = append(errs, h.router.Close())
 	}
+	if h.resourceTable != nil {
+		errs = append(errs, h.resourceTable.Close())
+	}
 	if h.storage != nil {
 		errs = append(errs, h.storage.Close())
 	}
@@ -687,6 +780,9 @@ func (h *Host) Close() error {
 	}
 	if h.registry != nil {
 		errs = append(errs, h.registry.Close())
+	}
+	if h.lending != nil {
+		errs = append(errs, h.lending.Close())
 	}
 	return errors.Join(errs...)
 }
@@ -756,6 +852,10 @@ func (h *Host) Serve(ctx context.Context) error {
 		workers.Add(1)
 		go func() { defer workers.Done(); h.stopped(h.registryIndex, h.registry.Serve(ctx)) }()
 	}
+	if h.lending != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.lendingIndex, h.lending.Serve(ctx)) }()
+	}
 	if h.providers != nil {
 		workers.Add(1)
 		go func() {
@@ -785,6 +885,10 @@ func (h *Host) Serve(ctx context.Context) error {
 	if h.router != nil {
 		workers.Add(1)
 		go func() { defer workers.Done(); h.stopped(h.routerIndex, h.router.Serve(ctx)) }()
+	}
+	if h.resourceTable != nil {
+		workers.Add(1)
+		go func() { defer workers.Done(); h.stopped(h.resourceTableIndex, h.resourceTable.Serve(ctx)) }()
 	}
 	if h.logging != nil {
 		workers.Add(1)

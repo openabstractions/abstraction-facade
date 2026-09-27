@@ -1,15 +1,30 @@
 # Rust service client core
 
+Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+
 `abstraction-facade-service` provides transport-independent `Machine<C>`, validated
 resolution and `Binding<C>`. Its only package dependency is the pure shared
 `abstraction-frame` trait at `../../abstraction-identity/rust-frame`. Generated
-resolver types remain in `../rs`. These are development source packages at 0.0.0.
+resolver types remain in `../rs`.
 
 Supply a `Connector` with `Machine::with_connector(endpoint, connector)`. The
 connector implements the shared frame trait and enforces peer identity, supported
 scope/transport, bounded frames, cancellation and the supplied absolute deadline.
-Resolution validates the contract, provider, guarantees and scope before invoking
-the selected endpoint. An alternate connector requires no native IPC link.
+Resolution validates the contract, provider, guarantees (a guarantee is a
+contract-specific promise; see the [reference vocabulary](https://openabstractions.org/reference.html#vocabulary)) and scope before
+invoking the selected endpoint. An alternate connector requires no native IPC
+link.
+
+`Binding::reference()` names the provider that answered, read-only, so an
+application can say which provider served it (CONTRACT.md `FAC-B4`). It borrows
+the resolver's `wire::ServiceReference`: `provider`, `capability`, `contract`,
+`guarantees`, `scope`, `transport` and `endpoint`. It grants nothing, and a
+binding from `Binding::restore` reads `None`.
+
+```rust
+let binding = machine.resolve_service("abstraction.storage/content-reader@1", vec![], wire::Scope::Local)?;
+println!("reused from {}", binding.reference().unwrap().provider);
+```
 
 A resolved `Binding` retains the selected endpoint. An explicit absolute deadline
 spans resolution and calls. Defaults provide five seconds per call. Shared

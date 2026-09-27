@@ -24,7 +24,7 @@ func NewJobOperatorWithTransport(transport listen.FrameClient, options JobsOptio
 }
 
 func (m *Machine) ResolveJobOperator(ctx context.Context, need Requirements) (*JobOperatorClient, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.job", "abstraction.job/operator@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.job", JobOperatorContract, need)
 	if err != nil {
 		return nil, err
 	}

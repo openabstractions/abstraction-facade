@@ -2,6 +2,7 @@ package abstraction_test
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -21,6 +22,19 @@ func (e exchange) ExchangeFrame(frame []byte) ([]byte, error) { return e(frame) 
 type notReady struct{ logging.HistoryReader }
 
 func (notReady) Ready() (bool, string) { return false, "journal:unreadable" }
+
+type describedReader struct{ logging.HistoryReader }
+
+func (describedReader) Ready() (bool, string) { return false, "journal:\n\"unreadable\"" }
+func (describedReader) DescribeMetadata() ([]string, map[string]string) {
+	return []string{"history/stream@1"}, map[string]string{"profiles": "stream,\"recent\"", "note": "snow 雪"}
+}
+
+type describedEditor struct{ config.ConfigEditor }
+
+func (describedEditor) DescribeMetadata() ([]string, map[string]string) {
+	return []string{"config/write@1"}, map[string]string{"mode": "write"}
+}
 
 // A generated logging dispatcher answers endpoint@1 Describe with sink@1 ready.
 func TestALoggingDispatcherDescribesSinkReady(t *testing.T) {
@@ -121,5 +135,34 @@ func TestServeEndpointDescribesAllAndRoutesByServiceName(t *testing.T) {
 		if err != nil || !strings.Contains(string(reply), code) {
 			t.Fatalf("frame %s: reply %s %v, want %s", frame, reply, err, code)
 		}
+	}
+}
+
+func TestServeEndpointDescribesEachHandlersOwnMetadata(t *testing.T) {
+	hosted := []logging.ServedService{
+		&logging.SinkDispatcher{},
+		&logging.HistoryReaderDispatcher{Handler: describedReader{}},
+		&config.ConfigEditorDispatcher{Handler: describedEditor{}},
+	}
+	description, err := wire.NewEndpointClient(exchange(func(frame []byte) ([]byte, error) {
+		return logging.ServeEndpoint(frame, "fixture", "1.0", hosted...)
+	})).Describe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(description.Services) != 3 {
+		t.Fatalf("description %+v", description)
+	}
+	sink, reader, editor := description.Services[0], description.Services[1], description.Services[2]
+	if sink.Contract != "abstraction.logging/sink@1" || len(sink.Guarantees) != 0 || len(sink.Capabilities) != 0 {
+		t.Fatalf("absent hook %+v", sink)
+	}
+	if reader.Contract != "abstraction.logging/reader@1" || reader.Readiness != wire.ServiceReadinessNotReady || reader.Why != "journal:\n\"unreadable\"" ||
+		!slices.Equal(reader.Guarantees, []string{"history/stream@1"}) || !maps.Equal(reader.Capabilities, map[string]string{"profiles": "stream,\"recent\"", "note": "snow 雪"}) {
+		t.Fatalf("reader metadata %+v", reader)
+	}
+	if editor.Contract != "abstraction.config/editor@1" || editor.Readiness != wire.ServiceReadinessReady || editor.Why != "" ||
+		!slices.Equal(editor.Guarantees, []string{"config/write@1"}) || !maps.Equal(editor.Capabilities, map[string]string{"mode": "write"}) {
+		t.Fatalf("editor metadata %+v", editor)
 	}
 }

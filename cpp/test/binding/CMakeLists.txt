@@ -21,11 +21,20 @@ if(WIN32)
 endif()
 add_test(NAME facade_bootstrap_override COMMAND ${CMAKE_COMMAND} -E env
     "ABSTRACTION_RUNTIME_ENDPOINT=explicit-bootstrap" $<TARGET_FILE:facade_binding_consumer> --default-runtime-endpoint)
-set_tests_properties(facade_bootstrap_override PROPERTIES PASS_REGULAR_EXPRESSION "explicit-bootstrap")
+if(APPLE)
+    # Installed macOS selection uses the fixed LaunchAgent Mach service.
+    set_tests_properties(facade_bootstrap_override PROPERTIES PASS_REGULAR_EXPRESSION "xpc:com.openabstractions.runtime-v1")
+else()
+    set_tests_properties(facade_bootstrap_override PROPERTIES PASS_REGULAR_EXPRESSION "explicit-bootstrap")
+endif()
 
 add_executable(facade_platform_refusal platform_refusal.cpp)
 target_link_libraries(facade_platform_refusal PRIVATE abstraction::facade_client)
 add_test(NAME facade_platform_refusal COMMAND facade_platform_refusal)
+
+add_executable(facade_platform_macos platform_macos.cpp)
+target_link_libraries(facade_platform_macos PRIVATE abstraction::facade_client)
+add_test(NAME facade_platform_macos COMMAND facade_platform_macos)
 
 add_executable(facade_deadline_no_io deadline_no_io.cpp)
 target_link_libraries(facade_deadline_no_io PRIVATE abstraction::facade_client)
@@ -38,6 +47,13 @@ add_executable(facade_activation activation.cpp)
 target_link_libraries(facade_activation PRIVATE abstraction::facade_client)
 add_test(NAME facade_activation COMMAND facade_activation WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(facade_activation PROPERTIES TIMEOUT 90)
+
+# The resolved reference a bound service carries (CONTRACT.md FAC-B4). It uses
+# an explicit reference and transport, so it needs no resolver.
+add_executable(facade_reference reference.cpp)
+target_link_libraries(facade_reference PRIVATE abstraction::facade_resolution)
+add_test(NAME facade_reference COMMAND facade_reference)
+set_tests_properties(facade_reference PROPERTIES TIMEOUT 30)
 
 add_executable(facade_server_trust server_trust.cpp)
 target_link_libraries(facade_server_trust PRIVATE abstraction::facade_client)

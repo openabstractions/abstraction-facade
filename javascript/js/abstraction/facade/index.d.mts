@@ -223,21 +223,25 @@ export interface CapabilityObservation {
   result: ResolveResult | null;
 }
 
-// One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-// unique. program is the absolute executable path the runtime launches and
-// requires of the process serving endpoint; empty for a remote runtime.
-// arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-// replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of a-z
-// 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1. transport
-// is a DeclarationTransport member. contracts holds 1..16 distinct wire names
-// of generated services the provider serves. guarantees holds 0..16 distinct
-// names its candidates advertise. resources holds 0..64 distinct <kind>:<name>
-// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -. models is
-// the 0..64 distinct model names a native inference provider is trusted to
-// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-// as a supervised child when a resolution first needs it; attach reads a
-// provider something else started; remote is exactly the oa-remote@1
-// activation, and remote is present exactly then.
+// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
+// role names what it is, and each role validates its own fields (FAC-R6). A
+// provider declares program, the absolute executable path the runtime launches
+// and requires of the process serving endpoint, arguments of 0..64 strings of
+// 1..4096 bytes with {endpoint} replaced by endpoint, endpoint a local endpoint
+// name of 1..64 bytes of a-z 0-9 _ . -, transport oa-native@1, activation
+// on_demand or attach, and contracts of 1..16 distinct wire names of generated
+// services it serves. A remote declares transport oa-remote@1, activation
+// remote, endpoint tls://<host>:<port>, the trust record in remote, and no
+// program or arguments. A host declares transport http@1, activation attach,
+// the engine in host, and no program, arguments, endpoint, contracts,
+// guarantees, models or remote. guarantees holds 0..16 distinct names a
+// provider's candidates advertise. resources holds 0..64 distinct <kind>:<name>
+// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
+// profile:<name> is what a host or a remote serves. models is the 0..64
+// distinct model names a native inference provider is trusted to serve, each
+// 1..256 UTF-8 bytes without controls. on_demand launches program as a
+// supervised child when a resolution first needs it; attach reads a provider
+// something else started.
 export interface Declaration {
   name: string;
   program: string;
@@ -250,6 +254,21 @@ export interface Declaration {
   activation: Activation;
   remote: RemoteTrust | null;
   models: string[];
+  role: DeclarationRole;
+  host: DeclarationHost | null;
+}
+
+// The daily limits of the credential a host declaration names, per UTC day, in
+// the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+// in currency millionths, requests, images, audio seconds and characters. Zero
+// or absent means no limit in that unit.
+export interface DeclarationCeiling {
+  tokensPerDay: bigint;
+  microsPerDay: bigint;
+  requestsPerDay: bigint;
+  imagesPerDay: bigint;
+  audioSecondsPerDay: bigint;
+  charactersPerDay: bigint;
 }
 
 // applied carries the new revision; the runtime supervises, withdraws or stops
@@ -267,6 +286,24 @@ export interface DeclarationChange {
 
 export type DeclarationEditOutcome = (typeof DeclarationEditOutcome)[keyof typeof DeclarationEditOutcome];
 export declare const DeclarationEditOutcome: Readonly<{ Applied: "applied"; Conflict: "conflict"; Unknown: "unknown"; Invalid: "invalid"; Forbidden: "forbidden"; Unavailable: "unavailable" }>;
+
+// The foreign HTTP engine a declaration of role host names, the fields
+// abstraction.inference/operator@1 HostEntry carries. base is its https or
+// loopback http API root, with no user information, query or fragment. kind is
+// the wire it speaks: an inference local_host_kinds member for a local engine,
+// and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+// is an engine on this machine, which carries no credential and no ceiling;
+// hosted true is a provider endpoint off it, whose credential names the
+// abstraction.credentials record the service applies and whose ceiling limits
+// that credential. The profiles the host serves are its profile:<name>
+// resources.
+export interface DeclarationHost {
+  base: string;
+  kind: string;
+  hosted: boolean;
+  credential: string;
+  ceiling: DeclarationCeiling | null;
+}
 
 // page carries every declaration in name order, at most 64, and the
 // declarations' revision Declare and Withdraw take. invalid is reserved for a
@@ -292,21 +329,31 @@ export interface DeclarationObservation {
 }
 
 export type DeclarationReadiness = (typeof DeclarationReadiness)[keyof typeof DeclarationReadiness];
-export declare const DeclarationReadiness: Readonly<{ Ready: "ready"; Idle: "idle"; Starting: "starting"; Restarting: "restarting"; Refused: "refused"; Unreachable: "unreachable"; NotReady: "not_ready" }>;
+export declare const DeclarationReadiness: Readonly<{ Ready: "ready"; Idle: "idle"; Starting: "starting"; Restarting: "restarting"; Refused: "refused"; Unreachable: "unreachable"; NotReady: "not_ready"; Disabled: "disabled" }>;
 
-// A declaration and the runtime's latest reading of it. declared_by is the
-// operator program that declared it. ready means endpoint@1 Describe, over a
-// connection requiring program as the server, listed every declared contract
-// ready. idle is an on_demand provider nothing has needed yet; starting a
-// launched child not yet ready; restarting a child that exited and waits out
-// its backoff; refused a process at endpoint running another program (why
-// program:<detail>); unreachable a provider whose Describe failed (why
-// describe:<code or detail>); not_ready a provider whose Describe lists a
-// declared contract not ready or absent (why contract:<wire name>:<reason>).
-// described is the last Description's services. accepted holds the resources a
-// capability accepted at the last reading, such as store:<name> described by an
-// inventory source and permitted by inventory.provide. restarts counts launches
-// after the first.
+export type DeclarationRole = (typeof DeclarationRole)[keyof typeof DeclarationRole];
+export declare const DeclarationRole: Readonly<{ Provider: "provider"; Host: "host"; Remote: "remote" }>;
+
+// A declaration and the runtime's latest reading of it. role repeats the
+// declaration's role, which the runtime resolves for a declaration that names
+// none. declared_by is the operator program that declared it, the word
+// installation for a declaration file the installation placed beside the
+// runtime executable, or the product's own word for a host a product record
+// declared. ready means endpoint@1 Describe, over a connection requiring
+// program as the server, listed every declared contract ready; for a host it
+// means the router's last survey reached it. idle is an on_demand provider
+// nothing has needed yet; starting a launched child not yet ready; restarting a
+// child that exited and waits out its backoff; refused a process at endpoint
+// running another program (why program:<detail>); unreachable a provider whose
+// Describe failed (why describe:<code or detail>), or a host the router did not
+// reach (why host:<detail>); not_ready a provider whose Describe lists a
+// declared contract not ready or absent (why contract:<wire name>:<reason>);
+// disabled a declaration of the installation or a product an operator withdrew
+// (why operator). described is the last Description's services, and host the
+// router's reading of a host. accepted holds the resources a capability
+// accepted at the last reading, such as store:<name> described by an inventory
+// source and permitted by inventory.provide. restarts counts launches after the
+// first.
 export interface DeclarationState {
   declaration: Declaration;
   declaredBy: string;
@@ -316,10 +363,12 @@ export interface DeclarationState {
   restarts: bigint;
   described: ServiceState[];
   accepted: string[];
+  role: DeclarationRole;
+  host: HostReading | null;
 }
 
 export type DeclarationTransport = (typeof DeclarationTransport)[keyof typeof DeclarationTransport];
-export declare const DeclarationTransport: Readonly<{ Native: "oa-native@1"; Remote: "oa-remote@1" }>;
+export declare const DeclarationTransport: Readonly<{ Native: "oa-native@1"; Remote: "oa-remote@1"; Http: "http@1" }>;
 
 // described lists every service the endpoint hosts, in the endpoint's order.
 // program and version are the display name and version the provider gives
@@ -352,20 +401,27 @@ export declare class EndpointClient {
 
 export declare const EndpointService: Readonly<{ wireName: "abstraction.facade/endpoint@1"; Client: typeof EndpointClient }>;
 
+// The router's latest reading of a host declaration: whether its last survey
+// reached the engine, and why it did not.
+export interface HostReading {
+  up: boolean;
+  why: string;
+}
+
 export declare class Refusal extends Error {
   constructor(word: string, offset: number);
   word: "malformed" | "bad_string" | "number_spelling" | "wrong_type" | "depth_exceeded" | "duplicate_key" | "duplicate_field" | "unknown_field" | "missing_field" | "bad_enum" | "trailing_bytes";
   offset: number;
 }
 
-/** The runtime's provider declarations, for operator tools. Applications never read it; they resolve. Each call is a rights decision for the bound operator subject; same-account identity alone grants nothing. A decision point that cannot answer reads unavailable. The registry is local: a remote runtime's services come from its own endpoint@1 Describe, and no registry is read across machines. */
+/** The runtime's one directory of the programs it knows, for operator tools: providers it launches or attaches to, foreign HTTP engines the router reaches, and other runtimes over mutual TLS. Applications never read it; they resolve. Each call is a rights decision for the bound operator subject; same-account identity alone grants nothing. A decision point that cannot answer reads unavailable. The registry is local: a remote runtime's services come from its own endpoint@1 Describe, and no registry is read across machines. */
 export declare class RegistryClient {
   constructor(transport: FrameTransport);
   /** Read every declaration and its reading. Gated by abstraction.facade/provider.manage on resource account. */
   declarations(): Promise<DeclarationList>;
   /** Conditionally add one declaration, kept as providers/<name>.json in the runtime state. Gated by provider.manage. A program cannot declare itself (invalid, program:self). A store:<name> resource writes the permit rule abstraction.storage/inventory.provide on store:<name> for program, and a remote declaration writes abstraction.inference/complete on host:<name> for the runtime's operator programs and the caller; an existing rule on a target is left as it is. A declaration grants nothing else. */
   declare(expectedRevision: string, declaration: Declaration): Promise<DeclarationChange>;
-  /** Conditionally remove one declaration: the runtime withdraws its candidates and hosts and ends a launched child. Gated by provider.manage. Rules are left as they are. */
+  /** Conditionally remove one declaration: the runtime withdraws its candidates and hosts and ends a launched child. Gated by provider.manage. A declaration the installation or a product declared is disabled by name instead of removed, so a reinstall or a later probe does not resurrect it, and a later Declare of that name enables it again. Rules are left as they are. */
   withdraw(expectedRevision: string, name: string): Promise<DeclarationChange>;
   /** Wait up to wait_ms milliseconds for the declarations or their readings to differ from cursor, then read them. An empty cursor answers at once. Gated by provider.manage. */
   observe(cursor: string, waitMs: bigint): Promise<DeclarationObservation>;
@@ -473,7 +529,7 @@ export interface ServiceState {
   capabilities: { [key: string]: string };
 }
 
-export declare const declarationResourceKinds: readonly ["store", "host", "profile"];
+export declare const declarationResourceKinds: readonly ["store", "host", "profile", "card"];
 
 export declare function decode(data: Uint8Array): ResolveResult;
 
@@ -511,7 +567,11 @@ export declare function newCapabilityObservation(): CapabilityObservation;
 
 export declare function newDeclaration(): Declaration;
 
+export declare function newDeclarationCeiling(): DeclarationCeiling;
+
 export declare function newDeclarationChange(): DeclarationChange;
+
+export declare function newDeclarationHost(): DeclarationHost;
 
 export declare function newDeclarationList(): DeclarationList;
 
@@ -520,6 +580,8 @@ export declare function newDeclarationObservation(): DeclarationObservation;
 export declare function newDeclarationState(): DeclarationState;
 
 export declare function newDescription(): Description;
+
+export declare function newHostReading(): HostReading;
 
 export declare function newRemoteTrust(): RemoteTrust;
 

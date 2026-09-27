@@ -34,13 +34,14 @@ func selectInstalled(ctx context.Context) (Selection, error) {
 		return Selection{}, fmt.Errorf("%w: installed executable: %w", ErrNoTrustedInstallation, err)
 	}
 	endpoint := os.Getenv("ABSTRACTION_RUNTIME_ENDPOINT")
-	if endpoint == "" {
+	fromEnvironment := endpoint != ""
+	if !fromEnvironment {
 		endpoint, err = Endpoint("runtime-v1")
 		if err != nil {
 			return Selection{}, err
 		}
 	}
-	return Selection{Endpoint: endpoint, Server: listen.ServerExpectation{
+	return Selection{Endpoint: endpoint, EndpointFromEnvironment: fromEnvironment, Server: listen.ServerExpectation{
 		Principal: identity.User{Kind: "posix", UID: os.Geteuid(), GID: -1}, Program: program,
 	}}, nil
 }

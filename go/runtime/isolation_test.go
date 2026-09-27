@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,9 @@ import (
 )
 
 func TestStartupCapabilityIsolation(t *testing.T) {
+	if assertDarwinNativeSocketRefusal(t, jobOptions(t)) {
+		return
+	}
 	for _, failure := range []string{"logging", "config", "jobs", "job-store", "nil-sink", "all"} {
 		t.Run(failure, func(t *testing.T) {
 			o := jobOptions(t)
@@ -86,10 +88,6 @@ func TestStartupCapabilityIsolation(t *testing.T) {
 					t.Error("host did not stop")
 				}
 			}()
-			if runtime.GOOS == "darwin" {
-				t.Log("Program-bound IPC success remains unproven on Darwin")
-				return
-			}
 			m := client.New(o.Endpoint)
 			for _, entry := range []struct{ name, capability, contract string }{{"logging", "abstraction.logging", "abstraction.logging/sink@1"}, {"config", "abstraction.config", "abstraction.config/reader@1"}, {"jobs", "abstraction.job", "abstraction.job/acceptance@1"}, {"jobs", "abstraction.job", "abstraction.job/operations@1"}} {
 				expected := wire.ResolutionStatusResolved
@@ -140,6 +138,9 @@ func TestStartupCapabilityIsolation(t *testing.T) {
 
 func TestResolverStartupFailureClosesHealthyProviders(t *testing.T) {
 	o := jobOptions(t)
+	if assertDarwinNativeSocketRefusal(t, o) {
+		return
+	}
 	occupied, err := listen.Listen(o.Endpoint)
 	if err != nil {
 		t.Fatal(err)

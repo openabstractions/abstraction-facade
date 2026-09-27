@@ -91,16 +91,17 @@ func selectInstalled(ctx context.Context) (Selection, error) {
 		return Selection{}, err
 	}
 	endpointName := os.Getenv("ABSTRACTION_RUNTIME_ENDPOINT")
-	if endpointName == "" {
+	fromEnvironment := endpointName != ""
+	if !fromEnvironment {
 		endpointName, err = Endpoint("runtime-v1")
 		if err != nil {
 			return Selection{}, err
 		}
 	}
-	return selectWindowsInstallation(ctx, sid, endpointName, installationQueries{relatedProduct, installedProperty})
+	return selectWindowsInstallation(ctx, sid, endpointName, fromEnvironment, installationQueries{relatedProduct, installedProperty})
 }
 
-func selectWindowsInstallation(ctx context.Context, sid, endpointName string, q installationQueries) (Selection, error) {
+func selectWindowsInstallation(ctx context.Context, sid, endpointName string, fromEnvironment bool, q installationQueries) (Selection, error) {
 	if _, err := windows.StringToSid(sid); err != nil {
 		return Selection{}, fmt.Errorf("%w: invalid current principal", ErrNoTrustedInstallation)
 	}
@@ -162,5 +163,5 @@ func selectWindowsInstallation(ctx context.Context, sid, endpointName string, q 
 	if err := ctx.Err(); err != nil {
 		return Selection{}, err
 	}
-	return Selection{Endpoint: endpointName, Server: listen.ServerExpectation{Principal: identity.User{Kind: "windows", SID: sid, UID: -1, GID: -1}, Program: location}}, nil
+	return Selection{Endpoint: endpointName, EndpointFromEnvironment: fromEnvironment, Server: listen.ServerExpectation{Principal: identity.User{Kind: "windows", SID: sid, UID: -1, GID: -1}, Program: location}}, nil
 }

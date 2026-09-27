@@ -57,8 +57,9 @@ func DefaultWhy(bundle string) string { return "allow " + bundle }
 //
 //   - downloads: acceptance.submit on the job acceptance contract, model lookup
 //     on each registry, and apply on each credential.
-//   - inference: route on the routes resource, complete on each host, and apply
-//     on each credential. At least one host is required.
+//   - inference: inventory.read on the router's inventory resource, route on
+//     the routes resource, complete on each host, and apply on each
+//     credential. At least one host is required.
 func Rules(bundle string, f For) ([]Rule, error) {
 	for _, list := range [][]string{f.Registries, f.Hosts, f.Credentials} {
 		for _, name := range list {
@@ -81,6 +82,7 @@ func Rules(bundle string, f For) ([]Rule, error) {
 		if len(f.Hosts) == 0 || len(f.Registries) != 0 {
 			return nil, fmt.Errorf("%w: inference names at least one host, and no registries", ErrBundle)
 		}
+		rules = append(rules, Rule{routerservice.ActionInventory, routerservice.ResourceInventory})
 		rules = append(rules, Rule{routerservice.ActionRoute, host.RoutesResource})
 		for _, name := range f.Hosts {
 			rules = append(rules, Rule{inference.ActionComplete, inference.ResourceHost(name)})

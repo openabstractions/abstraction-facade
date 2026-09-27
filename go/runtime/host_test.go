@@ -16,6 +16,7 @@ import (
 	wire "github.com/openabstractions/abstraction-facade/go/abstraction/facade"
 	client "github.com/openabstractions/abstraction-facade/go/client"
 	"github.com/openabstractions/abstraction-facade/go/resolution"
+	identity "github.com/openabstractions/abstraction-identity"
 	logging "github.com/openabstractions/abstraction-logging/go"
 )
 
@@ -31,6 +32,30 @@ func (s sink) Write(r logging.Record) error {
 	}
 	s.records <- r
 	return nil
+}
+
+// The installed Darwin runtime uses XPC. These explicit Unix-socket fixtures
+// assert its fail-closed Program ceiling before exercising stream-only behavior.
+func assertDarwinNativeSocketRefusal(t *testing.T, options Options) bool {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	h, err := Listen(options)
+	if h != nil {
+		h.Close()
+		t.Fatal("insufficiently proven caller created a runtime")
+	}
+	if !errors.Is(err, identity.ErrNotProven) {
+		t.Fatalf("expected startup proof refusal, got %v", err)
+	}
+	for _, path := range []string{options.Endpoint, options.Endpoint + ".lock"} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("proof refusal created resolver artifact %q: %v", path, err)
+		}
+	}
+	t.Skip("native Darwin sockets refuse Program at startup; installed XPC behavior has separate proof")
+	return true
 }
 
 func TestResolvedRuntime(t *testing.T) {
@@ -49,6 +74,9 @@ func TestResolvedRuntime(t *testing.T) {
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(out.release) }) }
 	options := Options{Endpoint: endpoint("runtime"), LogEndpoint: endpoint("selected-log"), ConfigEndpoint: endpoint("selected-config"), Sink: out}
+	if assertDarwinNativeSocketRefusal(t, options) {
+		return
+	}
 	h, err := Listen(options)
 	if err != nil {
 		t.Fatal(err)
@@ -71,13 +99,6 @@ func TestResolvedRuntime(t *testing.T) {
 	}()
 	m := client.New(options.Endpoint)
 	log, err := m.ResolveLog(ctx, client.Requirements{})
-	if runtime.GOOS == "darwin" {
-		if err == nil {
-			t.Fatal("unexpected successful Program-bound resolution")
-		}
-		t.Log("UNPROVEN successful runtime resolution on Darwin; current Program proof refusal retained")
-		return
-	}
 	if err != nil {
 		t.Fatal(err)
 	}

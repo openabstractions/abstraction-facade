@@ -244,6 +244,7 @@ inline const std::vector<std::string> kServiceReadinessNames = {"ready", "not_re
 enum class DeclarationTransport : std::int32_t {
     Native = 1,
     Remote = 2,
+    Http = 3,
 };
 
 // The member's name on the wire; empty for a value that names no member.
@@ -251,6 +252,7 @@ inline constexpr std::string_view wire_name(DeclarationTransport value) {
     switch (value) {
         case DeclarationTransport::Native: return "oa-native@1";
         case DeclarationTransport::Remote: return "oa-remote@1";
+        case DeclarationTransport::Http: return "http@1";
     }
     return {};
 }
@@ -259,6 +261,7 @@ inline constexpr std::string_view wire_name(DeclarationTransport value) {
 inline std::optional<DeclarationTransport> parse_declaration_transport(std::string_view name) {
     if (name == "oa-native@1") return DeclarationTransport::Native;
     if (name == "oa-remote@1") return DeclarationTransport::Remote;
+    if (name == "http@1") return DeclarationTransport::Http;
     return std::nullopt;
 }
 
@@ -268,7 +271,39 @@ inline constexpr bool operator!=(DeclarationTransport value, std::string_view na
 inline constexpr bool operator==(std::string_view name, DeclarationTransport value) { return wire_name(value) == name; }
 inline constexpr bool operator!=(std::string_view name, DeclarationTransport value) { return wire_name(value) != name; }
 
-inline const std::vector<std::string> kDeclarationTransportNames = {"oa-native@1", "oa-remote@1"};
+inline const std::vector<std::string> kDeclarationTransportNames = {"oa-native@1", "oa-remote@1", "http@1"};
+
+enum class DeclarationRole : std::int32_t {
+    Provider = 1,
+    Host = 2,
+    Remote = 3,
+};
+
+// The member's name on the wire; empty for a value that names no member.
+inline constexpr std::string_view wire_name(DeclarationRole value) {
+    switch (value) {
+        case DeclarationRole::Provider: return "provider";
+        case DeclarationRole::Host: return "host";
+        case DeclarationRole::Remote: return "remote";
+    }
+    return {};
+}
+
+// The member a wire name spells; empty for a name this vocabulary refuses.
+inline std::optional<DeclarationRole> parse_declaration_role(std::string_view name) {
+    if (name == "provider") return DeclarationRole::Provider;
+    if (name == "host") return DeclarationRole::Host;
+    if (name == "remote") return DeclarationRole::Remote;
+    return std::nullopt;
+}
+
+// A member equals its wire name, so code holding the contract's word compares directly.
+inline constexpr bool operator==(DeclarationRole value, std::string_view name) { return wire_name(value) == name; }
+inline constexpr bool operator!=(DeclarationRole value, std::string_view name) { return wire_name(value) != name; }
+inline constexpr bool operator==(std::string_view name, DeclarationRole value) { return wire_name(value) == name; }
+inline constexpr bool operator!=(std::string_view name, DeclarationRole value) { return wire_name(value) != name; }
+
+inline const std::vector<std::string> kDeclarationRoleNames = {"provider", "host", "remote"};
 
 enum class Activation : std::int32_t {
     OnDemand = 1,
@@ -310,6 +345,7 @@ enum class DeclarationReadiness : std::int32_t {
     Refused = 5,
     Unreachable = 6,
     NotReady = 7,
+    Disabled = 8,
 };
 
 // The member's name on the wire; empty for a value that names no member.
@@ -322,6 +358,7 @@ inline constexpr std::string_view wire_name(DeclarationReadiness value) {
         case DeclarationReadiness::Refused: return "refused";
         case DeclarationReadiness::Unreachable: return "unreachable";
         case DeclarationReadiness::NotReady: return "not_ready";
+        case DeclarationReadiness::Disabled: return "disabled";
     }
     return {};
 }
@@ -335,6 +372,7 @@ inline std::optional<DeclarationReadiness> parse_declaration_readiness(std::stri
     if (name == "refused") return DeclarationReadiness::Refused;
     if (name == "unreachable") return DeclarationReadiness::Unreachable;
     if (name == "not_ready") return DeclarationReadiness::NotReady;
+    if (name == "disabled") return DeclarationReadiness::Disabled;
     return std::nullopt;
 }
 
@@ -344,7 +382,7 @@ inline constexpr bool operator!=(DeclarationReadiness value, std::string_view na
 inline constexpr bool operator==(std::string_view name, DeclarationReadiness value) { return wire_name(value) == name; }
 inline constexpr bool operator!=(std::string_view name, DeclarationReadiness value) { return wire_name(value) != name; }
 
-inline const std::vector<std::string> kDeclarationReadinessNames = {"ready", "idle", "starting", "restarting", "refused", "unreachable", "not_ready"};
+inline const std::vector<std::string> kDeclarationReadinessNames = {"ready", "idle", "starting", "restarting", "refused", "unreachable", "not_ready", "disabled"};
 
 enum class DeclarationListOutcome : std::int32_t {
     Page = 1,
@@ -527,7 +565,7 @@ inline constexpr std::string_view kServiceErrorCodeUnknownService = "unknown_ser
 inline constexpr std::string_view kServiceErrorCodeUnknownMethod = "unknown_method";
 inline constexpr std::string_view kServiceErrorCodeWrongMode = "wrong_mode";
 
-inline const std::vector<std::string> kDeclarationResourceKinds = {"store", "host", "profile"};
+inline const std::vector<std::string> kDeclarationResourceKinds = {"store", "host", "profile", "card"};
 
 inline const std::vector<std::string> kRegistryActions = {"abstraction.facade/provider.manage"};
 
@@ -676,21 +714,56 @@ struct RemoteTrust {
     std::string credential;
 };
 
-// One provider outside the runtime. name is 1..64 bytes of a-z 0-9 _ - and
-// unique. program is the absolute executable path the runtime launches and
-// requires of the process serving endpoint; empty for a remote runtime.
-// arguments are 0..64 strings of 1..4096 bytes; the argument {endpoint} is
-// replaced by endpoint. endpoint is a local endpoint name of 1..64 bytes of a-z
-// 0-9 _ . - for oa-native@1, and tls://<host>:<port> for oa-remote@1. transport
-// is a DeclarationTransport member. contracts holds 1..16 distinct wire names
-// of generated services the provider serves. guarantees holds 0..16 distinct
-// names its candidates advertise. resources holds 0..64 distinct <kind>:<name>
-// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -. models is
-// the 0..64 distinct model names a native inference provider is trusted to
-// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-// as a supervised child when a resolution first needs it; attach reads a
-// provider something else started; remote is exactly the oa-remote@1
-// activation, and remote is present exactly then.
+// The daily limits of the credential a host declaration names, per UTC day, in
+// the units abstraction.inference/operator@1 CeilingLimit uses: tokens, spend
+// in currency millionths, requests, images, audio seconds and characters. Zero
+// or absent means no limit in that unit.
+struct DeclarationCeiling {
+    std::int64_t tokens_per_day = 0;
+    std::int64_t micros_per_day = 0;
+    std::int64_t requests_per_day = 0;
+    std::int64_t images_per_day = 0;
+    std::int64_t audio_seconds_per_day = 0;
+    std::int64_t characters_per_day = 0;
+};
+
+// The foreign HTTP engine a declaration of role host names, the fields
+// abstraction.inference/operator@1 HostEntry carries. base is its https or
+// loopback http API root, with no user information, query or fragment. kind is
+// the wire it speaks: an inference local_host_kinds member for a local engine,
+// and a router wire kind or <owner>/<name>@<n> for a hosted one. hosted false
+// is an engine on this machine, which carries no credential and no ceiling;
+// hosted true is a provider endpoint off it, whose credential names the
+// abstraction.credentials record the service applies and whose ceiling limits
+// that credential. The profiles the host serves are its profile:<name>
+// resources.
+struct DeclarationHost {
+    std::string base;
+    std::string kind;
+    bool hosted = false;
+    std::string credential;
+    std::optional<DeclarationCeiling> ceiling;
+};
+
+// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
+// role names what it is, and each role validates its own fields (FAC-R6). A
+// provider declares program, the absolute executable path the runtime launches
+// and requires of the process serving endpoint, arguments of 0..64 strings of
+// 1..4096 bytes with {endpoint} replaced by endpoint, endpoint a local endpoint
+// name of 1..64 bytes of a-z 0-9 _ . -, transport oa-native@1, activation
+// on_demand or attach, and contracts of 1..16 distinct wire names of generated
+// services it serves. A remote declares transport oa-remote@1, activation
+// remote, endpoint tls://<host>:<port>, the trust record in remote, and no
+// program or arguments. A host declares transport http@1, activation attach,
+// the engine in host, and no program, arguments, endpoint, contracts,
+// guarantees, models or remote. guarantees holds 0..16 distinct names a
+// provider's candidates advertise. resources holds 0..64 distinct <kind>:<name>
+// of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
+// profile:<name> is what a host or a remote serves. models is the 0..64
+// distinct model names a native inference provider is trusted to serve, each
+// 1..256 UTF-8 bytes without controls. on_demand launches program as a
+// supervised child when a resolution first needs it; attach reads a provider
+// something else started.
 struct Declaration {
     std::string name;
     std::string program;
@@ -703,21 +776,37 @@ struct Declaration {
     Activation activation{};
     std::optional<RemoteTrust> remote;
     std::vector<std::string> models;
+    DeclarationRole role{};
+    std::optional<DeclarationHost> host;
 };
 
-// A declaration and the runtime's latest reading of it. declared_by is the
-// operator program that declared it. ready means endpoint@1 Describe, over a
-// connection requiring program as the server, listed every declared contract
-// ready. idle is an on_demand provider nothing has needed yet; starting a
-// launched child not yet ready; restarting a child that exited and waits out
-// its backoff; refused a process at endpoint running another program (why
-// program:<detail>); unreachable a provider whose Describe failed (why
-// describe:<code or detail>); not_ready a provider whose Describe lists a
-// declared contract not ready or absent (why contract:<wire name>:<reason>).
-// described is the last Description's services. accepted holds the resources a
-// capability accepted at the last reading, such as store:<name> described by an
-// inventory source and permitted by inventory.provide. restarts counts launches
-// after the first.
+// The router's latest reading of a host declaration: whether its last survey
+// reached the engine, and why it did not.
+struct HostReading {
+    bool up = false;
+    std::string why;
+};
+
+// A declaration and the runtime's latest reading of it. role repeats the
+// declaration's role, which the runtime resolves for a declaration that names
+// none. declared_by is the operator program that declared it, the word
+// installation for a declaration file the installation placed beside the
+// runtime executable, or the product's own word for a host a product record
+// declared. ready means endpoint@1 Describe, over a connection requiring
+// program as the server, listed every declared contract ready; for a host it
+// means the router's last survey reached it. idle is an on_demand provider
+// nothing has needed yet; starting a launched child not yet ready; restarting a
+// child that exited and waits out its backoff; refused a process at endpoint
+// running another program (why program:<detail>); unreachable a provider whose
+// Describe failed (why describe:<code or detail>), or a host the router did not
+// reach (why host:<detail>); not_ready a provider whose Describe lists a
+// declared contract not ready or absent (why contract:<wire name>:<reason>);
+// disabled a declaration of the installation or a product an operator withdrew
+// (why operator). described is the last Description's services, and host the
+// router's reading of a host. accepted holds the resources a capability
+// accepted at the last reading, such as store:<name> described by an inventory
+// source and permitted by inventory.provide. restarts counts launches after the
+// first.
 struct DeclarationState {
     Declaration declaration;
     std::string declared_by;
@@ -727,6 +816,8 @@ struct DeclarationState {
     std::int64_t restarts = 0;
     std::vector<ServiceState> described;
     std::vector<std::string> accepted;
+    DeclarationRole role{};
+    std::optional<HostReading> host;
 };
 
 // page carries every declaration in name order, at most 64, and the
@@ -1168,7 +1259,10 @@ inline void enc_caller_observation(std::string&, const CallerObservation&, int);
 inline void enc_service_state(std::string&, const ServiceState&, int);
 inline void enc_description(std::string&, const Description&, int);
 inline void enc_remote_trust(std::string&, const RemoteTrust&, int);
+inline void enc_declaration_ceiling(std::string&, const DeclarationCeiling&, int);
+inline void enc_declaration_host(std::string&, const DeclarationHost&, int);
 inline void enc_declaration(std::string&, const Declaration&, int);
+inline void enc_host_reading(std::string&, const HostReading&, int);
 inline void enc_declaration_state(std::string&, const DeclarationState&, int);
 inline void enc_declaration_list(std::string&, const DeclarationList&, int);
 inline void enc_declaration_change(std::string&, const DeclarationChange&, int);
@@ -1570,9 +1664,110 @@ inline void enc_remote_trust(std::string& out, const RemoteTrust& v, int depth) 
     out += '}';
 }
 
+inline void enc_declaration_ceiling(std::string& out, const DeclarationCeiling& v, int depth) {
+    out += '{';
+    bool first = true;
+    if (v.tokens_per_day != 0) {
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "tokens_per_day");
+        out += ": ";
+        num(out, v.tokens_per_day);
+    }
+    if (v.micros_per_day != 0) {
+        if (!first) out += ',';
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "micros_per_day");
+        out += ": ";
+        num(out, v.micros_per_day);
+    }
+    if (v.requests_per_day != 0) {
+        if (!first) out += ',';
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "requests_per_day");
+        out += ": ";
+        num(out, v.requests_per_day);
+    }
+    if (v.images_per_day != 0) {
+        if (!first) out += ',';
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "images_per_day");
+        out += ": ";
+        num(out, v.images_per_day);
+    }
+    if (v.audio_seconds_per_day != 0) {
+        if (!first) out += ',';
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "audio_seconds_per_day");
+        out += ": ";
+        num(out, v.audio_seconds_per_day);
+    }
+    if (v.characters_per_day != 0) {
+        if (!first) out += ',';
+        first = false;
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "characters_per_day");
+        out += ": ";
+        num(out, v.characters_per_day);
+    }
+    if (!first) { out += '\n'; pad(out, depth); }
+    out += '}';
+}
+
+inline void enc_declaration_host(std::string& out, const DeclarationHost& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "base");
+    out += ": ";
+    esc(out, v.base);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "kind");
+    out += ": ";
+    esc(out, v.kind);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "hosted");
+    out += ": ";
+    out += v.hosted ? "true" : "false";
+    if (!v.credential.empty()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "credential");
+        out += ": ";
+        esc(out, v.credential);
+    }
+    if (v.ceiling.has_value()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "ceiling");
+        out += ": ";
+        enc_declaration_ceiling(out, *v.ceiling, depth + 1);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
 inline void enc_declaration(std::string& out, const Declaration& v, int depth) {
     if (wire_name(v.transport).empty()) throw Refusal("bad_enum", 0);
     if (wire_name(v.activation).empty()) throw Refusal("bad_enum", 0);
+    if (v.role != DeclarationRole{} && wire_name(v.role).empty()) throw Refusal("bad_enum", 0);
     out += '{';
     out += '\n';
     pad(out, depth + 1);
@@ -1647,6 +1842,40 @@ inline void enc_declaration(std::string& out, const Declaration& v, int depth) {
         out += ": ";
         strs(out, v.models, depth + 1);
     }
+    if (v.role != DeclarationRole{}) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "role");
+        out += ": ";
+        esc(out, std::string(wire_name(v.role)));
+    }
+    if (v.host.has_value()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "host");
+        out += ": ";
+        enc_declaration_host(out, *v.host, depth + 1);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_host_reading(std::string& out, const HostReading& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "up");
+    out += ": ";
+    out += v.up ? "true" : "false";
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "why");
+    out += ": ";
+    esc(out, v.why);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -1654,6 +1883,7 @@ inline void enc_declaration(std::string& out, const Declaration& v, int depth) {
 
 inline void enc_declaration_state(std::string& out, const DeclarationState& v, int depth) {
     if (wire_name(v.readiness).empty()) throw Refusal("bad_enum", 0);
+    if (v.role != DeclarationRole{} && wire_name(v.role).empty()) throw Refusal("bad_enum", 0);
     out += '{';
     out += '\n';
     pad(out, depth + 1);
@@ -1703,6 +1933,22 @@ inline void enc_declaration_state(std::string& out, const DeclarationState& v, i
         esc(out, "accepted");
         out += ": ";
         strs(out, v.accepted, depth + 1);
+    }
+    if (v.role != DeclarationRole{}) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "role");
+        out += ": ";
+        esc(out, std::string(wire_name(v.role)));
+    }
+    if (v.host.has_value()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "host");
+        out += ": ";
+        enc_host_reading(out, *v.host, depth + 1);
     }
     out += '\n';
     pad(out, depth);
@@ -2827,7 +3073,10 @@ inline CallerObservation decode_caller_observation(Reader& r);
 inline ServiceState decode_service_state(Reader& r);
 inline Description decode_description(Reader& r);
 inline RemoteTrust decode_remote_trust(Reader& r);
+inline DeclarationCeiling decode_declaration_ceiling(Reader& r);
+inline DeclarationHost decode_declaration_host(Reader& r);
 inline Declaration decode_declaration(Reader& r);
+inline HostReading decode_host_reading(Reader& r);
 inline DeclarationState decode_declaration_state(Reader& r);
 inline DeclarationList decode_declaration_list(Reader& r);
 inline DeclarationChange decode_declaration_change(Reader& r);
@@ -3439,6 +3688,111 @@ inline RemoteTrust decode_remote_trust(Reader& r) {
     return v;
 }
 
+inline DeclarationCeiling decode_declaration_ceiling(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationCeiling v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "tokens_per_day") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.tokens_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "micros_per_day") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.micros_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "requests_per_day") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.requests_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "images_per_day") {
+                if (seen & 8u) r.refuse("duplicate_field");
+                seen |= 8u;
+                v.images_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "audio_seconds_per_day") {
+                if (seen & 16u) r.refuse("duplicate_field");
+                seen |= 16u;
+                v.audio_seconds_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "characters_per_day") {
+                if (seen & 32u) r.refuse("duplicate_field");
+                seen |= 32u;
+                v.characters_per_day = r.integer(INT64_MIN, INT64_MAX);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    return v;
+}
+
+inline DeclarationHost decode_declaration_host(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationHost v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "base") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.base = r.str();
+            } else if (key == "kind") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.kind = r.str();
+            } else if (key == "hosted") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.hosted = r.boolean();
+            } else if (key == "credential") {
+                if (seen & 8u) r.refuse("duplicate_field");
+                seen |= 8u;
+                v.credential = r.str();
+            } else if (key == "ceiling") {
+                if (seen & 16u) r.refuse("duplicate_field");
+                seen |= 16u;
+                v.ceiling = decode_declaration_ceiling(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 7u) != 7u) r.refuse("missing_field");
+    return v;
+}
+
 inline Declaration decode_declaration(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
     r.enter();
@@ -3446,6 +3800,7 @@ inline Declaration decode_declaration(Reader& r) {
     Declaration v;
     std::optional<std::string> wire_transport;
     std::optional<std::string> wire_activation;
+    std::optional<std::string> wire_role;
     std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
@@ -3501,6 +3856,14 @@ inline Declaration decode_declaration(Reader& r) {
                 if (seen & 1024u) r.refuse("duplicate_field");
                 seen |= 1024u;
                 v.models = r.str_list();
+            } else if (key == "role") {
+                if (seen & 2048u) r.refuse("duplicate_field");
+                seen |= 2048u;
+                wire_role = r.str();
+            } else if (key == "host") {
+                if (seen & 4096u) r.refuse("duplicate_field");
+                seen |= 4096u;
+                v.host = decode_declaration_host(r);
             } else {
                 r.refuse("unknown_field");
             }
@@ -3523,6 +3886,50 @@ inline Declaration decode_declaration(Reader& r) {
         if (!parsed) r.refuse("bad_enum");
         v.activation = *parsed;
     }
+    if (wire_role) {
+        const auto parsed = parse_declaration_role(*wire_role);
+        if (!parsed) r.refuse("bad_enum");
+        v.role = *parsed;
+    }
+    return v;
+}
+
+inline HostReading decode_host_reading(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    HostReading v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "up") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.up = r.boolean();
+            } else if (key == "why") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.why = r.str();
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
     return v;
 }
 
@@ -3532,6 +3939,7 @@ inline DeclarationState decode_declaration_state(Reader& r) {
     ++r.pos;
     DeclarationState v;
     std::optional<std::string> wire_readiness;
+    std::optional<std::string> wire_role;
     std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
@@ -3575,6 +3983,14 @@ inline DeclarationState decode_declaration_state(Reader& r) {
                 if (seen & 128u) r.refuse("duplicate_field");
                 seen |= 128u;
                 v.accepted = r.str_list();
+            } else if (key == "role") {
+                if (seen & 256u) r.refuse("duplicate_field");
+                seen |= 256u;
+                wire_role = r.str();
+            } else if (key == "host") {
+                if (seen & 512u) r.refuse("duplicate_field");
+                seen |= 512u;
+                v.host = decode_host_reading(r);
             } else {
                 r.refuse("unknown_field");
             }
@@ -3591,6 +4007,11 @@ inline DeclarationState decode_declaration_state(Reader& r) {
         const auto parsed = parse_declaration_readiness(*wire_readiness);
         if (!parsed) r.refuse("bad_enum");
         v.readiness = *parsed;
+    }
+    if (wire_role) {
+        const auto parsed = parse_declaration_role(*wire_role);
+        if (!parsed) r.refuse("bad_enum");
+        v.role = *parsed;
     }
     return v;
 }

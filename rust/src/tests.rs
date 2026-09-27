@@ -91,6 +91,22 @@ fn reply_frame(r: Option<wire::ServiceReference>, status: &str) -> Vec<u8> {
     )
     .into_bytes()
 }
+/// CONTRACT.md FAC-B4: a resolved binding carries the reference the runtime
+/// returned, so an application can name the provider that served it.
+#[test]
+fn a_resolved_binding_carries_the_reference_the_runtime_returned() {
+    let served = reference();
+    let c = connector(Some(served.clone()), "resolved");
+    let binding = Machine::with_connector("resolver", c)
+        .resolve_service(
+            &served.contract,
+            vec!["required".into()],
+            wire::Scope::Remote,
+        )
+        .unwrap();
+    assert_eq!(binding.reference(), Some(&served));
+    assert_eq!(binding.reference().unwrap().provider, "implementation");
+}
 #[test]
 fn alternate_connector_preserves_one_budget_and_fixed_binding() {
     let c = connector(Some(reference()), "resolved");
@@ -302,7 +318,7 @@ const SINK: &str = "abstraction.logging/sink@1";
 #[test]
 fn unsupported_platform_names_itself_before_selection() {
     assert_eq!(unsupported_platform("android"), Some("android"));
-    assert_eq!(unsupported_platform("macos"), Some("macos"));
+    assert_eq!(unsupported_platform("macos"), None);
     assert_eq!(unsupported_platform("linux"), None);
     assert_eq!(unsupported_platform("windows"), None);
     let android = Scripted {

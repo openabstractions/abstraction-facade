@@ -8,7 +8,7 @@ import (
 // ResolveModel selects one model lookup service. Its portable result can be
 // submitted to a separately resolved download service through the job API.
 func (m *Machine) ResolveModel(ctx context.Context, need Requirements) (*model.Client, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.model", "abstraction.model/resolver@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.model", ModelContract, need)
 	if err != nil {
 		return nil, err
 	}

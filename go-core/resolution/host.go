@@ -14,8 +14,9 @@ import (
 
 const LocalTransport = "oa-framed-local@1"
 
-// DefaultEndpoint returns the current-user bootstrap location. Identity lookup
-// failure panics; new callers should use CheckedDefaultEndpoint to handle errors.
+// DefaultEndpoint returns the generic current-user bootstrap location used by
+// direct hosts and unverified clients. Identity lookup failure panics; new
+// callers should use CheckedDefaultEndpoint to handle errors.
 func DefaultEndpoint() string {
 	endpoint, err := CheckedDefaultEndpoint()
 	if err != nil {
@@ -25,9 +26,10 @@ func DefaultEndpoint() string {
 }
 
 // CheckedDefaultEndpoint preserves an explicit environment endpoint. Otherwise
-// it derives the current-user location and reports identity lookup errors.
-// Endpoint naming supplies a bootstrap convention; server trust is a separate
-// receiving-boundary requirement.
+// it derives the generic current-user location used by direct hosts and
+// unverified clients. Installed clients use bootstrap.SelectInstalled, whose
+// endpoint and independent server expectation must stay together. Endpoint
+// naming supplies no server trust by itself.
 func CheckedDefaultEndpoint() (string, error) {
 	if endpoint := os.Getenv("ABSTRACTION_RUNTIME_ENDPOINT"); endpoint != "" {
 		return endpoint, nil
@@ -54,7 +56,7 @@ func Listen(endpoint string, catalog *Catalog, policy PeerPolicy) (*Host, error)
 	if catalog == nil || policy == nil {
 		return nil, errors.New("resolution: catalogue and peer policy required")
 	}
-	l, err := listen.Listen(endpoint)
+	l, err := listen.ListenFramed(endpoint, listen.Program)
 	if err != nil {
 		return nil, err
 	}

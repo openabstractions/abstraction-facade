@@ -47,8 +47,8 @@ export type Scope = 'any' | 'local' | 'remote';
 /** The status of a resolution that selected or reached no runtime. */
 export declare const runtimeUnavailable: 'runtime_unavailable';
 
-/** The platform the runtime declares unsupported for a `process.platform` value: `android`, `macos` or null. */
-export declare function unsupportedPlatform(platform: string | undefined): 'android' | 'macos' | null;
+/** The platform the runtime declares unsupported for a `process.platform` value: `android` or null. */
+export declare function unsupportedPlatform(platform: string | undefined): 'android' | null;
 
 /**
  * A resolve call that produced no usable service. `status` is the resolver's refusal word,
@@ -73,7 +73,7 @@ export declare class ResolutionError extends Error {
   contract: string | null;
   /** What resolution looked for: the installed runtime or an explicit endpoint. */
   lookedFor: string | null;
-  /** For `runtime_unavailable`, a platform the runtime declares unsupported: `android` or `macos`. */
+  /** For `runtime_unavailable`, a platform the runtime declares unsupported: `android`. */
   platform: string | null;
 }
 

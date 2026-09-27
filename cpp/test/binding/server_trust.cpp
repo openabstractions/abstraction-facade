@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <thread>
-static int opens, selections, releases;
+static int opens, selections, releases, sessions;
 static oa_ipc_status selection_status=OA_IPC_OK;
 static bool default_endpoint=false;
 static uint32_t last_open_budget;
@@ -37,6 +37,25 @@ static oa_ipc_status cancelled_open(const char*,size_t,uint32_t,oa_ipc_cancellat
 static oa_ipc_status wrote(oa_ipc_connection*,const void*,size_t n,size_t* moved){*moved=n;return OA_IPC_OK;}
 static oa_ipc_status read(oa_ipc_connection* h,void* out,size_t size,size_t* moved){auto& f=*reinterpret_cast<Fake*>(h);*moved=std::min(size,f.reply.size()-f.offset);std::memcpy(out,f.reply.data()+f.offset,*moved);f.offset+=*moved;return *moved?OA_IPC_OK:OA_IPC_DISCONNECTED;}
 static void closed(oa_ipc_connection* h){delete reinterpret_cast<Fake*>(h);}
+// XPC uses one request-scoped session call. Feed it the same checked fixture
+// response as the stream path while keeping each call's server expectation.
+static uint32_t features(){return OA_IPC_FEATURE_XPC;}
+static oa_ipc_status fixture_session_call(const char* endpoint,size_t length,uint32_t ms,oa_ipc_cancellation* token,const oa_ipc_server_expectation* server,const void*,size_t frame_length,uint32_t,uint32_t,oa_ipc_reply** reply,size_t* sent){
+ ++sessions;
+ *reply=nullptr;*sent=0;
+ oa_ipc_connection* connection=nullptr;
+ const auto status=verified(endpoint,length,ms,token,server,&connection);
+ if(status!=OA_IPC_OK)return status;
+ auto* fake=reinterpret_cast<Fake*>(connection);
+ fake->reply.erase(0,4);
+ *reply=reinterpret_cast<oa_ipc_reply*>(fake);*sent=frame_length;
+ return OA_IPC_OK;
+}
+static const unsigned char* reply_data(const oa_ipc_reply* reply,size_t* length){
+ const auto* fake=reinterpret_cast<const Fake*>(reply);*length=fake->reply.size();
+ return reinterpret_cast<const unsigned char*>(fake->reply.data());
+}
+static void reply_release(oa_ipc_reply* reply){delete reinterpret_cast<Fake*>(reply);}
 #define oa_ipc_select_runtime selected
 #define oa_ipc_selected_server selected_server
 #define oa_ipc_runtime_selection_release released
@@ -46,6 +65,10 @@ static void closed(oa_ipc_connection* h){delete reinterpret_cast<Fake*>(h);}
 #define oa_ipc_write wrote
 #define oa_ipc_read read
 #define oa_ipc_close closed
+#define oa_ipc_features features
+#define oa_ipc_session_call fixture_session_call
+#define oa_ipc_reply_data reply_data
+#define oa_ipc_reply_release reply_release
 #include <abstraction/facade/client.hpp>
 #undef oa_ipc_open_verified
 #undef oa_ipc_open
@@ -53,9 +76,13 @@ static void closed(oa_ipc_connection* h){delete reinterpret_cast<Fake*>(h);}
 #undef oa_ipc_write
 #undef oa_ipc_read
 #undef oa_ipc_close
+#undef oa_ipc_features
+#undef oa_ipc_session_call
+#undef oa_ipc_reply_data
+#undef oa_ipc_reply_release
 using namespace abstraction;
 template<class F>void refused(F f){int before=opens;try{f();}catch(const ipc::FrameError&e){if(e.status==ipc::Status::Untrusted&&opens==before+1)return;throw;}throw std::runtime_error("guard lost");}
-// On a platform the runtime declares unsupported (macOS today), a default client
+// On a platform the runtime declares unsupported (Android), a default client
 // refuses before it selects an installation; platform_refusal.cpp covers the
 // error itself. Explicit endpoints with explicit server evidence stay usable.
 static void unsupported_platform_trust(){
@@ -99,6 +126,9 @@ int main(){
  // Explicit independent evidence remains usable despite unavailable installation.
  facade::ResolutionClient{}.with_server_expectation(ipc::ServerExpectation{2,"123","/installed/runtime"}).resolve(request);
  }
+#ifdef __APPLE__
+ if(sessions==0)throw std::runtime_error("installed XPC calls escaped the session fixture");
+#endif
  selection_status=OA_IPC_OK;default_endpoint=false;opens=0;
  const ipc::ServerExpectation s{2,"123","/installed/runtime"};
  facade::ResolutionClient resolver("resolver");resolver=resolver.with_server_expectation(s);

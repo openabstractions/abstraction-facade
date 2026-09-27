@@ -47,12 +47,22 @@ func TestTrustedInstallationSelection(t *testing.T) {
 	ctx := context.Background()
 	for _, scope := range []uint32{1, 2, 4} {
 		dir := t.TempDir()
-		selected, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", `\\.\pipe\test`, fixtureQueries(t, []registeredFixture{{"5", dir, scope}}))
+		selected, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", `\\.\pipe\test`, false, fixtureQueries(t, []registeredFixture{{"5", dir, scope}}))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if selected.Server.Program != filepath.Join(dir, "tools", "openabstractions.exe") || selected.Server.Principal.SID != "S-1-5-21-1-2-3-1001" {
 			t.Fatalf("incorrect runtime account/image: %+v", selected)
+		}
+		if selected.EndpointFromEnvironment {
+			t.Fatalf("endpoint not named by the environment: %+v", selected)
+		}
+		environment, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", `\\.\pipe\test`, true, fixtureQueries(t, []registeredFixture{{"5", dir, scope}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !environment.EndpointFromEnvironment {
+			t.Fatalf("endpoint named by the environment: %+v", environment)
 		}
 	}
 	for _, tc := range []struct {
@@ -68,7 +78,7 @@ func TestTrustedInstallationSelection(t *testing.T) {
 		{"state", []registeredFixture{{"7", t.TempDir(), 2}}, ErrNoTrustedInstallation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", `\\.\pipe\test`, fixtureQueries(t, tc.records))
+			_, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", `\\.\pipe\test`, false, fixtureQueries(t, tc.records))
 			if !errors.Is(err, tc.want) {
 				t.Fatal(err)
 			}
@@ -79,7 +89,7 @@ func TestTrustedInstallationSelection(t *testing.T) {
 func TestTrustedInstallationErrorsAndBudget(t *testing.T) {
 	q := fixtureQueries(t, []registeredFixture{{"5", t.TempDir(), 2}})
 	q.related = func(string, uint32) (string, error) { return "", windows.ERROR_ACCESS_DENIED }
-	if _, err := selectWindowsInstallation(context.Background(), "S-1-5-21-1-2-3-1001", "endpoint", q); !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+	if _, err := selectWindowsInstallation(context.Background(), "S-1-5-21-1-2-3-1001", "endpoint", false, q); !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,7 +100,7 @@ func TestTrustedInstallationErrorsAndBudget(t *testing.T) {
 		t.Fatal("query continued after cancellation")
 		return "", nil
 	}
-	if _, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", "endpoint", q); !errors.Is(err, context.Canceled) {
+	if _, err := selectWindowsInstallation(ctx, "S-1-5-21-1-2-3-1001", "endpoint", false, q); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }

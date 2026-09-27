@@ -27,7 +27,7 @@ func NewJobInventoryWithTransport(transport listen.FrameClient, options JobsOpti
 }
 
 func (m *Machine) ResolveJobInventory(ctx context.Context, need Requirements) (*InventoryClient, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.job", "abstraction.job/inventory@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.job", JobInventoryContract, need)
 	if err != nil {
 		return nil, err
 	}

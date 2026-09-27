@@ -2,12 +2,38 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
+	identity "github.com/openabstractions/abstraction-identity"
 	job "github.com/openabstractions/abstraction-job/go"
 )
+
+func assertDarwinNativeJobRefusal(t *testing.T, options Options) bool {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	h, err := listenJobs(options.JobEndpoint, options.JobRoot, "", "test-owner", nil, nil, true)
+	if h != nil {
+		h.Close()
+		t.Fatal("insufficiently proven caller created a job host")
+	}
+	if !errors.Is(err, identity.ErrNotProven) {
+		t.Fatalf("expected startup proof refusal, got %v", err)
+	}
+	for _, path := range []string{options.JobEndpoint, options.JobEndpoint + ".lock"} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("proof refusal created job endpoint artifact %q: %v", path, err)
+		}
+	}
+	t.Skip("native Darwin sockets refuse Program at startup; job upgrade behavior needs a running XPC host")
+	return true
+}
 
 type upgradeExecutor struct {
 	entered, draining, release chan struct{}
@@ -27,6 +53,9 @@ func (e *upgradeExecutor) Serve(ctx context.Context, _ job.Store) error {
 
 func TestUpgradeRootExclusionSurvivesListenerCloseUntilDrain(t *testing.T) {
 	a, b := jobOptions(t), jobOptions(t)
+	if assertDarwinNativeJobRefusal(t, a) {
+		return
+	}
 	b.JobEndpoint += "-replacement"
 	executor := &upgradeExecutor{make(chan struct{}), make(chan struct{}), make(chan struct{})}
 	var releaseOnce sync.Once
@@ -94,6 +123,9 @@ func TestUpgradeRootExclusionSurvivesListenerCloseUntilDrain(t *testing.T) {
 
 func TestUpgradeCloseBeforeServeReleasesRoot(t *testing.T) {
 	a, b := jobOptions(t), jobOptions(t)
+	if assertDarwinNativeJobRefusal(t, a) {
+		return
+	}
 	b.JobEndpoint += "-replacement"
 	old, err := listenJobs(a.JobEndpoint, a.JobRoot, "", "test-owner", nil, nil, true)
 	if err != nil {

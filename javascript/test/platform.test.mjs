@@ -17,9 +17,17 @@ class Counting {
 
 test('declared platforms', () => {
   assert.equal(unsupportedPlatform('android'), 'android');
-  assert.equal(unsupportedPlatform('darwin'), 'macos');
+  assert.equal(unsupportedPlatform('darwin'), null);
   assert.equal(unsupportedPlatform('linux'), null);
   assert.equal(unsupportedPlatform('win32'), null);
+});
+
+test('macOS proceeds to the shared native selector', async () => {
+  const connector = new Counting('darwin');
+  const error = await new Machine(null, {connector}).resolveService(contract).then(
+    () => assert.fail('resolution succeeded'), (e) => e);
+  assert.equal(error.platform, null);
+  assert.equal(connector.asked, 2);
 });
 
 test('an unsupported platform names itself before selection', async () => {

@@ -183,7 +183,7 @@ func TestResolvedRightsEnforceHistoryModelAndRouter(t *testing.T) {
 			}
 		}
 		f.outage(t, h)
-		expect("decision outage", observe(), map[string]string{"history": "policy_unavailable", "model": "unavailable", "inventory": "policy_unavailable", "route": "policy_unavailable"})
+		expect("decision outage", observe(), map[string]string{"history": "policy_unavailable", "model": "unavailable", "inventory": "unavailable", "route": "unavailable"})
 		// Open calls continue through the outage: a log write and a config read.
 		log, err := m.ResolveLog(ctx, client.Requirements{})
 		if err != nil {

@@ -6,9 +6,8 @@
 <link rel="stylesheet" href="style.css">
 
 <main>
-<nav class="site"><a class="name" href="index.html">Open Abstractions</a>
-<a href="index.html">Overview</a> <a href="cases.html">Cases</a> <a href="reference.html">Reference</a> <a href="evidence.html">Evidence</a> <a href="coverage.html">Coverage</a> <a href="adopt.html">Adopt</a>
-<a class="right" href="https://github.com/openabstractions">github.com/openabstractions</a></nav>
+<nav class="site" aria-label="Primary navigation"><a class="name" href="index.html">Open Abstractions</a>
+<a href="adopt.html">Adopt</a><a href="cases.html">Cases</a><span class="nav-devs-label">for developers</span><a href="reference.html">Reference</a><a href="coverage.html">Coverage</a><a href="catalogue.html">Catalogue</a><a href="https://github.com/openabstractions">GitHub</a></nav>
 
 
 <h1>Schema</h1>
@@ -44,7 +43,7 @@
 <h3><code>Describe</code></h3><p><code>request-response</code> <code>Description</code></p><ul>
 </ul>
 <h2 id="service-Registry">Service <code>Registry</code> <span class="tag">[DEF-S1]</span></h2>
-<p>The runtime&#39;s provider declarations, for operator tools. Applications never read it; they resolve. Each call is a rights decision for the bound operator subject; same-account identity alone grants nothing. A decision point that cannot answer reads unavailable. The registry is local: a remote runtime&#39;s services come from its own endpoint@1 Describe, and no registry is read across machines.</p>
+<p>The runtime&#39;s one directory of the programs it knows, for operator tools: providers it launches or attaches to, foreign HTTP engines the router reaches, and other runtimes over mutual TLS. Applications never read it; they resolve. Each call is a rights decision for the bound operator subject; same-account identity alone grants nothing. A decision point that cannot answer reads unavailable. The registry is local: a remote runtime&#39;s services come from its own endpoint@1 Describe, and no registry is read across machines.</p>
 <p>Wire identity: <code>abstraction.facade/registry@1</code></p>
 <p>Multiple services share this namespace. Generated ServiceName (Go) and service_name (C++/Python) validate the request envelope and version before returning its service identity for routing. The selected generated dispatcher validates the method and typed arguments; the selector does not authorize callers or interpret method payloads.</p>
 <p>Frames carry version, service, method and typed arguments. Transport owns framing, associated exchanges, deadlines and connections. Unknown version/service/method and malformed arguments are rejected before invoking a handler. One-way WriteFrame success means local submission, not remote acceptance or persistence.</p>
@@ -57,7 +56,7 @@
 <li>Argument 1: <code>string</code> <code>expected_revision</code> (required, including zero/false/empty)</li>
 <li>Argument 2: <code>Declaration</code> <code>declaration</code> (required, including zero/false/empty)</li>
 </ul>
-<p>Conditionally remove one declaration: the runtime withdraws its candidates and hosts and ends a launched child. Gated by provider.manage. Rules are left as they are.</p>
+<p>Conditionally remove one declaration: the runtime withdraws its candidates and hosts and ends a launched child. Gated by provider.manage. A declaration the installation or a product declared is disabled by name instead of removed, so a reinstall or a later probe does not resurrect it, and a later Declare of that name enables it again. Rules are left as they are.</p>
 <h3><code>Withdraw</code></h3><p><code>request-response</code> <code>DeclarationChange</code></p><ul>
 <li>Argument 1: <code>string</code> <code>expected_revision</code> (required, including zero/false/empty)</li>
 <li>Argument 2: <code>string</code> <code>name</code> (required, including zero/false/empty)</li>
@@ -116,8 +115,8 @@
 <div class="wrap"><table>
 <thead><tr><th>kind</th><th>types</th></tr></thead>
 <tbody>
-<tr><td>built in</td><td><code>Activation</code> <code>ApplicationActivationOutcome</code> <code>ApplicationOutcome</code> <code>BootstrapState</code> <code>CallerOutcome</code> <code>DeclarationEditOutcome</code> <code>DeclarationListOutcome</code> <code>DeclarationReadiness</code> <code>DeclarationTransport</code> <code>DescriptionOutcome</code> <code>ResolutionStatus</code> <code>Scope</code> <code>ServiceReadiness</code> <code>bool</code> <code>i64</code> <code>string</code></td></tr>
-<tr><td>declared below</td><td><code>ApplicationActivationRecipe</code> <code>ApplicationDescriptor</code> <code>ApplicationInterface</code> <code>BootstrapObservation</code> <code>Declaration</code> <code>RemoteTrust</code> <code>ResolveRequest</code> <code>ResolveResult</code> <code>ServiceReference</code></td></tr>
+<tr><td>built in</td><td><code>Activation</code> <code>ApplicationActivationOutcome</code> <code>ApplicationOutcome</code> <code>BootstrapState</code> <code>CallerOutcome</code> <code>DeclarationEditOutcome</code> <code>DeclarationListOutcome</code> <code>DeclarationReadiness</code> <code>DeclarationRole</code> <code>DeclarationTransport</code> <code>DescriptionOutcome</code> <code>ResolutionStatus</code> <code>Scope</code> <code>ServiceReadiness</code> <code>bool</code> <code>i64</code> <code>string</code></td></tr>
+<tr><td>declared below</td><td><code>ApplicationActivationRecipe</code> <code>ApplicationDescriptor</code> <code>ApplicationInterface</code> <code>BootstrapObservation</code> <code>Declaration</code> <code>DeclarationCeiling</code> <code>DeclarationHost</code> <code>HostReading</code> <code>RemoteTrust</code> <code>ResolveRequest</code> <code>ResolveResult</code> <code>ServiceReference</code></td></tr>
 <tr><td>container <span class="tag">[DEF-T3]</span></td><td><code>list&lt;string&gt;</code></td></tr>
 <tr><td>repeated record <span class="tag">[DEF-A9]</span></td><td><code>list&lt;ApplicationContext&gt;</code> <code>list&lt;ApplicationEntry&gt;</code> <code>list&lt;ApplicationInstance&gt;</code> <code>list&lt;ApplicationInterface&gt;</code> <code>list&lt;CallerAttribute&gt;</code> <code>list&lt;CapabilityObservation&gt;</code> <code>list&lt;DeclarationState&gt;</code> <code>list&lt;ServiceState&gt;</code></td></tr>
 <tr><td>string map <span class="tag">[DEF-A10]</span></td><td><code>map&lt;string,string&gt;</code></td></tr>
@@ -236,6 +235,29 @@
 <tr><td>4</td><td><code>key</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
 <tr><td>5</td><td><code>credential</code></td><td><code>string</code></td><td>optional · omitted when zero</td><td>—</td></tr>
 </tbody></table></div>
+<h3 id="struct-DeclarationCeiling"><code>DeclarationCeiling</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>tokens_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>2</td><td><code>micros_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>3</td><td><code>requests_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>4</td><td><code>images_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>5</td><td><code>audio_seconds_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>6</td><td><code>characters_per_day</code></td><td><code>i64</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-DeclarationHost"><code>DeclarationHost</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>base</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>kind</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
+<tr><td>3</td><td><code>hosted</code></td><td><code>bool</code></td><td>required</td><td>—</td></tr>
+<tr><td>4</td><td><code>credential</code></td><td><code>string</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>5</td><td><code>ceiling</code></td><td><code>DeclarationCeiling</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+</tbody></table></div>
 <h3 id="struct-Declaration"><code>Declaration</code></h3>
 <p class="meta">unknown fields <code>refuse</code></p>
 <div class="wrap"><table>
@@ -252,6 +274,16 @@
 <tr><td>9</td><td><code>activation</code></td><td><code>Activation</code></td><td>required</td><td>—</td></tr>
 <tr><td>10</td><td><code>remote</code></td><td><code>RemoteTrust</code></td><td>optional · omitted when absent</td><td>—</td></tr>
 <tr><td>11</td><td><code>models</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>12</td><td><code>role</code></td><td><code>DeclarationRole</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>13</td><td><code>host</code></td><td><code>DeclarationHost</code></td><td>optional · omitted when absent</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="struct-HostReading"><code>HostReading</code></h3>
+<p class="meta">unknown fields <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>field</th><th>type</th><th>presence</th><th>named elsewhere</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>up</code></td><td><code>bool</code></td><td>required</td><td>—</td></tr>
+<tr><td>2</td><td><code>why</code></td><td><code>string</code></td><td>required</td><td>—</td></tr>
 </tbody></table></div>
 <h3 id="struct-DeclarationState"><code>DeclarationState</code></h3>
 <p class="meta">unknown fields <code>refuse</code></p>
@@ -266,6 +298,8 @@
 <tr><td>6</td><td><code>restarts</code></td><td><code>i64</code></td><td>required</td><td>—</td></tr>
 <tr><td>7</td><td><code>described</code></td><td><code>list&lt;ServiceState&gt;</code></td><td>required</td><td>—</td></tr>
 <tr><td>8</td><td><code>accepted</code></td><td><code>list&lt;string&gt;</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>9</td><td><code>role</code></td><td><code>DeclarationRole</code></td><td>optional · omitted when zero</td><td>—</td></tr>
+<tr><td>10</td><td><code>host</code></td><td><code>HostReading</code></td><td>optional · omitted when absent</td><td>—</td></tr>
 </tbody></table></div>
 <h3 id="struct-DeclarationList"><code>DeclarationList</code></h3>
 <p class="meta">unknown fields <code>refuse</code></p>
@@ -462,6 +496,16 @@
 <tbody>
 <tr><td>1</td><td><code>native</code></td><td><code>oa-native@1</code></td></tr>
 <tr><td>2</td><td><code>remote</code></td><td><code>oa-remote@1</code></td></tr>
+<tr><td>3</td><td><code>http</code></td><td><code>http@1</code></td></tr>
+</tbody></table></div>
+<h3 id="enum-DeclarationRole"><code>DeclarationRole</code></h3>
+<p class="meta">a member this reader does not know is <code>refuse</code></p>
+<div class="wrap"><table>
+<thead><tr><th>id</th><th>member</th><th>wire</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>provider</code></td><td><code>provider</code></td></tr>
+<tr><td>2</td><td><code>host</code></td><td><code>host</code></td></tr>
+<tr><td>3</td><td><code>remote</code></td><td><code>remote</code></td></tr>
 </tbody></table></div>
 <h3 id="enum-Activation"><code>Activation</code></h3>
 <p class="meta">a member this reader does not know is <code>refuse</code></p>
@@ -484,6 +528,7 @@
 <tr><td>5</td><td><code>refused</code></td><td><code>refused</code></td></tr>
 <tr><td>6</td><td><code>unreachable</code></td><td><code>unreachable</code></td></tr>
 <tr><td>7</td><td><code>not_ready</code></td><td><code>not_ready</code></td></tr>
+<tr><td>8</td><td><code>disabled</code></td><td><code>disabled</code></td></tr>
 </tbody></table></div>
 <h3 id="enum-DeclarationListOutcome"><code>DeclarationListOutcome</code></h3>
 <p class="meta">a member this reader does not know is <code>refuse</code></p>
@@ -540,7 +585,7 @@
 <div class="wrap"><table>
 <thead><tr><th>name</th><th>type</th><th>value</th></tr></thead>
 <tbody>
-<tr><td><code>declaration_resource_kinds</code></td><td><code>list&lt;string&gt;</code></td><td><code>store, host, profile</code></td></tr>
+<tr><td><code>declaration_resource_kinds</code></td><td><code>list&lt;string&gt;</code></td><td><code>store, host, profile, card</code></td></tr>
 <tr><td><code>registry_actions</code></td><td><code>list&lt;string&gt;</code></td><td><code>abstraction.facade/provider.manage</code></td></tr>
 <tr><td><code>default_runtime_contracts</code></td><td><code>list&lt;string&gt;</code></td><td><code>abstraction.logging/sink@1, abstraction.config/reader@1, abstraction.job/acceptance@1, abstraction.job/operations@1, abstraction.config/editor@1</code></td></tr>
 </tbody></table></div>

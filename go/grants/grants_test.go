@@ -52,7 +52,7 @@ func TestBundlesNameExactRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = []Rule{{"abstraction.router/route", "abstraction.router/routes"}, {"abstraction.inference/complete", "host:openrouter"}, {"abstraction.credentials/apply", "credential:openrouter"}}
+	want = []Rule{{"abstraction.router/inventory.read", "abstraction.router/inventory"}, {"abstraction.router/route", "abstraction.router/routes"}, {"abstraction.inference/complete", "host:openrouter"}, {"abstraction.credentials/apply", "credential:openrouter"}}
 	if !reflect.DeepEqual(inference, want) {
 		t.Fatalf("inference %v, want %v", inference, want)
 	}

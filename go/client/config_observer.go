@@ -7,7 +7,7 @@ import (
 
 // ResolveConfigObserver requires the selected provider's notification contract.
 func (m *Machine) ResolveConfigObserver(ctx context.Context, need Requirements) (*config.Observer, error) {
-	ep, e := m.resolve(ctx, "abstraction.config", "abstraction.config/observer@1", need)
+	ep, e := m.resolve(ctx, "abstraction.config", ConfigObserverContract, need)
 	if e != nil {
 		return nil, e
 	}

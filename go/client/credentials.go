@@ -10,7 +10,7 @@ import (
 // register, rotate, revoke, list and audit credentials by name. Every call is a
 // rights decision on the bound caller, and no call returns secret bytes.
 func (m *Machine) ResolveCredentials(ctx context.Context, need Requirements) (*credentials.Holder, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.credentials", "abstraction.credentials/holder@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.credentials", CredentialsContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -20,7 +20,7 @@ func (m *Machine) ResolveCredentials(ctx context.Context, need Requirements) (*c
 // ResolveCredentialsApplier binds the applier for a consuming service the
 // receiving host designated as an enforcer. Any other program reads forbidden.
 func (m *Machine) ResolveCredentialsApplier(ctx context.Context, need Requirements) (*credentials.Applier, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.credentials", "abstraction.credentials/applier@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.credentials", CredentialsApplierContract, need)
 	if err != nil {
 		return nil, err
 	}

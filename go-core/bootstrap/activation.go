@@ -24,11 +24,14 @@ var ErrActivationUnsupported = errors.New("bootstrap: on-demand runtime activati
 const DefaultActivationBudget = 20 * time.Second
 
 // ActivateInstalled starts the selected installation's runtime once, through
-// its own `openabstractions start`, and waits for it to report readiness
-// within ctx. It performs no installation and selects nothing: the Selection
+// its platform supervisor. It performs no installation and selects nothing: the Selection
 // comes from SelectInstalled, so a machine with no installation never reaches
 // it. On Windows it refuses an elevated caller without launching anything and
-// reports an installer upgrade as ErrUpgradeInProgress. Other platforms return
+// reports an installer upgrade as ErrUpgradeInProgress. macOS revalidates the
+// selected LaunchAgent and asks launchd to kickstart it without replacing an
+// already-running process. Ordinary macOS discovery connects to the declared
+// Mach service and leaves on-demand activation to launchd; callers use this
+// function only when they explicitly want a kickstart. Other platforms return
 // ErrActivationUnsupported.
 func ActivateInstalled(ctx context.Context, selection Selection) error {
 	if err := ctx.Err(); err != nil {

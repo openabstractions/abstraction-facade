@@ -189,6 +189,8 @@ type BootstrapObservation = wire.BootstrapObservation
 
 type ResolveRequest = wire.ResolveRequest
 
+type ServiceReference = wire.ServiceReference
+
 type RuntimeObservation = wire.RuntimeObservation
 
 type Declaration = wire.Declaration

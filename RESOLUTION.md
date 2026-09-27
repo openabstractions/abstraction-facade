@@ -6,16 +6,23 @@ submit work, establish server trust or transfer ownership. The primary Go facade
 Explicit capability constructors accept a deliberately supplied endpoint.
 
 An application requests a capability, one or more exact acceptable versioned
-contract identities, required guarantees and permitted placement (`local`,
-`remote` or `any`). Contract identities are exact strings, not semantic-version
-ranges. Capability-specific accessors supply their supported contracts and
-documented defaults. An empty guarantee list adds no requirement; an empty
-contract list is invalid. Lists contain distinct nonempty names.
+service identities, required guarantees and permitted placement (`local`,
+`remote` or `any`). Service identities are compared as exact strings.
+Capability-specific accessors supply their supported services and documented
+defaults. An empty guarantee list adds no requirement; an empty service list is
+invalid. Lists contain distinct nonempty names. The Go facade's
+`Requirements.Scope`, left unset, resolves as `any`; set `local` or `remote`
+explicitly to restrict placement.
+
+The wire keeps the older words until `resolver@2`: `ResolveRequest.contracts`
+and `ServiceReference.contract` name services, and their `scope` fields name
+the placement. At `resolver@2` Go's `Requirements.Scope` becomes
+`Requirements.Placement` and `ScopeLocal` becomes `PlacementLocal`.
 
 Registrations are runtime-owned, ordered by applicable policy and associated
 with a readiness observation. Their logical provider identity is independent of
 PID and endpoint. A registration has one concrete placement, transport binding,
-endpoint and supported contract. It advertises candidate guarantees, not accepted
+endpoint and supported service. It advertises candidate guarantees, not accepted
 operation promises. No request field asserts caller identity or registration.
 
 The receiving boundary supplies authorization for its bound caller. Missing
@@ -26,7 +33,7 @@ authorization denies access. Selection applies these stages in order:
 | Valid request shape and semantic inputs | `invalid_request` |
 | Capability registered in an eligible placement | `unavailable` |
 | At least one eligible candidate authorized | `forbidden` |
-| At least one authorized candidate supports an acceptable contract | `incompatible` |
+| At least one authorized candidate supports an acceptable service | `incompatible` |
 | At least one compatible candidate satisfies every required guarantee | `unmet_requirements` |
 | At least one sufficient candidate ready | `not_ready` |
 
@@ -38,7 +45,7 @@ request finds it ready. Activation never waits inside a resolution.
 
 Select the first ready sufficient candidate in policy order. Never combine
 guarantees from different candidates, substitute an incompatible version, or
-use a weaker candidate because a sufficient one is not ready. Contract-list
+use a weaker candidate because a sufficient one is not ready. Service-list
 order is not a client preference that overrides runtime policy.
 
 `resolved` carries exactly one reference. Every refusal carries no reference;
@@ -51,13 +58,36 @@ The service boundary must recheck authority, identity, compatibility and the
 guarantees required when accepting work. A disconnected accepted operation is
 reconciled against its owner, never sent back through fresh selection by this API.
 
+## Naming the provider that answered
+
+A resolved binding carries the reference the runtime returned, read-only, so an
+application can say which provider served it (CONTRACT.md FAC-B4). The fields are
+the `ServiceReference` fields of [facade.thrift](facade.thrift): `provider`,
+`capability`, `contract`, `guarantees`, `scope`, `transport` and `endpoint`;
+`contract` names the service and `scope` the placement.
+
+| Language | Binding | Reference | Binds one service |
+|---|---|---|---|
+| Go | `client.Binding` | `Binding.Reference() wire.ServiceReference` | `Machine.ResolveService(ctx, contract, need)` |
+| C++ | `facade::BoundService<Service, Transport>` | `reference()` | `facade::resolve_service<Service>(resolver, guarantees, scope)` |
+| Rust | `Binding<C>` | `reference() -> Option<&wire::ServiceReference>` | `Machine::resolve_service(contract, guarantees, scope)` |
+| Python | `abstraction.facade.client.Binding` | `binding.reference` | `Machine.resolve_service(contract, guarantees=, scope=)` |
+| JavaScript | `Binding` | `binding.reference` | `Machine.resolveService(contract, {guarantees, scope})` |
+
+Go's `Reference()`, Python's `binding.reference` and JavaScript's frozen object
+each hand back a copy a caller cannot edit into the binding. Python also reads
+the reference of a capability client the facade built, with
+`abstraction.facade.client.reference(client)`. A binding a caller restored from
+a retained endpoint has none: Rust reads `None`, JavaScript and Python `null`
+and `None`, and Go the zero `ServiceReference`.
+
 ## When resolution yields no service
 
 An application that adopted a capability requires the service for it: when
 resolution yields no service, the operation fails with the facade's resolution
 error and the application substitutes nothing (VISION.md, "An adopted capability
 with no runtime fails"). Every facade reports that failure with one error type
-carrying a status, the requested capability and contract, what resolution looked
+carrying a status, the requested capability and service, what resolution looked
 for, and a cause.
 
 The status is the resolver's refusal word from the table above, or one of the
@@ -67,7 +97,7 @@ statuses a client reports without the resolver saying them:
 |---|---|---|
 | `runtime_unavailable` | No runtime could be selected, or the selected or explicit endpoint could not be reached. | The selection or transport failure. |
 | `invalid_resolution` | The resolver answered, and its answer failed validation: a refusal carrying a reference, or a reference that does not satisfy the request. | None, or the validation failure. |
-| `unsupported_transport` | The resolver selected a reference whose scope or transport this binding cannot use. | None; Go, C++ and Rust name the reference's scope and transport. |
+| `unsupported_transport` | The resolver selected a reference whose placement or transport this binding cannot use. | None; Go, C++ and Rust name the reference's placement and transport. |
 | `invalid_request` | The request was refused before it was sent. | None. |
 
 `runtime_unavailable` is distinct from the resolver's `unavailable`: the first
@@ -75,13 +105,15 @@ means no runtime answered, the second that a reachable runtime serves no
 registration for the capability. What resolution looked for is one of `the
 installed runtime` (selection failed), `the installed runtime at <endpoint>` or
 `the explicit endpoint <endpoint>`. A codec refusal, dispatch error or service
-error from a resolver that did answer keeps its own type.
+error from a resolver that did answer keeps its own type. An installed endpoint
+that `ABSTRACTION_RUNTIME_ENDPOINT` named, not the installation's own
+registration, is explicit: Go's SDK activation never starts that installation
+to wait on it, and reports its absence at once.
 
 ### Unsupported platforms
 
-The runtime's platform declaration (`docs/platforms.json` in the source
-repository, published in the layer catalogue) lists `android` (including Termux)
-and `macos` as unsupported. On those platforms, resolving through the installed
+The binding-level early platform refusal applies to Android, including Termux.
+On Android, resolving through the installed
 runtime reports `runtime_unavailable` at `the installed runtime` before any
 selection, with no cause, and the error's platform field names the platform:
 
@@ -90,11 +122,16 @@ selection, with no cause, and the error's platform field names the platform:
 An explicit endpoint is the application's own choice and resolves as on any
 other platform. Each binding detects the platform natively: Go from `GOOS`
 during installed-runtime selection (`bootstrap.UnsupportedPlatformError`), C++
-from `__ANDROID__` and `TARGET_OS_OSX` (or `ABSTRACTION_FACADE_TARGET_PLATFORM`),
+from `__ANDROID__` (or `ABSTRACTION_FACADE_TARGET_PLATFORM`),
 Python from `sys.platform` and `sys.getandroidapilevel`, Rust from the
 connector's `platform()` (default `std::env::consts::OS`), and JavaScript from
 the connector's `platform` (default `process.platform`). On a declared platform
 the Python `Machine()` loads no native library.
+
+macOS bindings continue to installed selection. The shared native selector
+validates the per-user LaunchAgent and returns UID/executable trust for the fixed
+XPC bootstrap name. This source behavior does not qualify a published macOS
+runtime before the remaining end-to-end acceptance checks pass.
 
 The caller's own cancellation stays the transport outcome, never a resolution
 error. In Go, C++ and Rust a waiting budget already spent when resolution starts
@@ -233,9 +270,9 @@ before and after a runtime restart and prove a single retained operation.
 Go `client.Machine.ResolveLog`, `ResolveConfig` and `ResolveRouter` resolve before
 constructing the selected typed client. The corresponding C++ accessors use the
 same reference binding. `oa-framed-local@1` binds the local OA endpoint for either
-concrete execution scope, `local` or `remote`. The service enforces the selected
+concrete placement, `local` or `remote`. The service enforces the selected
 placement for every admitted call. Another transport is refused as
-`unsupported_transport`. Older clients reject remote-scope native references;
+`unsupported_transport`. Older clients reject remote-placement native references;
 their existing local bindings remain compatible. Bootstrap uses
 the shared `runtime-v1` endpoint convention, or an explicitly supplied location.
 
@@ -244,12 +281,13 @@ local and hosted routes. `openabstractions.user-runtime` is a `local` candidate
 with `abstraction.inference/local-only@1`; its original inference endpoint now
 enforces local execution. `openabstractions.user-runtime.remote` is a `remote`
 candidate with `abstraction.inference/hosted-allowed@1` on a separate local IPC
-endpoint. Applications using hosted inference must request `scope=remote` and a
-binding version that accepts remote scope over `oa-framed-local@1`. Before this
-split the Go user runtime advertised its mixed router as `scope=local`; callers
-that used that inaccurate registration for hosted work must change the requested
-scope. `scope=any` selects the first sufficient concrete candidate in runtime
-policy order and retains that placement for the binding.
+endpoint. Applications using hosted inference must request placement `remote`
+(`scope=remote` on the wire) and a binding version that accepts remote placement
+over `oa-framed-local@1`. Before this split the Go user runtime advertised its
+mixed router as `scope=local`; callers that used that inaccurate registration
+for hosted work must change the requested placement. `scope=any` selects the
+first sufficient concrete candidate in runtime policy order and retains that
+placement for the binding.
 On Windows the default is
 `\\.\pipe\openabstractions-user-<process-token SID>-runtime-v1`.
 Runtime provider endpoints use the same account namespace. Go and C++ derive
@@ -297,7 +335,7 @@ control panel uses it to show a person how the runtime sees that client.
 Go: `client.Machine.ObserveCaller(ctx)` selects the runtime as resolution does,
 under the same server trust, and returns the observation. A selection or
 transport failure is the resolution error with capability `abstraction.facade`
-and contract `abstraction.facade/caller@1`, and an observation whose identity
+and service `abstraction.facade/caller@1`, and an observation whose identity
 disagrees with its outcome is `invalid_resolution`. The server side is
 `resolution.ObserveCaller(peer)`, dispatched by `HandleConnection` on the
 service name. `go-core/resolution` `TestCallerEchoIsTheBoundProgramEvidence`

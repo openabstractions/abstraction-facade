@@ -11,7 +11,7 @@ import (
 // decides abstraction.inference/complete for the bound caller and applies a
 // named credential itself; no key or endpoint reaches the application.
 func (m *Machine) ResolveInference(ctx context.Context, need Requirements) (*inference.Chat, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.inference", "abstraction.inference/chat@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.inference", InferenceContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func (m *Machine) ResolveInference(ctx context.Context, need Requirements) (*inf
 // decides abstraction.inference/complete for the bound caller and applies a
 // named credential itself; no key or endpoint reaches the application.
 func (m *Machine) ResolveEmbeddings(ctx context.Context, need Requirements) (*inference.Embeddings, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.inference", "abstraction.inference/embed@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.inference", EmbeddingsContract, need)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (m *Machine) ResolveEmbeddings(ctx context.Context, need Requirements) (*in
 // hosts, the gateway window's local keys and the inference audit. The runtime
 // decides host.manage, key.issue or audit.read for this program on each call.
 func (m *Machine) ResolveInferenceOperator(ctx context.Context, need Requirements) (*inference.Operator, error) {
-	endpoint, err := m.resolve(ctx, "abstraction.inference", "abstraction.inference/operator@1", need)
+	endpoint, err := m.resolve(ctx, "abstraction.inference", InferenceOperatorContract, need)
 	if err != nil {
 		return nil, err
 	}

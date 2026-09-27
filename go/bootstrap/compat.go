@@ -8,6 +8,14 @@ import (
 )
 
 func Endpoint(service string) (string, error) { return core.Endpoint(service) }
+func InstalledEndpoint(service string) (string, error) {
+	return core.InstalledEndpoint(service)
+}
+
+type Selection = core.Selection
+
+func SelectInstalled(ctx context.Context) (Selection, error) { return core.SelectInstalled(ctx) }
+
 func ObserveInstalled(ctx context.Context) wire.BootstrapObservation {
 	return core.ObserveInstalled(ctx)
 }

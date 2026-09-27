@@ -7,6 +7,7 @@ import (
 	identity "github.com/openabstractions/abstraction-identity"
 	logservice "github.com/openabstractions/abstraction-logging/go/service"
 	modelservice "github.com/openabstractions/abstraction-model/go/service"
+	resourceservice "github.com/openabstractions/abstraction-resource/go/service"
 	routerservice "github.com/openabstractions/abstraction-router/go/service"
 )
 
@@ -45,6 +46,23 @@ func HistoryPolicyFromRights(decisions Decider) logservice.HistoryPolicy {
 func ModelPolicyFromRights(decisions Decider) modelservice.LookupPolicy {
 	return func(ctx context.Context, peer *identity.Peer, registry string) error {
 		return requireDecision(ctx, decisions, peer, ModelLookupAction, registry, modelservice.ErrPolicyUnavailable)
+	}
+}
+
+// The rights rule of a resource table read (CONTRACT.md RES-T4). The resource
+// is the account, not the resource being read: a program either sees the
+// machine's holders or sees its own rows.
+const (
+	ResourceTableReadAction   = resourceservice.ActionTableRead
+	ResourceTableReadResource = resourceservice.ResourceAccount
+)
+
+// ResourceTablePolicyFromRights decides before each read of the resource
+// table. A refusal narrows the answer to the caller's own rows; it does not
+// end the call. No permit is cached.
+func ResourceTablePolicyFromRights(decisions Decider) resourceservice.Policy {
+	return func(ctx context.Context, peer *identity.Peer, action, resource string) error {
+		return requireDecision(ctx, decisions, peer, action, resource, resourceservice.ErrPolicyUnavailable)
 	}
 }
 

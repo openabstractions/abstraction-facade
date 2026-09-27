@@ -3,12 +3,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 from abstraction.ipc import ServerExpectation, FrameError, CANCELLED, DISCONNECTED, IO_ERROR, TIMEOUT, UNTRUSTED
-from abstraction.facade.client import Machine, ResolutionError
+from abstraction.facade.client import Machine, ResolutionError, unsupported_platform
 from abstraction.facade.jobs import Jobs
 import abstraction.facade as wire
 
 
 class BindingTests(unittest.TestCase):
+    def test_macos_reaches_installed_selection(self):
+        with patch("abstraction.facade.client.sys.platform", "darwin"):
+            self.assertIsNone(unsupported_platform())
+
     def test_plain_string_scope_is_rejected_before_transport(self):
         machine = Machine.__new__(Machine)
         with self.assertRaisesRegex(ValueError, "invalid resolution requirements"):
@@ -78,6 +82,43 @@ class BindingTests(unittest.TestCase):
         restored = Jobs.restore_installed("provider", "owner", library=self.lib)
         self.assertIs(restored._transport.server, self.expected)
         self.assertEqual(restored.owner, "owner")
+
+    def test_a_resolved_binding_carries_the_reference_the_runtime_returned(self):
+        binding = Machine(library=self.lib).resolve_service("abstraction.storage/content-reader@1",
+                                                            guarantees=["durable@1"])
+        reference = binding.reference
+        self.assertEqual((reference.provider, reference.capability, reference.contract,
+                          reference.guarantees, reference.scope, reference.transport, reference.endpoint),
+                         ("catalogue-label", "abstraction.storage", "abstraction.storage/content-reader@1",
+                          ["durable@1"], "local", "oa-framed-local@1", "provider"))
+
+    def test_the_reference_of_a_binding_is_read_only(self):
+        binding = Machine(library=self.lib).resolve_service("abstraction.storage/content-reader@1",
+                                                            guarantees=["durable@1"])
+        edited = binding.reference
+        edited.provider, edited.guarantees[0] = "someone-else", "rewritten"
+        self.assertEqual((binding.reference.provider, binding.reference.guarantees),
+                         ("catalogue-label", ["durable@1"]))
+
+    def test_a_new_waiting_policy_keeps_the_selected_reference(self):
+        binding = Machine(library=self.lib).resolve_service("abstraction.storage/content-reader@1")
+        for kept in (binding.with_waiting(deadline=time.monotonic() + 5), binding.call_scope()):
+            self.assertEqual(kept.reference.provider, "catalogue-label")
+            self.assertEqual(kept.endpoint, b"provider")
+
+    def test_a_capability_client_names_the_provider_that_served_it(self):
+        from abstraction.facade.client import reference
+        jobs = Machine(library=self.lib).resolve_jobs()
+        self.assertEqual(reference(jobs).provider, "catalogue-label")
+        self.assertEqual(reference(jobs).contract, "abstraction.job/acceptance@1")
+        self.assertIsNone(reference(object()))
+
+    def test_resolve_service_refuses_a_contract_that_names_no_capability(self):
+        machine = Machine(library=self.lib)
+        for contract in ("", "abstraction.storage", "/content-reader@1", "abstraction.storage/", None):
+            with self.assertRaisesRegex(ValueError, "invalid resolution requirements"):
+                machine.resolve_service(contract)
+        self.assertEqual(self.transports, [])
 
     def test_selection_refusal_does_not_contact_resolver(self):
         def refuse(**options): raise FrameError(UNTRUSTED, "no installation")
@@ -227,6 +268,27 @@ class BindingTests(unittest.TestCase):
             self.assertIs(Machine(library=self.lib).describe_endpoint("provider-endpoint"), described)
         self.assertEqual(seen[0].endpoint, b"provider-endpoint")
         with self.assertRaises(ValueError): Machine(library=self.lib).describe_endpoint("")
+
+    def test_resource_table_and_leases_resolve_typed_clients(self):
+        import abstraction.resource as resource
+        from abstraction.facade.client import reference
+        requests = []
+        def resolver(transport):
+            def resolve(request):
+                requests.append((request.capability, request.contracts))
+                return wire.ResolveResult(status="resolved", reference=wire.ServiceReference(
+                    provider="catalogue-label", capability=request.capability, contract=request.contracts[0],
+                    guarantees=[], scope="local", transport="oa-framed-local@1", endpoint="resource"))
+            return SimpleNamespace(resolve=resolve)
+        with patch("abstraction.facade.client.wire.ResolverClient", side_effect=resolver):
+            table = Machine(library=self.lib).resolve_resource_table()
+            leases = Machine(library=self.lib).resolve_resource_leases()
+        self.assertIsInstance(table, resource.TableClient)
+        self.assertIsInstance(leases, resource.LeasesClient)
+        self.assertEqual(requests, [("abstraction.resource", ["abstraction.resource/table@1"]),
+                                    ("abstraction.resource", ["abstraction.resource/leases@1"])])
+        self.assertEqual(reference(table).provider, "catalogue-label")
+        self.assertEqual(reference(leases).provider, "catalogue-label")
 
     def test_explicit_endpoint_compatibility_and_expired_policy(self):
         client = Machine("explicit", self.lib).resolve_jobs()

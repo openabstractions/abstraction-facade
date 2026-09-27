@@ -1,5 +1,7 @@
 # JavaScript service bindings
 
+Install status: source only today, no npm package published; 0.3.0 plans an `@openabstractions` npm package, pending the npm organization and owner consent.
+
 The pure facade package uses generated resolver codecs and a supplied connector.
 It has no native or capability dependency. A connector implements
 `supports(scope, transport)` and `connect(endpoint, waitingOptions)`, returning a
@@ -14,6 +16,17 @@ const connector = new NativeConnector();
 const machine = new Machine(null, {connector});
 const binding = await machine.resolveService('abstraction.logging/sink@1');
 const log = binding.client(SinkClient);
+```
+
+`binding.reference` names the provider that answered, read-only, so an
+application can say which provider served it (CONTRACT.md `FAC-B4`). It is the
+resolver's frozen `ServiceReference`: `provider`, `capability`, `contract`,
+`guarantees` (a guarantee is a contract-specific promise; see the
+[reference vocabulary](https://openabstractions.org/reference.html#vocabulary)), `scope`, `transport` and `endpoint`. It grants nothing, and a
+`Binding` constructed from a caller-retained endpoint has `null`.
+
+```js
+console.log(`reused from ${binding.reference.provider}`);
 ```
 
 An application that logs keeps a `ResolvedSink` from `@openabstractions/facade/logging`
@@ -62,8 +75,32 @@ An explicit `deadline` remains fixed across resolution and calls. Obtain
 its selection. Reusable objects are immutable. Generated protocols alone make
 no claim that a provider implements every method or that one-way writes persist.
 
-Install the actual source package containing its generated `js/` output. The
-outside fixture uses an isolated package tree and installed native addon, with
-an alternate pure connector test proving no native import requirement. Version
-0.0.0 is development metadata. Initial behavioral proof covers logging on
-Windows/MSVC; other capabilities/platforms require their own service evidence.
+## Build from source
+
+Place `abstraction-identity` and `abstraction-facade` checkouts beside one
+another. This facade package (`package.json`, `type: "module"`) is pure
+JavaScript and needs no native build; `NativeConnector` from
+`@openabstractions/ipc` does, since it wraps the shared C ABI through a Node
+addon built by `abstraction-identity/javascript/CMakeLists.txt` and
+`addon.cpp`.
+
+From their common parent, install the shared native library, then build the
+Node addon against it and install both packages locally:
+
+```sh
+PREFIX="/absolute/writable/ipc-prefix" # on Windows use an absolute drive path
+cmake -S abstraction-identity/cpp -B build/ipc -DBUILD_SHARED_LIBS=ON -DABSTRACTION_IPC_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$PREFIX"
+cmake --build build/ipc --config Release
+cmake --install build/ipc --config Release
+cmake -S abstraction-identity/javascript -B build/ipc-node -DCMAKE_PREFIX_PATH="$PREFIX" -DNODE_INCLUDE_DIR="/path/to/node-api/headers"
+cmake --build build/ipc-node --config Release
+cmake --install build/ipc-node --config Release
+npm install ./abstraction-identity/javascript ./abstraction-facade/javascript
+```
+
+Set `NODE_IMPORT_LIBRARY` to the matching architecture's official `node.lib`
+on Windows. The outside fixture uses an isolated package tree and this
+installed native addon, with an alternate pure connector test proving no
+native import requirement. Initial behavioral proof covers logging on
+Windows/MSVC; other capabilities/platforms require their own service
+evidence.

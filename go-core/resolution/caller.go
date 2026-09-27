@@ -39,7 +39,10 @@ func ObserveCaller(peer *identity.Peer) wire.CallerObservation {
 	if user.Kind != "windows" {
 		account = strconv.Itoa(user.UID)
 	}
-	limits := identity.Ceiling()
+	limits, err := identity.CeilingFor(identity.Transport(peer.Transport))
+	if err != nil {
+		return refused
+	}
 	best := []identity.Proof{limits.Best.User, limits.Best.Process, limits.Best.Path, limits.Best.Package, limits.Best.Code}
 	proofs := []identity.Proof{peer.User.Proof(), peer.Process.Proof(), peer.Path.Proof(), peer.Package.Proof(), peer.Code.Proof()}
 	attributes := make([]wire.CallerAttribute, 0, len(proofs))

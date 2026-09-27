@@ -1,5 +1,7 @@
 # Native Rust facade connector
 
+Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+
 This optional development crate supplies `NativeConnector`, the concrete `Machine`
 alias, and `discover()`.
 
