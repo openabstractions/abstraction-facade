@@ -82,7 +82,7 @@ func TestResolvedRightsCatalogueRegistrationExpiryAndProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	me := rightsclient.Subject{Account: account.Uid, Program: filepath.Clean(exe)}
+	me := rightsclient.Subject{Account: account.Uid, Program: identity.CanonicalProgramPath(filepath.Clean(exe))}
 	at := base.Format(rights.StampFormat)
 
 	page, err := operator.ListPolicyContext(ctx, "", 64)

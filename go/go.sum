@@ -1,4 +1,4 @@
-github.com/openabstractions/abstraction-asks/go v0.5.0 h1:UnbCuj3C1a3YGdywLYRkZxrkH23Q3/MCglGMtLJNj34=
+github.com/openabstractions/abstraction-asks/go v0.5.0 h1:FiNrAy14vnbDbCh68Ecrh+AFODL+vWzniYHCd1citrY=
 github.com/openabstractions/abstraction-asks/go v0.5.0/go.mod h1:pFX+pvjj4XKU1cNYY1gpWpFGi4buksVOyHMWeQb2qOo=
 github.com/openabstractions/abstraction-cas/go v0.4.0 h1:zaAJm5VrYMBQm8U64rtuBS/7MPq0iOB5ZMkA8dsEF1w=
 github.com/openabstractions/abstraction-cas/go v0.4.0/go.mod h1:pR8sRTbXF3k7fiXNjNiBqqc7i0Wu9RQvctH3q/wKUYo=
@@ -12,7 +12,7 @@ github.com/openabstractions/abstraction-facade/go-core v0.3.0 h1:QSAs64nabM2YLS8
 github.com/openabstractions/abstraction-facade/go-core v0.3.0/go.mod h1:zvr+SWV8e7iP2G8vcXE/X/KWhlefraZL70Z0dW5qBFU=
 github.com/openabstractions/abstraction-identity v0.4.0 h1:BmBeiuB7BOoG7cn/Rd1aX30gwVhWVQYJHb65jDrAEaE=
 github.com/openabstractions/abstraction-identity v0.4.0/go.mod h1:gv5sDQuTQqv/UY+fXY5Q74i1junNIEvf/5UsZxMxwKY=
-github.com/openabstractions/abstraction-inference/go v0.2.0 h1:fB/vopcbYe/3mdsNcVMe5nV2gwYSZjdaoEx+O6Geg5A=
+github.com/openabstractions/abstraction-inference/go v0.2.0 h1:lMg0ToQWs+3Zdg5PGMVzAocnqc9as4IcI0K3m53BHns=
 github.com/openabstractions/abstraction-inference/go v0.2.0/go.mod h1:qRJg9CbeZ/i3Uhx4LvbWrNQ7ihcOigTGGs0G3iznwSI=
 github.com/openabstractions/abstraction-job/go v0.6.0 h1:8vOExvBqZGdWxblPvHh7wUQ9ohLSY1AwuIqM0BTHRH4=
 github.com/openabstractions/abstraction-job/go v0.6.0/go.mod h1:r/sV592kFpKZwWmeCOohXq3T4yrInVzdfckX9mfCWzU=
@@ -24,7 +24,7 @@ github.com/openabstractions/abstraction-model/identity v0.1.0 h1:D6qQ+eyl9wXg1mZ
 github.com/openabstractions/abstraction-model/identity v0.1.0/go.mod h1:zhI4vDx4Y8T9P0xt0rK1R0J1N7oTyf+TfktOSyb9MR0=
 github.com/openabstractions/abstraction-resource/go v0.1.0 h1:h5rZypUKK1dd//mBdQH5lsjRGoNK590lE+qyqA2fjGQ=
 github.com/openabstractions/abstraction-resource/go v0.1.0/go.mod h1:5/hK7QdCCiOjGBluu4ve8INIb4J3j+lX9vOHHXfik0Q=
-github.com/openabstractions/abstraction-rights/go v0.4.0 h1:BFAO2tHxQ1edGKCxDBTQ2f5o4x/4cmG5XhaSr0GHyDY=
+github.com/openabstractions/abstraction-rights/go v0.4.0 h1:6iFxQxcHF7XM9q58bTBXnVxnN/q+1F49jVfdZGnYvrY=
 github.com/openabstractions/abstraction-rights/go v0.4.0/go.mod h1:/mXaJV5AfsecyCO/HZVjKscObkIFf6ueNQvqA1MPi1w=
 github.com/openabstractions/abstraction-router/go v0.3.0 h1:uoDYBDeu8XCoIye6BcU/e3ZHPHdjKuej5mRJP/uwJbU=
 github.com/openabstractions/abstraction-router/go v0.3.0/go.mod h1:VJ5f2g0EqU6yf+UiNK3xAe31vF7c9MO6b+rohZ2uwMo=
