@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           repository: openabstractions/abstraction-identity
-          ref: e2adfa0d160026141cdd34ef0eadd14a37d6b5f2
+          ref: 98a2d9a42684a9c58d9d137d91e196e51ba1e2d6
           path: abstraction-identity
           persist-credentials: false
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
