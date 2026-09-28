@@ -10,8 +10,8 @@ github.com/openabstractions/abstraction-download/go v0.6.0 h1:P97+AITWANjknEoG/G
 github.com/openabstractions/abstraction-download/go v0.6.0/go.mod h1:y/1NklzH1gDXZqQhl/Q1WMzNwk1Rrc1mPzqObQM44Ro=
 github.com/openabstractions/abstraction-facade/go-core v0.3.0 h1:QSAs64nabM2YLS8AQ3SPMLlWmdIN3NRBjsyKm6jGbl8=
 github.com/openabstractions/abstraction-facade/go-core v0.3.0/go.mod h1:zvr+SWV8e7iP2G8vcXE/X/KWhlefraZL70Z0dW5qBFU=
-github.com/openabstractions/abstraction-identity v0.4.0 h1:BmBeiuB7BOoG7cn/Rd1aX30gwVhWVQYJHb65jDrAEaE=
-github.com/openabstractions/abstraction-identity v0.4.0/go.mod h1:gv5sDQuTQqv/UY+fXY5Q74i1junNIEvf/5UsZxMxwKY=
+github.com/openabstractions/abstraction-identity v0.4.1 h1:/IELm2gIkIOOhCDkZK2qJ9ESVqWOek593RTNHZVCqcU=
+github.com/openabstractions/abstraction-identity v0.4.1/go.mod h1:gv5sDQuTQqv/UY+fXY5Q74i1junNIEvf/5UsZxMxwKY=
 github.com/openabstractions/abstraction-inference/go v0.2.0 h1:lMg0ToQWs+3Zdg5PGMVzAocnqc9as4IcI0K3m53BHns=
 github.com/openabstractions/abstraction-inference/go v0.2.0/go.mod h1:qRJg9CbeZ/i3Uhx4LvbWrNQ7ihcOigTGGs0G3iznwSI=
 github.com/openabstractions/abstraction-job/go v0.6.0 h1:8vOExvBqZGdWxblPvHh7wUQ9ohLSY1AwuIqM0BTHRH4=

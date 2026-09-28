@@ -7,7 +7,7 @@ require (
 	github.com/openabstractions/abstraction-config/go v0.5.0
 	github.com/openabstractions/abstraction-download/go v0.6.0
 	github.com/openabstractions/abstraction-facade/go-core v0.3.0
-	github.com/openabstractions/abstraction-identity v0.4.0
+	github.com/openabstractions/abstraction-identity v0.4.1
 	github.com/openabstractions/abstraction-job/go v0.6.0
 	github.com/openabstractions/abstraction-logging/go v0.5.0
 	github.com/openabstractions/abstraction-model/go v0.5.0
