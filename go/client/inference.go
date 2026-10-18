@@ -18,6 +18,35 @@ func (m *Machine) ResolveInference(ctx context.Context, need Requirements) (*inf
 	return inference.NewWithTransport(endpoint), nil
 }
 
+// ResolveInferenceChatV2 binds the versioned explicit model or named policy
+// service. A runtime without chat@2 returns a resolution error.
+func (m *Machine) ResolveInferenceChatV2(ctx context.Context, need Requirements) (*inference.ChatV2, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.inference", InferenceChatV2Contract, need)
+	if err != nil {
+		return nil, err
+	}
+	return inference.NewChatV2WithTransport(endpoint), nil
+}
+
+// ResolveInferenceSelectionOperatorV2 binds the scoped policy editor with
+// optional logical provider pins.
+func (m *Machine) ResolveInferenceSelectionOperatorV2(ctx context.Context, need Requirements) (*inference.SelectionOperatorV2, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.inference", InferenceSelectionOperatorV2Contract, need)
+	if err != nil {
+		return nil, err
+	}
+	return inference.NewSelectionOperatorV2WithTransport(endpoint), nil
+}
+
+// ResolveInferenceImageV2 binds image generation by explicit model or policy.
+func (m *Machine) ResolveInferenceImageV2(ctx context.Context, need Requirements) (*inference.ImageV2, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.inference", InferenceImageV2Contract, need)
+	if err != nil {
+		return nil, err
+	}
+	return inference.NewImageV2WithTransport(endpoint), nil
+}
+
 // ResolveEmbeddings binds the embeddings service of the selected runtime:
 // Embed texts by model family. The runtime picks a host serving embeddings,
 // decides abstraction.inference/complete for the bound caller and applies a

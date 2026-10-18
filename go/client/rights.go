@@ -24,3 +24,20 @@ func (m *Machine) ResolveRightsOperator(ctx context.Context, need Requirements) 
 	}
 	return rights.NewOperatorWithTransport(endpoint), nil
 }
+
+// ResolveRightsSelector selects the typed service explicitly. Absence refuses;
+// no typed request is sent to authorization@1.
+func (m *Machine) ResolveRightsSelector(ctx context.Context, need Requirements) (*rights.Client, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.rights", RightsSelectorContract, need)
+	if err != nil {
+		return nil, err
+	}
+	return rights.NewWithTransport(endpoint), nil
+}
+func (m *Machine) ResolveRightsSelectorOperator(ctx context.Context, need Requirements) (*rights.SelectorOperator, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.rights", RightsSelectorOperatorContract, need)
+	if err != nil {
+		return nil, err
+	}
+	return rights.NewSelectorOperatorWithTransport(endpoint), nil
+}

@@ -1,5 +1,15 @@
 # abstraction-facade
 
+*For applications. Operators add providers as [Start here](#start-here)
+describes.*
+
+The facade is the OA client library, the entry point an application adds to
+reach OA services.
+
+**What's new here:** One client library finds the allowed service for each
+capability and returns a typed client, so the application's code stays the same
+whichever provider or machine does the work.
+
 Ask this computer to keep work running, call a model, read shared content, write
 an event, ask a person, or find a supported application that is open. The facade
 finds an allowed service that can do the job and returns the matching client.
@@ -7,9 +17,14 @@ The service keeps its data, credentials and execution state.
 
 The same application code can use a built-in service or an operator's existing
 downloader, model engine or remote provider. The application states the behavior
-it requires; selection and failures stay explicit. **Development API**: this page
-describes the source at this revision; release qualification is tracked
-separately.
+it requires; selection and failures stay explicit.
+
+The example is in [Go](#go).
+
+The [permission journey](https://github.com/openabstractions/abstractions/blob/main/examples/rights-playground/README.md)
+follows a resolved service from missing access through native consent, a saved
+rule and a real credential-bearing operation. It explains the ownership
+boundaries and distinguishes current source evidence from the pending human demo.
 
 ## Start here
 
@@ -90,7 +105,8 @@ func main() {
 
 `facade.Discover()` returns `*Machine` (an alias for `client.Machine`).
 `client.Machine` in `github.com/openabstractions/abstraction-facade/go/client`
-exposes: `ResolveLog`, `ResolveLogReader`, `ResolveLogObserver`, `ResolveConfig`,
+exposes: `ResolveLog`, `ResolveLogReader`, `ResolveLogObserver`,
+`ResolveLogSourceReader`, `ResolveConfig`,
 `ResolveConfigEditor`, `ResolveConfigObserver`, `ResolveRouter`, `ResolveModel`,
 `ResolveInference`, `ResolveEmbeddings`, `ResolveInferenceOperator`,
 `ResolveJobs`, `ResolveJobOperations`, `ResolveJobInventory`, `RestoreJobs`,
@@ -155,10 +171,10 @@ Build the application before granting it rights: `rights grant` binds to the
 built binary's absolute path, and `go run` starts a fresh temporary binary on
 every run, which never matches a grant.
 
-See abstraction-inference's [combined example](https://github.com/openabstractions/abstraction-inference/blob/main/README.md#list-this-machines-models-then-chat-with-one)
-for the full program: listing this machine's servable models through the
-router, sending the request, and reading `reply.Outcome` including
-`not_permitted`.
+See abstraction-inference's [chat example](https://github.com/openabstractions/abstraction-inference/blob/main/README.md#chat-with-a-model)
+for the full program, sending the request and reading `reply.Outcome`
+including `not_permitted`, and the section after it for listing this
+machine's servable models through the router.
 
 For a released revision, create an application module and select that exact
 facade revision:
@@ -378,6 +394,11 @@ JavaScript package. Windows integration and CTest runs are exercised most;
 RESOLUTION.md's Windows runtime test is the one described end to end.
 [Agent adoption and contribution checks](CONTRIBUTING.md).
 
+## Status
+
+**Development API**: this page describes the source at this revision; release
+qualification is tracked separately.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
@@ -390,7 +411,7 @@ application manifest. That program announces its workspaces and supported
 interfaces. Closing an instance leaves the registered application available in
 the directory. Each caller sees the applications it is allowed to read.
 
-`ResolveApplications` binds `abstraction.facade/applications@1` in Go. Its
+`ResolveApplications` binds `abstraction.facade/applications@2` in Go. Its
 schema generates clients and dispatchers for all supported languages. The
 current runtime serves local announcements with native program identity;
 macOS source uses XPC for Program proof, while the published 0.2.0 runtime
@@ -410,3 +431,24 @@ openabstractions applications activate <application-name> --json
 ```
 
 The listing omits executable paths, start guidance and activation recipes.
+
+<!-- BEGIN GENERATED PERMISSION DEFINITIONS -->
+
+## Permission definitions
+
+Generated from the existing compiled catalogue. [RIGHTS.json](RIGHTS.json) contains the complete action/profile records, disclosure, lifecycle, first-use behavior, selector support and finite bundles.
+
+This reference records compiled receiving support; RIGHTS.json names the compilation context. A connected runtime advertises current availability and selector support. These definitions supply no grant.
+
+The Applications directory and its receiving operations are experimental.
+
+| Action | Resource profile | Owning operations | First-use targets | Compiled receiver |
+|---|---|---|---|---|
+| `abstraction.facade/application.activate` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/applications@2#Activate` | `none` | served in compiled context |
+| `abstraction.facade/application.announce` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/applications@2#Announce`, `abstraction.facade/applications@2#Withdraw` | `none` | served in compiled context |
+| `abstraction.facade/application.manage` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/applications@2#Register`, `abstraction.facade/applications@2#Remove` | `none` | served in compiled context |
+| `abstraction.facade/application.read` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/applications@2#Observe` | `none` | served in compiled context |
+| `abstraction.facade/application.register_self` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/applications@2#Register` | `none` | served in compiled context |
+| `abstraction.facade/provider.manage` | `abstraction.rights/legacy-exact-string@1` | `abstraction.facade/registry@1#Declarations`, `abstraction.facade/registry@1#Declare`, `abstraction.facade/registry@1#Withdraw`, `abstraction.facade/registry@1#Observe`, `abstraction.facade/registry@2#Declarations`, `abstraction.facade/registry@2#Declare`, `abstraction.facade/registry@2#Withdraw`, `abstraction.facade/registry@2#Observe` | `none` | served in compiled context |
+
+<!-- END GENERATED PERMISSION DEFINITIONS -->

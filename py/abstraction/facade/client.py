@@ -160,6 +160,11 @@ class Machine:
         import abstraction.asks.api as asks
         return asks.QuestionOperatorClient(self._bind("abstraction.asks", "abstraction.asks/operator@1", guarantees, scope))
 
+    def resolve_asks_choices(self, *, guarantees=(), scope: Scope = Scope.ANY):
+        """Bind ordinary choices; retain each complete request reference for retry."""
+        import abstraction.asks.api as asks
+        return asks.ChoiceApplicationClient(self._bind("abstraction.asks", "abstraction.asks/application@2", guarantees, scope))
+
     def resolve_credentials(self, *, guarantees=(), scope: Scope = Scope.ANY):
         """Register, rotate, revoke, list and audit credentials by name; no call returns secret bytes."""
         import abstraction.credentials.api as credentials
@@ -188,9 +193,9 @@ class Machine:
         """Bind the local identity-scoped application directory and activation API."""
         if not isinstance(scope, Scope) or scope not in (Scope.ANY, Scope.LOCAL):
             raise ResolutionError("unmet_requirements", "abstraction.facade",
-                                  "abstraction.facade/applications@1", scope)
+                                  "abstraction.facade/applications@2", scope)
         return wire.ApplicationsClient(self._bind("abstraction.facade",
-            "abstraction.facade/applications@1", guarantees, Scope.LOCAL))
+            "abstraction.facade/applications@2", guarantees, Scope.LOCAL))
 
     def describe_endpoint(self, endpoint):
         """Call abstraction.facade/endpoint@1 Describe on one local endpoint: the services it hosts and each one's readiness.

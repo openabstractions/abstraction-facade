@@ -7,6 +7,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	identity "github.com/openabstractions/abstraction-identity"
@@ -81,8 +82,11 @@ func trustedInstalledPath(home, path string, uid int, executable bool) error {
 	if !filepath.IsAbs(home) || filepath.Clean(home) != home || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return refuse("installed path is not absolute and canonical")
 	}
-	rel, err := filepath.Rel(home, path)
-	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator) {
+	// Both are absolute and canonical, so path lies in home when it is spelled
+	// below home exactly; the walk below then refuses any link or foreign
+	// owner on every folder between them, so the spelling is where the file is.
+	rel, inside := strings.CutPrefix(path, strings.TrimRight(home, "/")+"/")
+	if !inside || rel == "" {
 		return refuse("installed path is outside the current user home")
 	}
 	current := home

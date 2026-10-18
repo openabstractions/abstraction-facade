@@ -1,6 +1,8 @@
 # Go facade client
 
-Install status: published; every module in the tree pins `go/v0.5.0`, in place since 2026-09-20, and `go get github.com/openabstractions/abstraction-facade/go@v0.5.0` fetches it. 0.3.0 tags `go/v0.6.0`.
+*For Go applications.*
+
+Install status: published; 0.3.0 shipped `go/v0.6.1`, and `go get github.com/openabstractions/abstraction-facade/go@v0.6.1` fetches it.
 
 Package `client` binds an application to capability services through the
 installed runtime. `Discover` authenticates the runtime from installation

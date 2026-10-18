@@ -1,5 +1,7 @@
 # C++ resolution bindings
 
+*For C++ applications.*
+
 Install status: source checkout only — clone the sibling repositories and build with CMake; no package registry ships this at 0.3.0 or after.
 
 `abstraction::facade_client` supplies service resolution through every Machine

@@ -62,6 +62,15 @@ type Options struct {
 	// LogHistoryPolicy narrows history reading and observation, for example
 	// HistoryPolicyFromRights. Nil keeps same-account Program proof.
 	LogHistoryPolicy logservice.HistoryPolicy
+	// LogApplicationHistoryPolicy supplies the shared typed batch boundary for
+	// reader@2 and observer@2. It is required with an owned retained provider.
+	LogApplicationHistoryPolicy logservice.ApplicationHistoryPolicy
+	// LogSourcePolicy gates each named native source independently.
+	// SourcePolicyFromRights does not inherit grants for OA history.
+	LogSourcePolicy logservice.SourcePolicy
+	// LogProtectedSources is the protected path for a native source the
+	// unelevated runtime is denied (logging LOG-N1). Nil keeps the denial.
+	LogProtectedSources logservice.ProtectedSourceReads
 	// ModelRegistry explicitly selects model providers. Nil leaves lookup absent.
 	ModelRegistry *model.Registry
 	ModelEndpoint string
@@ -118,17 +127,37 @@ type Options struct {
 	QuestionEndpoint string
 	// QuestionOperator explicitly authorizes the human-answering integration.
 	// Nil keeps operator methods unavailable to application clients.
-	QuestionOperator asksservice.AuthorizeOperator
+	QuestionOperator  asksservice.AuthorizeOperator
+	QuestionResponder asksservice.AuthorizeResponder
+	// QuestionChoiceResponder checks an enrolled assistant answering a
+	// shared ordinary choice (asks ASK-R9). Nil keeps those methods refused.
+	QuestionChoiceResponder asksservice.AuthorizeChoiceResponder
+	// QuestionAnsweringRequest asks for an answerer's enrollment (asks
+	// ASK-R10). Nil keeps responder@1 RequestAnswering forbidden.
+	QuestionAnsweringRequest asksservice.RequestAnswering
 	// QuestionAskPolicy decides each application Ask, for example
 	// AskPolicyFromRights. Nil keeps same-account Program proof.
 	QuestionAskPolicy asksservice.AskPolicy
+	// Prepared by trusted typed capability owners, independently of ordinary Ask.
+	QuestionPermissionPrepare asksservice.PreparePermission
+	// QuestionNotificationPolicy and QuestionNotificationBlocked decide
+	// abstraction.asks/notification.post (ASK-N1, ASK-N6). Together they serve
+	// notification@1, and notification-operator@1 beside QuestionOperator.
+	// The runtime's job host confirms referenced operations and posts
+	// operation_end notifications when their operation ends.
+	QuestionNotificationPolicy  asksservice.NotificationPolicy
+	QuestionNotificationBlocked asksservice.NotificationBlocked
 	// RightsPolicy is an explicit decision provider. Enforcer authorization is
 	// required to evaluate another receiving service's attributed subject.
-	RightsPolicy   *rights.DecisionPolicy
-	RightsEnforcer rightsservice.AuthorizeEnforcer
+	RightsPolicy           *rights.DecisionPolicy
+	RightsEnforcer         rightsservice.AuthorizeEnforcer
+	RightsSelectorEnforcer rightsservice.AuthorizeSelectorEnforcer
 	// RightsOperator explicitly authorizes policy administration; nil omits its contract.
-	RightsOperator rightsservice.AuthorizeOperator
-	RightsEndpoint string
+	RightsOperator        rightsservice.AuthorizeOperator
+	RightsFirstUseAllow   rightsservice.ApplyFirstUseAllow
+	RightsPermissionAllow rightsservice.ApplyPermissionAllow
+	RightsPermissionUndo  rightsservice.UndoPermissionEffect
+	RightsEndpoint        string
 	// RightsActions are registered into RightsPolicy before the decision service
 	// starts, with this host's account and executable as registrant. Registering
 	// an action already in the catalogue writes nothing; a failed registration
@@ -169,8 +198,15 @@ type Options struct {
 	// authorization. Nil retains same-owner Program-proven access plus JobPolicy.
 	// It supplies no rights-service lookup by itself.
 	JobMethodPolicy acceptanceprovider.MethodPolicy
-	Sink            logging.Sink
-	OnError         func(error)
+	// JobStanding decides accepted work again while it runs, asking nobody
+	// (abstraction-job JOB-A18); nil decides nothing again.
+	// JobStandingChanges, when set, subscribes a recheck of every unfinished
+	// job to each committed rights change and returns its removal
+	// (abstraction-rights RIGHTS-R23).
+	JobStanding        acceptanceprovider.StandingDecider
+	JobStandingChanges func(changed func()) (remove func())
+	Sink               logging.Sink
+	OnError            func(error)
 }
 
 type Host struct {
@@ -179,6 +215,10 @@ type Host struct {
 	config              *configservice.Host
 	configObserverIndex int
 	jobs                *jobHost
+	// notifications is set once the question host serves notification@1;
+	// questionBook is that host's Book, which postEndedOperations edits.
+	notifications       bool
+	questionBook        *asks.Book
 	model               *modelservice.Host
 	modelIndex          int
 	router              *routerservice.Host
@@ -308,11 +348,14 @@ func Listen(options Options) (*Host, error) {
 	if err := validateInference(options); err != nil {
 		return nil, err
 	}
-	if options.RightsPolicy == nil && (options.RightsEndpoint != "" || options.RightsEnforcer != nil || options.RightsOperator != nil || len(options.RightsActions) > 0) {
+	if options.RightsPolicy == nil && (options.RightsEndpoint != "" || options.RightsEnforcer != nil || options.RightsSelectorEnforcer != nil || options.RightsOperator != nil || options.RightsFirstUseAllow != nil || options.RightsPermissionAllow != nil || options.RightsPermissionUndo != nil || len(options.RightsActions) > 0) {
 		return nil, errors.New("runtime: authorization requires an explicit decision policy")
 	}
-	if options.QuestionBook != nil && !options.QuestionBook.ApplicationProfile() || options.QuestionBook == nil && (options.QuestionEndpoint != "" || options.QuestionOperator != nil || options.QuestionAskPolicy != nil) {
+	if options.QuestionBook != nil && !options.QuestionBook.ApplicationProfile() || options.QuestionBook == nil && (options.QuestionEndpoint != "" || options.QuestionOperator != nil || options.QuestionResponder != nil || options.QuestionChoiceResponder != nil || options.QuestionAnsweringRequest != nil || options.QuestionAskPolicy != nil || options.QuestionPermissionPrepare != nil || options.QuestionNotificationPolicy != nil || options.QuestionNotificationBlocked != nil) {
 		return nil, errors.New("runtime: questions require a separate application-profile book")
+	}
+	if (options.QuestionNotificationPolicy == nil) != (options.QuestionNotificationBlocked == nil) {
+		return nil, errors.New("runtime: notifications require both the posting policy and the block check")
 	}
 	if (options.Storage != nil) != (options.StoragePolicy != nil) || (options.Storage == nil && options.StorageEndpoint != "") {
 		return nil, errors.New("runtime: storage requires an explicit provider and content policy")
@@ -369,6 +412,21 @@ func Listen(options Options) (*Host, error) {
 				return nil, errors.Join(err, h.Close())
 			}
 		}
+		if options.LogApplicationHistoryPolicy.Check != nil || options.LogApplicationHistoryPolicy.Fits != nil {
+			if err := l.EnableApplicationHistoryPolicy(options.LogApplicationHistoryPolicy); err != nil {
+				return nil, errors.Join(err, h.Close())
+			}
+		}
+		if options.LogSourcePolicy != nil {
+			if err := l.EnableSourceReader(logservice.NativeSourceAdapters(), options.LogSourcePolicy); err != nil {
+				return nil, errors.Join(err, h.Close())
+			}
+			if options.LogProtectedSources != nil {
+				if err := l.EnableProtectedSources(options.LogProtectedSources); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+		}
 	}
 	var c *configservice.Host
 	if options.ConfigStore == nil {
@@ -401,6 +459,7 @@ func Listen(options Options) (*Host, error) {
 		h.jobs, err = listenJobs(options.JobEndpoint, options.JobRoot, options.JobOwner, owner.Uid, options.JobPolicy, options.JobExecutor, options.ManagedJobs)
 		if err == nil {
 			h.jobs.methodPolicy = options.JobMethodPolicy
+			h.jobs.standing(options.JobStanding, options.JobStandingChanges)
 		}
 		if err != nil {
 			// A failed store cannot establish its logical owner. Publish no job
@@ -500,8 +559,28 @@ func Listen(options Options) (*Host, error) {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime questions startup: %w", err))
 		} else {
 			h.questions.OnError = options.OnError
+			if options.QuestionPermissionPrepare != nil {
+				if err := h.questions.EnablePermission(options.QuestionPermissionPrepare); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
 			if options.QuestionOperator != nil {
 				if err := h.questions.EnableOperator(options.QuestionOperator); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.QuestionResponder != nil {
+				if err := h.questions.EnableResponder(options.QuestionResponder); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.QuestionChoiceResponder != nil {
+				if err := h.questions.EnableChoiceResponder(options.QuestionChoiceResponder); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.QuestionAnsweringRequest != nil {
+				if err := h.questions.EnableAnsweringRequest(options.QuestionAnsweringRequest); err != nil {
 					return nil, errors.Join(err, h.Close())
 				}
 			}
@@ -509,6 +588,16 @@ func Listen(options Options) (*Host, error) {
 				if err := h.questions.EnableAskPolicy(options.QuestionAskPolicy); err != nil {
 					return nil, errors.Join(err, h.Close())
 				}
+			}
+			if options.QuestionNotificationPolicy != nil {
+				var owner asksservice.OperationOwner
+				if h.jobs != nil {
+					owner = h.jobs.operationOwner
+				}
+				if err := h.questions.EnableNotifications(options.QuestionNotificationPolicy, options.QuestionNotificationBlocked, owner); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+				h.notifications, h.questionBook = true, options.QuestionBook
 			}
 		}
 	}
@@ -521,6 +610,21 @@ func Listen(options Options) (*Host, error) {
 			startupErrors = append(startupErrors, fmt.Errorf("runtime rights startup: %w", err))
 		} else {
 			h.rights.OnError = options.OnError
+			if options.RightsSelectorEnforcer != nil {
+				if err := h.rights.EnableSelectorEnforcer(options.RightsSelectorEnforcer); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.RightsPermissionAllow != nil || options.RightsPermissionUndo != nil {
+				if err := h.rights.EnablePermissionEffects(options.RightsPermissionAllow, options.RightsPermissionUndo); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
+			if options.RightsFirstUseAllow != nil {
+				if err := h.rights.EnableFirstUseAllow(options.RightsFirstUseAllow); err != nil {
+					return nil, errors.Join(err, h.Close())
+				}
+			}
 			if options.RightsOperator != nil {
 				if err := h.rights.EnableOperator(options.RightsOperator); err != nil {
 					return nil, errors.Join(err, h.Close())
@@ -571,6 +675,19 @@ func Listen(options Options) (*Host, error) {
 		observer := h.candidates[0]
 		observer.Reference.Contract = "abstraction.logging/observer@1"
 		h.candidates = append(h.candidates, observer)
+	}
+	if options.LogApplicationHistoryPolicy.Check != nil {
+		for _, contract := range []string{"abstraction.logging/reader@2", "abstraction.logging/observer@2"} {
+			application := h.candidates[0]
+			application.Reference.Contract = contract
+			application.Ready = h.logging != nil && h.logging.ApplicationHistoryAvailable()
+			h.candidates = append(h.candidates, application)
+		}
+	}
+	if h.logging == nil || h.logging.SourceReaderAvailable() {
+		sources := h.candidates[0]
+		sources.Reference.Contract = "abstraction.logging/source-reader@1"
+		h.candidates = append(h.candidates, sources)
 	}
 	if h.jobs != nil {
 		inventory := h.jobs.candidate(options.JobEndpoint)
@@ -635,13 +752,34 @@ func Listen(options Options) (*Host, error) {
 	}
 	if options.QuestionBook != nil {
 		h.questionIndex = len(h.candidates)
-		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil, Reference: wire.ServiceReference{
-			Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/application@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{},
-		}})
+		for _, contract := range []string{"abstraction.asks/application@1", "abstraction.asks/application@2"} {
+			h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil, Reference: wire.ServiceReference{
+				Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: contract, Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{},
+			}})
+		}
 	}
 	if options.QuestionOperator != nil {
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil && h.questions.OperatorAvailable(), Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{},
+		}})
+	}
+	if options.QuestionNotificationPolicy != nil {
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil && h.notifications, Reference: wire.ServiceReference{Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/notification@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{}}})
+		if options.QuestionOperator != nil {
+			h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil && h.notifications && h.questions.OperatorAvailable(), Reference: wire.ServiceReference{Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/notification-operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{}}})
+		}
+	}
+	if options.QuestionPermissionPrepare != nil {
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil, Reference: wire.ServiceReference{Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/permission@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{}}})
+	}
+	if options.QuestionOperator != nil {
+		// Retained typed occurrences remain readable/answerable while new
+		// capability-owned admission is unavailable.
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil && h.questions.OperatorAvailable(), Reference: wire.ServiceReference{Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/permission-operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{}}})
+	}
+	if options.QuestionResponder != nil || options.QuestionChoiceResponder != nil || options.QuestionAnsweringRequest != nil {
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: h.questions != nil, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.asks", Contract: "abstraction.asks/responder@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.QuestionEndpoint, Guarantees: []string{},
 		}})
 	}
 	// A decision point whose state cannot be read is not ready; Serve keeps
@@ -660,6 +798,7 @@ func Listen(options Options) (*Host, error) {
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.rights", Contract: "abstraction.rights/operator@1", Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RightsEndpoint, Guarantees: []string{},
 		}})
 	}
+	h.addSelectorRightsCandidates(options, rightsReady)
 	h.addCredentialCandidates(options)
 	h.addInferenceCandidate(options)
 	h.addRegistryCandidate(options)
@@ -873,6 +1012,10 @@ func (h *Host) Serve(ctx context.Context) error {
 	if h.questions != nil {
 		workers.Add(1)
 		go func() { defer workers.Done(); h.stopped(h.questionIndex, h.questions.Serve(ctx)) }()
+		if h.notifications && h.jobs != nil {
+			workers.Add(1)
+			go func() { defer workers.Done(); h.postEndedOperations(ctx) }()
+		}
 	}
 	if h.storage != nil {
 		workers.Add(1)

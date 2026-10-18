@@ -1,6 +1,8 @@
 # Resolved storage content reader
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 This optional crate adds `StorageMachine` to the pure facade `Machine<C>`.
 `resolve_storage(vec![], abstraction_facade_native::Scope::Local)` returns a fixed `Client<Binding<C>>`.

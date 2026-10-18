@@ -1,6 +1,8 @@
 # Resolved questions and question operator
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 This optional crate adds `AsksMachine` to the pure facade `Machine<C>`.
 `resolve_asks(vec![], abstraction_facade_native::Scope::Local)` returns `Questions<Binding<C>>` for

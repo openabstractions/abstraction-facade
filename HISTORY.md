@@ -32,6 +32,82 @@ Linked from [CONTRACT.md](CONTRACT.md)'s "Reading this page."
 | `REG-7` | [FAC-R7] | reading registrations |
 | `REG-8` | [FAC-R8] | activation |
 
+### Inherited handles, 2026-10-01
+
+A provider host lends a model's memory section to the engine it launches by
+handle inheritance (VISION 2026-10-01;
+`research/model-locators/MEMORY-LENDING.md` §3, §9 step 2). The research
+prototype passed the handle through `os/exec` and assigned the job after the
+child started; `supervision` now carries the handle and keeps the atomic job
+assignment.
+
+| id | before | now |
+| --- | --- | --- |
+| FAC-P1 | none; a supervised child inherited its three standard handles only | binding: `Options.Inherit` names further inheritable handles, joined to the one handle list; anything else is refused with `ErrInherit` before a job or process exists |
+| FAC-P2 | none; `Wait` returned the parent's exit code alone | binding: `Process.Exit` reports the code and its exception status, run time, stop, the job's memory peaks and limit, a limit refusal from the job's completion port (or inferred from the peak) and abnormal member exits; modelhost logs it per engine (MODELHOST-E1) after a PyTorch engine ended with no trace (`research/live-runs/2026-10-02.md`, torch-live) |
+
+### A declared card's wake lease, 2026-10-02
+
+A video provider declared with `provider add` could name no card, so its
+program got neither `hold` on `card:0` nor on `awake`, and modelhost's GPU
+fault guard was refused the wake lease at every video start
+(`research/live-runs/2026-10-02.md`, phase 2 finding 3). The registry already
+wrote both rules for a declared card; the rule text named only the card.
+
+| id | before | now |
+| --- | --- | --- |
+| FAC-R3 | `card:<n>` takes `abstraction.resource/hold` on the card | the card and `awake`; `provider add --card <n>` names one |
+
+### Bundles and paired outputs, 2026-10-02
+
+An application's first video job through the runtime needed six rules, each
+learnt from a separate refusal (`research/live-runs/2026-10-02.md`, phase 2
+finding 4). The coordinator decided: a video output profile, one combined
+refusal that admits every first-use question at once, output pairing that
+reaches only the program's own results, and an inference bundle that adds
+job submission and the output pairs it names. `go/grants` gained
+`PairedOutput` and `Paired` (an answer on `content.write` for
+`output:image` or `output:video` also writes `content.read`), and the
+`inference` bundle gained `acceptance.submit` and `For.Outputs`. No rule id
+of this contract changed; inference INF-S7 and INF-V4 state the behaviour.
+
+The review of that change found the inference bundle's `acceptance.submit`
+on the acceptance contract let the program queue URL downloads too.
+Submission is now decided per kind (job JOB-A13): `runtime.JobPolicyFromRights`
+decides the acceptance contract first and, without a rule there, the
+submission's `job:<kind>` (`JobKindResource`); the inference bundle writes
+`job:inference` and the downloads bundle `job:download`.
+
+An explicit deny now wins (`research/wake-and-inference-rights/REPORT.md`
+recommendation 6): under a permit on the acceptance contract,
+`JobPolicyFromRights` still reads the kind's rule, through
+`runtime.QuietDecider` where the host has one so the read asks nothing, and a
+deny there refuses that kind.
+
+`grants.OutputProfileResources` gained `output:speech`
+(`research/wake-and-inference-rights/REPORT.md` recommendation 7): one
+answer on `content.write` for speech output also writes `content.read`, as
+for image and video. The runtime now asks it for a synchronous `speech@1` or
+`image@1` call as well as for a job. `grants.OutputProfiles` gained
+`speech` too, so `rights grant --for inference --output speech` writes the
+same pair, whose read reaches only the program's own results.
+
+### A launched provider learns the runtime's endpoints, 2026-10-02
+
+The live walkthrough of 2026-10-02 (D8) declared a model host's lease
+endpoint as `<runtime endpoint>-resource-table`, which an isolated runtime
+does not serve, and the application saw only `engine:unavailable`.
+Coordinator's decision: the runtime names its own services to the children
+it launches, and a declaration carries an endpoint only as an override.
+serve's `providerEnvironment`; `openabstractions models host` declares no
+`--resource-endpoint` unless given one and drops one an earlier version
+derived.
+
+| id | before | now |
+| --- | --- | --- |
+| FAC-R8 | a launched child gets the runtime's environment unchanged | it also gets the resource, log, config and router endpoints, and the runtime endpoint when not the installed one, in the variables their clients read; a declared argument overrides |
+| FAC-R8 | (same day, review) an endpoint variable the runtime does not set was inherited from the runtime's parent | the child gets none of the five the runtime does not set: no `ABSTRACTION_RUNTIME_ENDPOINT` from an installed runtime, none of the five under XPC; every other variable passes through |
+
 ## Reviewed and applied
 
 - `research/reviews/inference-facade-2026-09-23.md` F9 — `Scope` is

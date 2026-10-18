@@ -67,7 +67,7 @@ func TestMissingLogSinkIsReported(t *testing.T) {
 					t.Error("runtime did not stop")
 				}
 			}()
-			contracts := []string{"abstraction.logging/sink@1", "abstraction.logging/reader@1", "abstraction.logging/observer@1", "abstraction.config/reader@1"}
+			contracts := []string{"abstraction.logging/sink@1", "abstraction.logging/reader@1", "abstraction.logging/observer@1", "abstraction.logging/source-reader@1", "abstraction.config/reader@1"}
 			requests := make([]wire.ResolveRequest, len(contracts))
 			for i, contract := range contracts {
 				capability, _, _ := strings.Cut(contract, "/")
@@ -85,7 +85,7 @@ func TestMissingLogSinkIsReported(t *testing.T) {
 				case <-time.After(20 * time.Millisecond):
 				}
 			}
-			want := []wire.ResolutionStatus{wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusResolved}
+			want := []wire.ResolutionStatus{wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusNotReady, wire.ResolutionStatusResolved}
 			for i, observation := range report.Capabilities {
 				if observation.Result == nil || observation.Result.Status != want[i] {
 					t.Fatalf("%s: %+v, want %s", contracts[i], observation.Result, want[i])

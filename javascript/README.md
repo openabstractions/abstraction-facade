@@ -1,6 +1,8 @@
 # JavaScript service bindings
 
-Install status: source only today, no npm package published; 0.3.0 plans an `@openabstractions` npm package, pending the npm organization and owner consent.
+*For JavaScript applications.*
+
+Install status: source only; no npm package is published. An `@openabstractions` npm package waits for the npm organization and owner consent.
 
 The pure facade package uses generated resolver codecs and a supplied connector.
 It has no native or capability dependency. A connector implements

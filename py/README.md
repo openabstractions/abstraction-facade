@@ -1,6 +1,8 @@
 # Python resolved capability clients
 
-Install status: source only today — build the native IPC library locally, then `pip install` from local paths; 0.3.0 plans a PyPI wheel, pending owner consent.
+*For Python applications.*
+
+Install status: source only — build the native IPC library locally, then `pip install` from local paths. A PyPI wheel waits for owner consent.
 
 Python clients resolve logging, configuration and durable work through generated
 interfaces over `abstraction.ipc`. An operator configures a shared-library path or
@@ -40,6 +42,32 @@ provider. Only local `oa-framed-local@1` references are supported. A selected
 client keeps its endpoint and waiting policy; failed calls are not reselected or
 replayed. write completion confirms local transport submission, not durable log
 storage. Provider errors on a one-way call remain service-side diagnostics.
+
+## Ask a model
+
+```python
+import sys
+import time
+
+import abstraction.inference.api as api
+from abstraction.facade.client import Machine
+
+machine = Machine(deadline=time.monotonic() + 30)
+chat = machine.resolve_inference()
+reply = chat.complete(api.Request(
+    model=sys.argv[1],  # the model to ask
+    messages=[api.Message(role=api.Role.USER, parts=[
+        api.Part(kind=api.PartKind.TEXT, text="Say hello in five words."),
+    ])],
+))
+if reply.outcome != api.ReplyOutcome.COMPLETED:
+    raise SystemExit(f"chat {reply.outcome.value}: {reply.reason}")
+print("".join(part.text for part in reply.message.parts))
+```
+
+`complete` starts the request, follows it to its end and returns the reply;
+`stream` yields the same reply in pieces. A download with progress is in
+[the job client's README](https://github.com/openabstractions/abstraction-job/blob/main/py/README.md).
 
 ## Naming the provider that served you
 

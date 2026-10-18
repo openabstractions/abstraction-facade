@@ -1074,6 +1074,17 @@ pub struct DeclarationHost {
     pub ceiling: Option<DeclarationCeiling>,
 }
 
+/// One required inference extension key a provider or remote runtime asserts it
+/// can examine for a declared profile. This operator-managed inventory lets the
+/// selecting runtime refuse unknown required keys before activating a provider;
+/// the selected service still validates values and model-specific support
+/// before accepting work.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeclarationExtension {
+    pub profile: String,
+    pub key: String,
+}
+
 /// One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and
 /// unique. role names what it is, and each role validates its own fields
 /// (FAC-R6). A provider declares program, the absolute executable path the
@@ -1090,9 +1101,14 @@ pub struct DeclarationHost {
 /// distinct <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of
 /// a-z 0-9 _ . -; profile:<name> is what a host or a remote serves. models is
 /// the 0..64 distinct model names a native inference provider is trusted to
-/// serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-/// as a supervised child when a resolution first needs it; attach reads a
-/// provider something else started.
+/// serve, each 1..256 UTF-8 bytes without controls; an entry <profile>:<model>
+/// whose profile the declaration serves (a listed profile whose contract it
+/// declares, or chat for a chat-only declaration listing none) serves model for
+/// that profile alone, any other entry serves every served profile, and a model
+/// named chat:x is written chat:chat:x (abstraction.router ROUTE-D9). on_demand
+/// launches program as a supervised child when a resolution first needs it;
+/// attach reads a provider something else started. Extension inventory lives in
+/// registry@2 and is omitted from this strict registry@1 projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declaration {
     pub name: String,
@@ -1108,6 +1124,15 @@ pub struct Declaration {
     pub models: Vec<String>,
     pub role: Option<DeclarationRole>,
     pub host: Option<DeclarationHost>,
+}
+
+/// One atomic registry@2 edit. The extension inventory is validated against the
+/// declaration's served inference profiles and stored with that declaration
+/// generation. An empty inventory asserts no required extension support.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclarationWithExtensions {
+    pub declaration: Declaration,
+    pub supported_extensions: Vec<DeclarationExtension>,
 }
 
 /// The router's latest reading of a host declaration: whether its last survey
@@ -1187,6 +1212,32 @@ pub struct DeclarationObservation {
     pub outcome: DeclarationListOutcome,
     pub cursor: String,
     pub declarations: Vec<DeclarationState>,
+}
+
+/// The registry@1 state and the extension inventory from the same declaration
+/// snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclarationStateV2 {
+    pub state: DeclarationState,
+    pub supported_extensions: Vec<DeclarationExtension>,
+}
+
+/// The registry@2 declarations and their edit revision. Refusals carry an empty
+/// revision and no declarations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclarationListV2 {
+    pub outcome: DeclarationListOutcome,
+    pub revision: String,
+    pub declarations: Vec<DeclarationStateV2>,
+}
+
+/// The registry@2 declarations and readings from one snapshot. The cursor
+/// includes extension inventory changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclarationObservationV2 {
+    pub outcome: DeclarationListOutcome,
+    pub cursor: String,
+    pub declarations: Vec<DeclarationStateV2>,
 }
 
 /// An application's claimed interface metadata. name identifies it within one
@@ -1270,12 +1321,17 @@ pub struct ApplicationInstance {
 /// One installed application's descriptor with its currently leased instances.
 /// scope records directory provenance; this local profile supplies local and
 /// never imports remote announcements. An empty instance list makes no claim
-/// about whether an unregistered process is running.
+/// about whether an unregistered process is running. self_registered is present
+/// and true while the entry was registered by its own program under the
+/// account-wide registration default and the person has not answered Keep to
+/// the runtime's question about it (AskConfirmation). Only such entries carry
+/// the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationEntry {
     pub descriptor: ApplicationDescriptor,
     pub instances: Vec<ApplicationInstance>,
     pub scope: Scope,
+    pub self_registered: bool,
 }
 
 /// applied confirms the change; an announcement returns its opaque instance.
@@ -1317,6 +1373,38 @@ pub struct ApplicationActivationResult {
     pub reason: String,
 }
 
+/// One time an application became present in this runtime: the first announced
+/// instance of a registered application in a local session where none of its
+/// instances was live. application, program and title are the descriptor's at
+/// that time. launched is true when this runtime's own activation attempt for
+/// the application in that session was waiting for it; false means the
+/// application announced itself. It records a fresh announcement, not process
+/// lineage, and a runtime restart makes every running application announce
+/// again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplicationStart {
+    pub application: String,
+    pub program: String,
+    pub title: String,
+    pub started_unix_ms: i64,
+    pub launched: bool,
+}
+
+/// page carries at most the requested 1..64 starts, newest first. complete
+/// means the log was exhausted; otherwise cursor continues it.
+/// complete_since_unix_ms is zero while every retained start is listed;
+/// otherwise starts at or before it may have been evicted. stale means the
+/// cursor's log changed or belongs to another runtime: restart from an empty
+/// cursor. Other outcomes carry no starts or cursor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationStartPage {
+    pub outcome: ApplicationOutcome,
+    pub starts: Vec<ApplicationStart>,
+    pub cursor: String,
+    pub complete: bool,
+    pub complete_since_unix_ms: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OAResolverResolveArguments {
     request: ResolveRequest,
@@ -1353,8 +1441,35 @@ struct OARegistryObserveArguments {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OARegistryV2DeclarationsArguments {
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OARegistryV2DeclareArguments {
+    expected_revision: String,
+    declaration: DeclarationWithExtensions,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OARegistryV2WithdrawArguments {
+    expected_revision: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OARegistryV2ObserveArguments {
+    cursor: String,
+    wait_ms: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct OAApplicationsRegisterArguments {
     descriptor: ApplicationDescriptor,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OAApplicationsAskConfirmationArguments {
+    application: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1382,6 +1497,12 @@ struct OAApplicationsObserveArguments {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct OAApplicationsActivateArguments {
     application: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OAApplicationsListStartsArguments {
+    cursor: String,
+    limit: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1443,7 +1564,32 @@ struct OARegistryObserveResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct OARegistryV2DeclarationsResult {
+    value: DeclarationListV2,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OARegistryV2DeclareResult {
+    value: DeclarationChange,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OARegistryV2WithdrawResult {
+    value: DeclarationChange,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OARegistryV2ObserveResult {
+    value: DeclarationObservationV2,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OAApplicationsRegisterResult {
+    value: ApplicationChange,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OAApplicationsAskConfirmationResult {
     value: ApplicationChange,
 }
 
@@ -1470,6 +1616,11 @@ struct OAApplicationsObserveResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OAApplicationsActivateResult {
     value: ApplicationActivationResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OAApplicationsListStartsResult {
+    value: ApplicationStartPage,
 }
 
 fn enc_resolve_request(out: &mut Vec<u8>, v: &ResolveRequest, depth: i32) {
@@ -1721,6 +1872,24 @@ fn enc_declaration_host(out: &mut Vec<u8>, v: &DeclarationHost, depth: i32) {
     out.push(b'}');
 }
 
+fn enc_declaration_extension(out: &mut Vec<u8>, v: &DeclarationExtension, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "profile");
+    out.extend_from_slice(b": ");
+    esc(out, &v.profile);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "key");
+    out.extend_from_slice(b": ");
+    esc(out, &v.key);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
 fn enc_declaration(out: &mut Vec<u8>, v: &Declaration, depth: i32) {
     out.push(b'{');
     out.push(b'\n');
@@ -1811,6 +1980,26 @@ fn enc_declaration(out: &mut Vec<u8>, v: &Declaration, depth: i32) {
         esc(out, "host");
         out.extend_from_slice(b": ");
         enc_declaration_host(out, value, depth + 1);
+    }
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
+fn enc_declaration_with_extensions(out: &mut Vec<u8>, v: &DeclarationWithExtensions, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "declaration");
+    out.extend_from_slice(b": ");
+    enc_declaration(out, &v.declaration, depth + 1);
+    if !v.supported_extensions.is_empty() {
+        out.push(b',');
+        out.push(b'\n');
+        pad(out, depth + 1);
+        esc(out, "supported_extensions");
+        out.extend_from_slice(b": ");
+        enc_list(out, &v.supported_extensions, depth + 1, enc_declaration_extension);
     }
     out.push(b'\n');
     pad(out, depth);
@@ -2044,6 +2233,65 @@ fn enc_oa_registry_observe_arguments(out: &mut Vec<u8>, v: &OARegistryObserveArg
     out.push(b'}');
 }
 
+fn enc_oa_registry_v2_declarations_arguments(out: &mut Vec<u8>, _v: &OARegistryV2DeclarationsArguments, _depth: i32) {
+    out.push(b'{');
+    out.push(b'}');
+}
+
+fn enc_oa_registry_v2_declare_arguments(out: &mut Vec<u8>, v: &OARegistryV2DeclareArguments, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "expected_revision");
+    out.extend_from_slice(b": ");
+    esc(out, &v.expected_revision);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "declaration");
+    out.extend_from_slice(b": ");
+    enc_declaration_with_extensions(out, &v.declaration, depth + 1);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
+fn enc_oa_registry_v2_withdraw_arguments(out: &mut Vec<u8>, v: &OARegistryV2WithdrawArguments, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "expected_revision");
+    out.extend_from_slice(b": ");
+    esc(out, &v.expected_revision);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "name");
+    out.extend_from_slice(b": ");
+    esc(out, &v.name);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
+fn enc_oa_registry_v2_observe_arguments(out: &mut Vec<u8>, v: &OARegistryV2ObserveArguments, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out.extend_from_slice(b": ");
+    esc(out, &v.cursor);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "wait_ms");
+    out.extend_from_slice(b": ");
+    num(out, v.wait_ms);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
 fn enc_oa_applications_register_arguments(out: &mut Vec<u8>, v: &OAApplicationsRegisterArguments, depth: i32) {
     out.push(b'{');
     out.push(b'\n');
@@ -2051,6 +2299,18 @@ fn enc_oa_applications_register_arguments(out: &mut Vec<u8>, v: &OAApplicationsR
     esc(out, "descriptor");
     out.extend_from_slice(b": ");
     enc_application_descriptor(out, &v.descriptor, depth + 1);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
+fn enc_oa_applications_ask_confirmation_arguments(out: &mut Vec<u8>, v: &OAApplicationsAskConfirmationArguments, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "application");
+    out.extend_from_slice(b": ");
+    esc(out, &v.application);
     out.push(b'\n');
     pad(out, depth);
     out.push(b'}');
@@ -2123,6 +2383,24 @@ fn enc_oa_applications_activate_arguments(out: &mut Vec<u8>, v: &OAApplicationsA
     esc(out, "application");
     out.extend_from_slice(b": ");
     esc(out, &v.application);
+    out.push(b'\n');
+    pad(out, depth);
+    out.push(b'}');
+}
+
+fn enc_oa_applications_list_starts_arguments(out: &mut Vec<u8>, v: &OAApplicationsListStartsArguments, depth: i32) {
+    out.push(b'{');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out.extend_from_slice(b": ");
+    esc(out, &v.cursor);
+    out.push(b',');
+    out.push(b'\n');
+    pad(out, depth + 1);
+    esc(out, "limit");
+    out.extend_from_slice(b": ");
+    num(out, v.limit);
     out.push(b'\n');
     pad(out, depth);
     out.push(b'}');
@@ -3521,6 +3799,69 @@ fn decode_declaration_host(r: &mut Reader) -> Result<DeclarationHost, Refusal> {
     })
 }
 
+fn decode_declaration_extension(r: &mut Reader) -> Result<DeclarationExtension, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_profile: String = Default::default();
+    let mut field_key: String = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "profile" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_profile = r.string()?;
+                }
+                "key" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_key = r.string()?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    Ok(DeclarationExtension {
+        profile: field_profile,
+        key: field_key,
+    })
+}
+
 fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
     if r.at() != b'{' {
         return r.refuse("wrong_type");
@@ -3693,6 +4034,72 @@ fn decode_declaration(r: &mut Reader) -> Result<Declaration, Refusal> {
         models: field_models,
         role: field_role,
         host: field_host,
+    })
+}
+
+fn decode_declaration_with_extensions(r: &mut Reader) -> Result<DeclarationWithExtensions, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_declaration: Option<Declaration> = None;
+    let mut field_supported_extensions: Vec<DeclarationExtension> = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "declaration" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_declaration = Some(decode_declaration(r)?);
+                }
+                "supported_extensions" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_supported_extensions = decode_list(r, decode_declaration_extension)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_declaration) = field_declaration else {
+        return r.refuse("missing_field");
+    };
+    Ok(DeclarationWithExtensions {
+        declaration: field_declaration,
+        supported_extensions: field_supported_extensions,
     })
 }
 
@@ -4126,6 +4533,222 @@ fn decode_declaration_observation(r: &mut Reader) -> Result<DeclarationObservati
         return r.refuse("bad_enum");
     };
     Ok(DeclarationObservation {
+        outcome: field_outcome,
+        cursor: field_cursor,
+        declarations: field_declarations,
+    })
+}
+
+fn decode_declaration_state_v2(r: &mut Reader) -> Result<DeclarationStateV2, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_state: Option<DeclarationState> = None;
+    let mut field_supported_extensions: Vec<DeclarationExtension> = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "state" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_state = Some(decode_declaration_state(r)?);
+                }
+                "supported_extensions" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_supported_extensions = decode_list(r, decode_declaration_extension)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_state) = field_state else {
+        return r.refuse("missing_field");
+    };
+    Ok(DeclarationStateV2 {
+        state: field_state,
+        supported_extensions: field_supported_extensions,
+    })
+}
+
+fn decode_declaration_list_v2(r: &mut Reader) -> Result<DeclarationListV2, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_outcome: Option<String> = None;
+    let mut field_revision: String = Default::default();
+    let mut field_declarations: Vec<DeclarationStateV2> = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "outcome" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_outcome = Some(r.string()?);
+                }
+                "revision" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_revision = r.string()?;
+                }
+                "declarations" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_declarations = decode_list(r, decode_declaration_state_v2)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 7 != 7 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_outcome) = field_outcome.as_deref().and_then(DeclarationListOutcome::from_wire) else {
+        return r.refuse("bad_enum");
+    };
+    Ok(DeclarationListV2 {
+        outcome: field_outcome,
+        revision: field_revision,
+        declarations: field_declarations,
+    })
+}
+
+fn decode_declaration_observation_v2(r: &mut Reader) -> Result<DeclarationObservationV2, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_outcome: Option<String> = None;
+    let mut field_cursor: String = Default::default();
+    let mut field_declarations: Vec<DeclarationStateV2> = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "outcome" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_outcome = Some(r.string()?);
+                }
+                "cursor" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_cursor = r.string()?;
+                }
+                "declarations" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_declarations = decode_list(r, decode_declaration_state_v2)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 7 != 7 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_outcome) = field_outcome.as_deref().and_then(DeclarationListOutcome::from_wire) else {
+        return r.refuse("bad_enum");
+    };
+    Ok(DeclarationObservationV2 {
         outcome: field_outcome,
         cursor: field_cursor,
         declarations: field_declarations,
@@ -4618,6 +5241,7 @@ fn decode_application_entry(r: &mut Reader) -> Result<ApplicationEntry, Refusal>
     let mut field_descriptor: ApplicationDescriptor = Default::default();
     let mut field_instances: Vec<ApplicationInstance> = Default::default();
     let mut field_scope: Option<String> = None;
+    let mut field_self_registered: bool = Default::default();
     let mut seen: u32 = 0;
     r.skip_ws();
     if r.at() != b'}' {
@@ -4655,6 +5279,13 @@ fn decode_application_entry(r: &mut Reader) -> Result<ApplicationEntry, Refusal>
                     seen |= 4;
                     field_scope = Some(r.string()?);
                 }
+                "self_registered" => {
+                    if seen & 8 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 8;
+                    field_self_registered = r.boolean()?;
+                }
                 _ => {
                     return r.refuse("unknown_field");
                 }
@@ -4681,6 +5312,7 @@ fn decode_application_entry(r: &mut Reader) -> Result<ApplicationEntry, Refusal>
         descriptor: field_descriptor,
         instances: field_instances,
         scope: field_scope,
+        self_registered: field_self_registered,
     })
 }
 
@@ -4915,6 +5547,189 @@ fn decode_application_activation_result(r: &mut Reader) -> Result<ApplicationAct
         instance: field_instance,
         started: field_started,
         reason: field_reason,
+    })
+}
+
+fn decode_application_start(r: &mut Reader) -> Result<ApplicationStart, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_application: String = Default::default();
+    let mut field_program: String = Default::default();
+    let mut field_title: String = Default::default();
+    let mut field_started_unix_ms: i64 = Default::default();
+    let mut field_launched: bool = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "application" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_application = r.string()?;
+                }
+                "program" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_program = r.string()?;
+                }
+                "title" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_title = r.string()?;
+                }
+                "started_unix_ms" => {
+                    if seen & 8 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 8;
+                    field_started_unix_ms = r.integer(i64::MIN, i64::MAX)?;
+                }
+                "launched" => {
+                    if seen & 16 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 16;
+                    field_launched = r.boolean()?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 31 != 31 {
+        return r.refuse("missing_field");
+    }
+    Ok(ApplicationStart {
+        application: field_application,
+        program: field_program,
+        title: field_title,
+        started_unix_ms: field_started_unix_ms,
+        launched: field_launched,
+    })
+}
+
+fn decode_application_start_page(r: &mut Reader) -> Result<ApplicationStartPage, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_outcome: Option<String> = None;
+    let mut field_starts: Vec<ApplicationStart> = Default::default();
+    let mut field_cursor: String = Default::default();
+    let mut field_complete: bool = Default::default();
+    let mut field_complete_since_unix_ms: i64 = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "outcome" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_outcome = Some(r.string()?);
+                }
+                "starts" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_starts = decode_list(r, decode_application_start)?;
+                }
+                "cursor" => {
+                    if seen & 4 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 4;
+                    field_cursor = r.string()?;
+                }
+                "complete" => {
+                    if seen & 8 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 8;
+                    field_complete = r.boolean()?;
+                }
+                "complete_since_unix_ms" => {
+                    if seen & 16 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 16;
+                    field_complete_since_unix_ms = r.integer(i64::MIN, i64::MAX)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 31 != 31 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_outcome) = field_outcome.as_deref().and_then(ApplicationOutcome::from_wire) else {
+        return r.refuse("bad_enum");
+    };
+    Ok(ApplicationStartPage {
+        outcome: field_outcome,
+        starts: field_starts,
+        cursor: field_cursor,
+        complete: field_complete,
+        complete_since_unix_ms: field_complete_since_unix_ms,
     })
 }
 
@@ -5245,6 +6060,224 @@ fn decode_oa_registry_observe_arguments(r: &mut Reader) -> Result<OARegistryObse
     })
 }
 
+fn decode_oa_registry_v2_declarations_arguments(r: &mut Reader) -> Result<OARegistryV2DeclarationsArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    r.skip_ws();
+    if r.at() != b'}' {
+        if r.at() != b'"' {
+            return r.refuse("malformed");
+        }
+        r.string()?;
+        r.skip_ws();
+        if r.at() != b':' {
+            return r.refuse("malformed");
+        }
+        return r.refuse("unknown_field");
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    Ok(OARegistryV2DeclarationsArguments {})
+}
+
+fn decode_oa_registry_v2_declare_arguments(r: &mut Reader) -> Result<OARegistryV2DeclareArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_expected_revision: String = Default::default();
+    let mut field_declaration: Option<DeclarationWithExtensions> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "expected_revision" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_expected_revision = r.string()?;
+                }
+                "declaration" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_declaration = Some(decode_declaration_with_extensions(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_declaration) = field_declaration else {
+        return r.refuse("missing_field");
+    };
+    Ok(OARegistryV2DeclareArguments {
+        expected_revision: field_expected_revision,
+        declaration: field_declaration,
+    })
+}
+
+fn decode_oa_registry_v2_withdraw_arguments(r: &mut Reader) -> Result<OARegistryV2WithdrawArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_expected_revision: String = Default::default();
+    let mut field_name: String = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "expected_revision" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_expected_revision = r.string()?;
+                }
+                "name" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_name = r.string()?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    Ok(OARegistryV2WithdrawArguments {
+        expected_revision: field_expected_revision,
+        name: field_name,
+    })
+}
+
+fn decode_oa_registry_v2_observe_arguments(r: &mut Reader) -> Result<OARegistryV2ObserveArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_cursor: String = Default::default();
+    let mut field_wait_ms: i64 = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "cursor" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_cursor = r.string()?;
+                }
+                "wait_ms" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_wait_ms = r.integer(i64::MIN, i64::MAX)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    Ok(OARegistryV2ObserveArguments {
+        cursor: field_cursor,
+        wait_ms: field_wait_ms,
+    })
+}
+
 fn decode_oa_applications_register_arguments(r: &mut Reader) -> Result<OAApplicationsRegisterArguments, Refusal> {
     if r.at() != b'{' {
         return r.refuse("wrong_type");
@@ -5296,6 +6329,60 @@ fn decode_oa_applications_register_arguments(r: &mut Reader) -> Result<OAApplica
     }
     Ok(OAApplicationsRegisterArguments {
         descriptor: field_descriptor,
+    })
+}
+
+fn decode_oa_applications_ask_confirmation_arguments(r: &mut Reader) -> Result<OAApplicationsAskConfirmationArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_application: String = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "application" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_application = r.string()?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    Ok(OAApplicationsAskConfirmationArguments {
+        application: field_application,
     })
 }
 
@@ -5584,6 +6671,69 @@ fn decode_oa_applications_activate_arguments(r: &mut Reader) -> Result<OAApplica
     }
     Ok(OAApplicationsActivateArguments {
         application: field_application,
+    })
+}
+
+fn decode_oa_applications_list_starts_arguments(r: &mut Reader) -> Result<OAApplicationsListStartsArguments, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_cursor: String = Default::default();
+    let mut field_limit: i64 = Default::default();
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "cursor" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_cursor = r.string()?;
+                }
+                "limit" => {
+                    if seen & 2 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 2;
+                    field_limit = r.integer(i64::MIN, i64::MAX)?;
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 3 != 3 {
+        return r.refuse("missing_field");
+    }
+    Ok(OAApplicationsListStartsArguments {
+        cursor: field_cursor,
+        limit: field_limit,
     })
 }
 
@@ -6220,6 +7370,234 @@ fn decode_oa_registry_observe_result(r: &mut Reader) -> Result<OARegistryObserve
     })
 }
 
+fn decode_oa_registry_v2_declarations_result(r: &mut Reader) -> Result<OARegistryV2DeclarationsResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<DeclarationListV2> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_declaration_list_v2(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OARegistryV2DeclarationsResult {
+        value: field_value,
+    })
+}
+
+fn decode_oa_registry_v2_declare_result(r: &mut Reader) -> Result<OARegistryV2DeclareResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<DeclarationChange> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_declaration_change(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OARegistryV2DeclareResult {
+        value: field_value,
+    })
+}
+
+fn decode_oa_registry_v2_withdraw_result(r: &mut Reader) -> Result<OARegistryV2WithdrawResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<DeclarationChange> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_declaration_change(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OARegistryV2WithdrawResult {
+        value: field_value,
+    })
+}
+
+fn decode_oa_registry_v2_observe_result(r: &mut Reader) -> Result<OARegistryV2ObserveResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<DeclarationObservationV2> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_declaration_observation_v2(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OARegistryV2ObserveResult {
+        value: field_value,
+    })
+}
+
 fn decode_oa_applications_register_result(r: &mut Reader) -> Result<OAApplicationsRegisterResult, Refusal> {
     if r.at() != b'{' {
         return r.refuse("wrong_type");
@@ -6273,6 +7651,63 @@ fn decode_oa_applications_register_result(r: &mut Reader) -> Result<OAApplicatio
         return r.refuse("missing_field");
     };
     Ok(OAApplicationsRegisterResult {
+        value: field_value,
+    })
+}
+
+fn decode_oa_applications_ask_confirmation_result(r: &mut Reader) -> Result<OAApplicationsAskConfirmationResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<ApplicationChange> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_application_change(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OAApplicationsAskConfirmationResult {
         value: field_value,
     })
 }
@@ -6562,6 +7997,63 @@ fn decode_oa_applications_activate_result(r: &mut Reader) -> Result<OAApplicatio
     })
 }
 
+fn decode_oa_applications_list_starts_result(r: &mut Reader) -> Result<OAApplicationsListStartsResult, Refusal> {
+    if r.at() != b'{' {
+        return r.refuse("wrong_type");
+    }
+    r.enter()?;
+    r.pos += 1;
+    let mut field_value: Option<ApplicationStartPage> = None;
+    let mut seen: u32 = 0;
+    r.skip_ws();
+    if r.at() != b'}' {
+        loop {
+            r.skip_ws();
+            if r.at() != b'"' {
+                return r.refuse("malformed");
+            }
+            let key = r.string()?;
+            r.skip_ws();
+            if r.at() != b':' {
+                return r.refuse("malformed");
+            }
+            r.pos += 1;
+            r.skip_ws();
+            match key.as_str() {
+                "value" => {
+                    if seen & 1 != 0 {
+                        return r.refuse("duplicate_field");
+                    }
+                    seen |= 1;
+                    field_value = Some(decode_application_start_page(r)?);
+                }
+                _ => {
+                    return r.refuse("unknown_field");
+                }
+            }
+            r.skip_ws();
+            if r.at() != b',' {
+                break;
+            }
+            r.pos += 1;
+        }
+    }
+    if r.at() != b'}' {
+        return r.refuse("malformed");
+    }
+    r.pos += 1;
+    r.depth -= 1;
+    if seen & 1 != 1 {
+        return r.refuse("missing_field");
+    }
+    let Some(field_value) = field_value else {
+        return r.refuse("missing_field");
+    };
+    Ok(OAApplicationsListStartsResult {
+        value: field_value,
+    })
+}
+
 pub fn decode(data: &[u8]) -> Result<ResolveResult, Refusal> {
     let mut r = Reader { buf: data, pos: 0, depth: 0 };
     r.skip_ws();
@@ -6592,12 +8084,24 @@ fn service_check_declaration_host(v: &DeclarationHost) -> Result<(), Refusal> {
     Ok(())
 }
 
+fn service_check_declaration_extension(_v: &DeclarationExtension) -> Result<(), Refusal> {
+    Ok(())
+}
+
 fn service_check_declaration(v: &Declaration) -> Result<(), Refusal> {
     if let Some(value) = &v.remote {
         service_check_remote_trust(value)?;
     }
     if let Some(value) = &v.host {
         service_check_declaration_host(value)?;
+    }
+    Ok(())
+}
+
+fn service_check_declaration_with_extensions(v: &DeclarationWithExtensions) -> Result<(), Refusal> {
+    service_check_declaration(&v.declaration)?;
+    for value in &v.supported_extensions {
+        service_check_declaration_extension(value)?;
     }
     Ok(())
 }
@@ -6662,8 +8166,29 @@ fn service_check_oa_registry_observe_arguments(_v: &OARegistryObserveArguments) 
     Ok(())
 }
 
+fn service_check_oa_registry_v2_declarations_arguments(_v: &OARegistryV2DeclarationsArguments) -> Result<(), Refusal> {
+    Ok(())
+}
+
+fn service_check_oa_registry_v2_declare_arguments(v: &OARegistryV2DeclareArguments) -> Result<(), Refusal> {
+    service_check_declaration_with_extensions(&v.declaration)?;
+    Ok(())
+}
+
+fn service_check_oa_registry_v2_withdraw_arguments(_v: &OARegistryV2WithdrawArguments) -> Result<(), Refusal> {
+    Ok(())
+}
+
+fn service_check_oa_registry_v2_observe_arguments(_v: &OARegistryV2ObserveArguments) -> Result<(), Refusal> {
+    Ok(())
+}
+
 fn service_check_oa_applications_register_arguments(v: &OAApplicationsRegisterArguments) -> Result<(), Refusal> {
     service_check_application_descriptor(&v.descriptor)?;
+    Ok(())
+}
+
+fn service_check_oa_applications_ask_confirmation_arguments(_v: &OAApplicationsAskConfirmationArguments) -> Result<(), Refusal> {
     Ok(())
 }
 
@@ -6685,6 +8210,10 @@ fn service_check_oa_applications_observe_arguments(_v: &OAApplicationsObserveArg
 }
 
 fn service_check_oa_applications_activate_arguments(_v: &OAApplicationsActivateArguments) -> Result<(), Refusal> {
+    Ok(())
+}
+
+fn service_check_oa_applications_list_starts_arguments(_v: &OAApplicationsListStartsArguments) -> Result<(), Refusal> {
     Ok(())
 }
 
@@ -7035,6 +8564,140 @@ impl<T: FrameTransport> Registry for RegistryClient<T> {
     }
 }
 
+/// The local operator registry with per-profile required extension inventory.
+/// It shares the authenticated endpoint, rights decision, revisions and
+/// withdrawal authority with registry@1. A registry@1 reading omits extension
+/// metadata; a registry@1 Declare creates an empty extension inventory.
+pub trait RegistryV2 {
+    type Error;
+    /// Read all declarations, readings and extension inventories under
+    /// provider.manage.
+    fn declarations(&self) -> Result<DeclarationListV2, Self::Error>;
+    /// Conditionally add the declaration and its extension inventory as one
+    /// generation, under provider.manage. The registry@1 Declare semantics for
+    /// rules and ownership apply.
+    fn declare(&self, expected_revision: String, declaration: DeclarationWithExtensions) -> Result<DeclarationChange, Self::Error>;
+    /// Conditionally withdraw a declaration under provider.manage, with the
+    /// registry@1 semantics.
+    fn withdraw(&self, expected_revision: String, name: String) -> Result<DeclarationChange, Self::Error>;
+    /// Wait for declarations, readings or extension inventories to change,
+    /// under provider.manage.
+    fn observe(&self, cursor: String, wait_ms: i64) -> Result<DeclarationObservationV2, Self::Error>;
+}
+
+pub struct RegistryV2Client<T> {
+    transport: T,
+}
+
+impl<T> RegistryV2Client<T> {
+    pub fn new(transport: T) -> Self {
+        Self { transport }
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: FrameTransport> RegistryV2 for RegistryV2Client<T> {
+    type Error = CallError<T::Error>;
+    fn declarations(&self) -> Result<DeclarationListV2, Self::Error> {
+        let args = OARegistryV2DeclarationsArguments {};
+        let arguments = service_encode(&args, service_check_oa_registry_v2_declarations_arguments, enc_oa_registry_v2_declarations_arguments, decode_oa_registry_v2_declarations_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/registry@2".into(), method: "Declarations".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/registry@2" || reply.method != "Declarations" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_registry_v2_declarations_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+
+    fn declare(&self, expected_revision: String, declaration: DeclarationWithExtensions) -> Result<DeclarationChange, Self::Error> {
+        let args = OARegistryV2DeclareArguments { expected_revision, declaration };
+        let arguments = service_encode(&args, service_check_oa_registry_v2_declare_arguments, enc_oa_registry_v2_declare_arguments, decode_oa_registry_v2_declare_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/registry@2".into(), method: "Declare".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/registry@2" || reply.method != "Declare" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_registry_v2_declare_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+
+    fn withdraw(&self, expected_revision: String, name: String) -> Result<DeclarationChange, Self::Error> {
+        let args = OARegistryV2WithdrawArguments { expected_revision, name };
+        let arguments = service_encode(&args, service_check_oa_registry_v2_withdraw_arguments, enc_oa_registry_v2_withdraw_arguments, decode_oa_registry_v2_withdraw_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/registry@2".into(), method: "Withdraw".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/registry@2" || reply.method != "Withdraw" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_registry_v2_withdraw_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+
+    fn observe(&self, cursor: String, wait_ms: i64) -> Result<DeclarationObservationV2, Self::Error> {
+        let args = OARegistryV2ObserveArguments { cursor, wait_ms };
+        let arguments = service_encode(&args, service_check_oa_registry_v2_observe_arguments, enc_oa_registry_v2_observe_arguments, decode_oa_registry_v2_observe_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/registry@2".into(), method: "Observe".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/registry@2" || reply.method != "Observe" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_registry_v2_observe_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+}
+
 /// Experimental application-presence profile owned by the OA service.
 /// Persistent operator descriptors and transient app announcements have
 /// distinct authority and lifetime. This is a local directory; MCP/UI metadata
@@ -7043,10 +8706,24 @@ impl<T: FrameTransport> Registry for RegistryClient<T> {
 /// identity refuses access.
 pub trait Applications {
     type Error;
-    /// Add an installed descriptor. Requires application.manage on account;
-    /// existing names conflict. Does not launch or grant use. Programs cannot
-    /// self-register.
+    /// Add an installed descriptor. Requires application.manage on account for
+    /// another program's descriptor, or application.register_self on account
+    /// for the caller's own program, which the account-wide registration
+    /// default permits; such an entry is self_registered until confirmed. A
+    /// title that reads as OpenAbstractions is invalid with reason title.
+    /// Existing names conflict; a program's second self-registration while one
+    /// is unconfirmed conflicts with reason unconfirmed. Does not launch or
+    /// grant use.
     fn register(&self, descriptor: ApplicationDescriptor) -> Result<ApplicationChange, Self::Error>;
+    /// Ask the person again, through the runtime's own asks question
+    /// application.self_registered, whether to keep a self-registered entry.
+    /// Requires application.manage on account. The person's Keep clears
+    /// self_registered; Remove removes every unconfirmed entry of its program
+    /// and blocks that program from registering itself; closing or expiry
+    /// leaves it unconfirmed. A pending question is replayed. A confirmed or
+    /// operator-registered entry applies without asking; an unknown name is
+    /// unknown. An earlier applications@2 service returns unknown_method.
+    fn ask_confirmation(&self, application: String) -> Result<ApplicationChange, Self::Error>;
     /// Remove an installed descriptor and its presence. Requires
     /// application.manage on account. Does not terminate user applications.
     fn remove(&self, application: String) -> Result<ApplicationChange, Self::Error>;
@@ -7072,6 +8749,12 @@ pub trait Applications {
     /// cancellation stops its wait and never terminates or restarts the
     /// application.
     fn activate(&self, application: String) -> Result<ApplicationActivationResult, Self::Error>;
+    /// Read the runtime's start log newest first, for this runtime's operator
+    /// programs only: any other caller, another account and a remote peer get
+    /// forbidden. Each start is kept seven days, at most 256. limit is 1..64;
+    /// cursor is empty or a previous page's, at most 256 bytes. An earlier
+    /// applications@2 service returns unknown_method.
+    fn list_starts(&self, cursor: String, limit: i64) -> Result<ApplicationStartPage, Self::Error>;
 }
 
 pub struct ApplicationsClient<T> {
@@ -7093,14 +8776,14 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
     fn register(&self, descriptor: ApplicationDescriptor) -> Result<ApplicationChange, Self::Error> {
         let args = OAApplicationsRegisterArguments { descriptor };
         let arguments = service_encode(&args, service_check_oa_applications_register_arguments, enc_oa_applications_register_arguments, decode_oa_applications_register_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Register".into(), arguments };
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Register".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Register" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Register" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7114,17 +8797,41 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
         Ok(result.value)
     }
 
-    fn remove(&self, application: String) -> Result<ApplicationChange, Self::Error> {
-        let args = OAApplicationsRemoveArguments { application };
-        let arguments = service_encode(&args, service_check_oa_applications_remove_arguments, enc_oa_applications_remove_arguments, decode_oa_applications_remove_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Remove".into(), arguments };
+    fn ask_confirmation(&self, application: String) -> Result<ApplicationChange, Self::Error> {
+        let args = OAApplicationsAskConfirmationArguments { application };
+        let arguments = service_encode(&args, service_check_oa_applications_ask_confirmation_arguments, enc_oa_applications_ask_confirmation_arguments, decode_oa_applications_ask_confirmation_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "AskConfirmation".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Remove" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "AskConfirmation" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_applications_ask_confirmation_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+
+    fn remove(&self, application: String) -> Result<ApplicationChange, Self::Error> {
+        let args = OAApplicationsRemoveArguments { application };
+        let arguments = service_encode(&args, service_check_oa_applications_remove_arguments, enc_oa_applications_remove_arguments, decode_oa_applications_remove_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Remove".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Remove" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7141,14 +8848,14 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
     fn announce(&self, presence: ApplicationPresence) -> Result<ApplicationChange, Self::Error> {
         let args = OAApplicationsAnnounceArguments { presence };
         let arguments = service_encode(&args, service_check_oa_applications_announce_arguments, enc_oa_applications_announce_arguments, decode_oa_applications_announce_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Announce".into(), arguments };
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Announce".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Announce" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Announce" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7165,14 +8872,14 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
     fn withdraw(&self, application: String, instance: String) -> Result<ApplicationChange, Self::Error> {
         let args = OAApplicationsWithdrawArguments { application, instance };
         let arguments = service_encode(&args, service_check_oa_applications_withdraw_arguments, enc_oa_applications_withdraw_arguments, decode_oa_applications_withdraw_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Withdraw".into(), arguments };
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Withdraw".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Withdraw" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Withdraw" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7189,14 +8896,14 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
     fn observe(&self, cursor: String, wait_ms: i64) -> Result<ApplicationPage, Self::Error> {
         let args = OAApplicationsObserveArguments { cursor, wait_ms };
         let arguments = service_encode(&args, service_check_oa_applications_observe_arguments, enc_oa_applications_observe_arguments, decode_oa_applications_observe_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Observe".into(), arguments };
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Observe".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Observe" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Observe" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7213,14 +8920,14 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
     fn activate(&self, application: String) -> Result<ApplicationActivationResult, Self::Error> {
         let args = OAApplicationsActivateArguments { application };
         let arguments = service_encode(&args, service_check_oa_applications_activate_arguments, enc_oa_applications_activate_arguments, decode_oa_applications_activate_arguments).map_err(CallError::Refusal)?;
-        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@1".into(), method: "Activate".into(), arguments };
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "Activate".into(), arguments };
         let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
         let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
         let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
         if reply.version != 1 {
             return Err(CallError::Dispatch("unknown_version"));
         }
-        if reply.service != "abstraction.facade/applications@1" || reply.method != "Activate" {
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "Activate" {
             return Err(CallError::Dispatch("mismatched_response"));
         }
         if !reply.ok {
@@ -7231,6 +8938,30 @@ impl<T: FrameTransport> Applications for ApplicationsClient<T> {
             return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
         }
         let result = service_decode(&reply.payload, decode_oa_applications_activate_result).map_err(CallError::Refusal)?;
+        Ok(result.value)
+    }
+
+    fn list_starts(&self, cursor: String, limit: i64) -> Result<ApplicationStartPage, Self::Error> {
+        let args = OAApplicationsListStartsArguments { cursor, limit };
+        let arguments = service_encode(&args, service_check_oa_applications_list_starts_arguments, enc_oa_applications_list_starts_arguments, decode_oa_applications_list_starts_arguments).map_err(CallError::Refusal)?;
+        let request = OAServiceFrame { version: 1, service: "abstraction.facade/applications@2".into(), method: "ListStarts".into(), arguments };
+        let frame = service_encode(&request, service_check_oa_service_frame, enc_oa_service_frame, decode_oa_service_frame).map_err(CallError::Refusal)?;
+        let reply = self.transport.exchange_frame(&frame).map_err(CallError::Transport)?;
+        let reply = service_decode(&reply, decode_oa_service_reply).map_err(CallError::Refusal)?;
+        if reply.version != 1 {
+            return Err(CallError::Dispatch("unknown_version"));
+        }
+        if reply.service != "abstraction.facade/applications@2" || reply.method != "ListStarts" {
+            return Err(CallError::Dispatch("mismatched_response"));
+        }
+        if !reply.ok {
+            let error = service_decode(&reply.payload, decode_oa_service_error).map_err(CallError::Refusal)?;
+            if error.code.is_empty() {
+                return Err(CallError::Dispatch("invalid_error"));
+            }
+            return Err(CallError::Service(ServiceError { code: error.code, message: error.message }));
+        }
+        let result = service_decode(&reply.payload, decode_oa_applications_list_starts_result).map_err(CallError::Refusal)?;
         Ok(result.value)
     }
 }

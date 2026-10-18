@@ -44,3 +44,6 @@ func (b BoundJobs) ObserveWork(id api.RequestIdentity) (api.ObservationResult, e
 func (b BoundJobs) ReadResult(id api.RequestIdentity, offset, maxBytes int64) (api.ResultRead, error) {
 	return b.client.ReadResult(b.ctx, id, offset, maxBytes)
 }
+func (b BoundJobs) LinkResult(id api.RequestIdentity, destination string) (api.ResultLink, error) {
+	return b.client.LinkResult(b.ctx, id, destination)
+}

@@ -15,6 +15,7 @@ import (
 	identity "github.com/openabstractions/abstraction-identity"
 	logging "github.com/openabstractions/abstraction-logging/go"
 	logwire "github.com/openabstractions/abstraction-logging/go/abstraction/logging"
+	logclient "github.com/openabstractions/abstraction-logging/go/client"
 	model "github.com/openabstractions/abstraction-model/go"
 	modelclient "github.com/openabstractions/abstraction-model/go/client"
 	rightsclient "github.com/openabstractions/abstraction-rights/go/client"
@@ -200,4 +201,95 @@ func TestResolvedRightsEnforceHistoryModelAndRouter(t *testing.T) {
 			t.Fatal("config read during a rights outage", err)
 		}
 	})
+}
+
+func TestResolvedRightsScopeNativeLogSourcesIndependently(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("current Program proof limitation")
+	}
+	sourceID := "windows/application"
+	if runtime.GOOS == "linux" {
+		sourceID = "linux/system-journal"
+	}
+	eachDecider(t, []string{LogSourceAction}, func(t *testing.T, f deciderFixture, o Options) {
+		policy := SourcePolicyFromRights(f.decider)
+		subjects := make(chan rightsclient.Subject, 32)
+		o.LogSourcePolicy = func(ctx context.Context, peer *identity.Peer, action, resource string) error {
+			if subject, e := rightsclient.SubjectFromPeer(peer); e == nil {
+				select {
+				case subjects <- subject:
+				default:
+				}
+			}
+			return policy(ctx, peer, action, resource)
+		}
+		_, stop := runJobRuntime(t, o)
+		defer stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		reader, err := client.New(o.Endpoint).ResolveLogSourceReader(ctx, client.Requirements{Scope: client.ScopeLocal})
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := reader.SourcesContext(ctx)
+		if err != nil || catalog.Outcome != logwire.SourceCatalogOutcomeCatalog {
+			t.Fatalf("source catalog: %+v %v", catalog, err)
+		}
+		if sourceAvailability(catalog, sourceID) != logwire.SourceAvailabilityPermissionDenied {
+			t.Fatalf("initial source was not denied: %+v", catalog)
+		}
+		if page, err := reader.ReadContext(ctx, sourceID, "retained:cursor", 1, 512); err != nil || page.Outcome != logwire.HistoryPageOutcomeNotPermitted || len(page.Records) != 0 || page.Next != "retained:cursor" {
+			t.Fatalf("ungranted source read: %+v %v", page, err)
+		}
+		if page, err := reader.StartAtEndContext(ctx, sourceID); err != nil || page.Outcome != logwire.HistoryPageOutcomeNotPermitted || len(page.Records) != 0 || page.Next != "" {
+			t.Fatalf("ungranted source baseline: %+v %v", page, err)
+		}
+		var subject rightsclient.Subject
+		select {
+		case subject = <-subjects:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		resource := LogSourceResource(sourceID)
+		if resource != "source:"+sourceID {
+			t.Fatalf("source resource %q", resource)
+		}
+		if err := f.policy.Set(subject, LogSourceAction, resource, true); err != nil {
+			t.Fatal(err)
+		}
+		catalog, err = reader.SourcesContext(ctx)
+		if err != nil || catalog.Outcome != logwire.SourceCatalogOutcomeCatalog {
+			t.Fatalf("granted source catalog: %+v %v", catalog, err)
+		}
+		availability := sourceAvailability(catalog, sourceID)
+		if availability == logwire.SourceAvailabilityPermissionDenied {
+			t.Fatalf("source grant did not reach this fixed resource: %+v", catalog)
+		}
+		otherID := "windows/system"
+		if sourceID == otherID {
+			otherID = "linux/system-journal"
+		}
+		if sourceAvailability(catalog, otherID) != logwire.SourceAvailabilityPermissionDenied {
+			t.Fatalf("source grant widened to %s: %+v", otherID, catalog)
+		}
+		if err := f.policy.Revoke(subject, LogSourceAction, resource); err != nil {
+			t.Fatal(err)
+		}
+		catalog, err = reader.SourcesContext(ctx)
+		if err != nil || catalog.Outcome != logwire.SourceCatalogOutcomeCatalog || sourceAvailability(catalog, sourceID) != logwire.SourceAvailabilityPermissionDenied {
+			t.Fatalf("revoked source right returned %+v, %v", catalog, err)
+		}
+		if page, err := reader.ReadContext(ctx, sourceID, "retained:cursor", 1, 512); err != nil || page.Outcome != logwire.HistoryPageOutcomeNotPermitted || len(page.Records) != 0 || page.Next != "retained:cursor" {
+			t.Fatalf("revoked source read: %+v %v", page, err)
+		}
+	})
+}
+
+func sourceAvailability(catalog logclient.SourceCatalog, id string) logwire.SourceAvailability {
+	for _, descriptor := range catalog.Sources {
+		if descriptor.ID == id {
+			return descriptor.Availability
+		}
+	}
+	return 0
 }

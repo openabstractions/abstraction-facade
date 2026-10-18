@@ -12,6 +12,9 @@ import (
 // InferenceContract is the wire contract an inference service publishes.
 const InferenceContract = "abstraction.inference/chat@1"
 
+var InferenceChatV2Contract = new(inferencewire.ChatV2Dispatcher).ServiceContract()
+var InferenceSelectionOperatorV2Contract = new(inferencewire.SelectionOperatorV2Dispatcher).ServiceContract()
+
 const (
 	InferenceLocalGuarantee  = "abstraction.inference/local-only@1"
 	InferenceHostedGuarantee = "abstraction.inference/hosted-allowed@1"
@@ -34,6 +37,7 @@ var InferenceSpeechContract = new(inferencewire.SpeechDispatcher).ServiceContrac
 
 // InferenceImageContract is read from the generated dispatcher.
 var InferenceImageContract = new(inferencewire.ImageDispatcher).ServiceContract()
+var InferenceImageV2Contract = new(inferencewire.ImageV2Dispatcher).ServiceContract()
 
 // InferenceService is a separately composed inference host, for example
 // abstraction-inference/go/service.Host with its provider, already listening
@@ -76,9 +80,16 @@ func (h *Host) addInferenceCandidate(options Options) {
 		}
 	}
 	add(InferenceContract)
+	if v2, ok := options.Inference.(interface{ ChatV2Available() bool }); ok && v2.ChatV2Available() {
+		add(InferenceChatV2Contract)
+	}
 	// A service that also serves embeddings on its endpoint says so.
 	if embed, ok := options.Inference.(interface{ EmbedAvailable() bool }); ok && embed.EmbedAvailable() {
 		add(InferenceEmbedContract)
+	}
+	// A service that evaluates chat prefixes ahead of a request says so.
+	if preload, ok := options.Inference.(interface{ PreloadAvailable() bool }); ok && preload.PreloadAvailable() {
+		add(new(inferencewire.PreloaderDispatcher).ServiceContract())
 	}
 	// A service that has a ready transcription provider on this endpoint says so.
 	if transcription, ok := options.Inference.(interface{ TranscriptionAvailable() bool }); ok && transcription.TranscriptionAvailable() {
@@ -90,6 +101,9 @@ func (h *Host) addInferenceCandidate(options Options) {
 	if images, ok := options.Inference.(interface{ ImageAvailable() bool }); ok && images.ImageAvailable() {
 		add(InferenceImageContract)
 	}
+	if images, ok := options.Inference.(interface{ ImageV2Available() bool }); ok && images.ImageV2Available() {
+		add(InferenceImageV2Contract)
+	}
 	if live, ok := options.Inference.(interface{ LiveAvailable() bool }); ok && live.LiveAvailable() {
 		add(new(inferencewire.LiveDispatcher).ServiceContract())
 	}
@@ -97,6 +111,12 @@ func (h *Host) addInferenceCandidate(options Options) {
 	if operator, ok := options.Inference.(interface{ OperatorAvailable() bool }); ok && operator.OperatorAvailable() {
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: true, Reference: wire.ServiceReference{
 			Provider: "openabstractions.user-runtime", Capability: "abstraction.inference", Contract: InferenceOperatorContract,
+			Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.InferenceEndpoint, Guarantees: []string{},
+		}})
+	}
+	if selection, ok := options.Inference.(interface{ SelectionOperatorV2Available() bool }); ok && selection.SelectionOperatorV2Available() {
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: true, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.inference", Contract: InferenceSelectionOperatorV2Contract,
 			Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.InferenceEndpoint, Guarantees: []string{},
 		}})
 	}

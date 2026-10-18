@@ -21,6 +21,13 @@ type CredentialsService interface {
 	ApplierAvailable() bool
 }
 
+// ScopedCredentialsService is optional. The composition advertises the new
+// receiving profiles only when their actual shared authorization is configured.
+type ScopedCredentialsService interface {
+	ScopedAvailable() bool
+	ScopedApplierAvailable() bool
+}
+
 func validateCredentials(options Options) error {
 	if (options.Credentials == nil) != (options.CredentialsEndpoint == "") {
 		return errors.New("runtime: credentials require an explicit service and its endpoint")
@@ -37,6 +44,12 @@ func (h *Host) addCredentialCandidates(options Options) {
 	contracts := []string{"abstraction.credentials/holder@1"}
 	if options.Credentials.ApplierAvailable() {
 		contracts = append(contracts, "abstraction.credentials/applier@1")
+	}
+	if scoped, ok := options.Credentials.(ScopedCredentialsService); ok && scoped.ScopedAvailable() {
+		contracts = append(contracts, "abstraction.credentials/reader@1", "abstraction.credentials/holder@2")
+		if scoped.ScopedApplierAvailable() {
+			contracts = append(contracts, "abstraction.credentials/applier@2")
+		}
 	}
 	for _, contract := range contracts {
 		h.candidates = append(h.candidates, resolution.Candidate{Ready: true, Reference: wire.ServiceReference{

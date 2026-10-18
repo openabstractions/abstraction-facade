@@ -1,6 +1,8 @@
 # Rust durable job bindings
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 Add the separate `abstraction-facade-jobs` Cargo package and import `JobsMachine` to call `Machine::resolve_jobs`, `resolve_job_operations` or `resolve_job_inventory`. Resolution uses the pure base facade's validated `Binding<C>`. The package depends only on that core and generated job API; logging and native IPC sources are optional separate selections.
 

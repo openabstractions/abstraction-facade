@@ -2028,6 +2028,16 @@ type DeclarationHost struct {
 	Ceiling    *DeclarationCeiling
 }
 
+// One required inference extension key a provider or remote runtime asserts it
+// can examine for a declared profile. This operator-managed inventory lets the
+// selecting runtime refuse unknown required keys before activating a provider;
+// the selected service still validates values and model-specific support before
+// accepting work.
+type DeclarationExtension struct {
+	Profile string
+	Key     string
+}
+
 // One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
 // role names what it is, and each role validates its own fields (FAC-R6). A
 // provider declares program, the absolute executable path the runtime launches
@@ -2044,9 +2054,14 @@ type DeclarationHost struct {
 // of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
 // profile:<name> is what a host or a remote serves. models is the 0..64
 // distinct model names a native inference provider is trusted to serve, each
-// 1..256 UTF-8 bytes without controls. on_demand launches program as a
-// supervised child when a resolution first needs it; attach reads a provider
-// something else started.
+// 1..256 UTF-8 bytes without controls; an entry <profile>:<model> whose profile
+// the declaration serves (a listed profile whose contract it declares, or chat
+// for a chat-only declaration listing none) serves model for that profile
+// alone, any other entry serves every served profile, and a model named chat:x
+// is written chat:chat:x (abstraction.router ROUTE-D9). on_demand launches
+// program as a supervised child when a resolution first needs it; attach reads
+// a provider something else started. Extension inventory lives in registry@2
+// and is omitted from this strict registry@1 projection.
 type Declaration struct {
 	Name       string
 	Program    string
@@ -2061,6 +2076,14 @@ type Declaration struct {
 	Models     []string
 	Role       DeclarationRole
 	Host       *DeclarationHost
+}
+
+// One atomic registry@2 edit. The extension inventory is validated against the
+// declaration's served inference profiles and stored with that declaration
+// generation. An empty inventory asserts no required extension support.
+type DeclarationWithExtensions struct {
+	Declaration         Declaration
+	SupportedExtensions []DeclarationExtension
 }
 
 // The router's latest reading of a host declaration: whether its last survey
@@ -2134,6 +2157,29 @@ type DeclarationObservation struct {
 	Outcome      DeclarationListOutcome
 	Cursor       string
 	Declarations []DeclarationState
+}
+
+// The registry@1 state and the extension inventory from the same declaration
+// snapshot.
+type DeclarationStateV2 struct {
+	State               DeclarationState
+	SupportedExtensions []DeclarationExtension
+}
+
+// The registry@2 declarations and their edit revision. Refusals carry an empty
+// revision and no declarations.
+type DeclarationListV2 struct {
+	Outcome      DeclarationListOutcome
+	Revision     string
+	Declarations []DeclarationStateV2
+}
+
+// The registry@2 declarations and readings from one snapshot. The cursor
+// includes extension inventory changes.
+type DeclarationObservationV2 struct {
+	Outcome      DeclarationListOutcome
+	Cursor       string
+	Declarations []DeclarationStateV2
 }
 
 // An application's claimed interface metadata. name identifies it within one
@@ -2210,11 +2256,16 @@ type ApplicationInstance struct {
 // One installed application's descriptor with its currently leased instances.
 // scope records directory provenance; this local profile supplies local and
 // never imports remote announcements. An empty instance list makes no claim
-// about whether an unregistered process is running.
+// about whether an unregistered process is running. self_registered is present
+// and true while the entry was registered by its own program under the
+// account-wide registration default and the person has not answered Keep to the
+// runtime's question about it (AskConfirmation). Only such entries carry the
+// field.
 type ApplicationEntry struct {
-	Descriptor ApplicationDescriptor
-	Instances  []ApplicationInstance
-	Scope      Scope
+	Descriptor     ApplicationDescriptor
+	Instances      []ApplicationInstance
+	Scope          Scope
+	SelfRegistered bool
 }
 
 // applied confirms the change; an announcement returns its opaque instance.
@@ -2253,6 +2304,36 @@ type ApplicationActivationResult struct {
 	Reason   string
 }
 
+// One time an application became present in this runtime: the first announced
+// instance of a registered application in a local session where none of its
+// instances was live. application, program and title are the descriptor's at
+// that time. launched is true when this runtime's own activation attempt for
+// the application in that session was waiting for it; false means the
+// application announced itself. It records a fresh announcement, not process
+// lineage, and a runtime restart makes every running application announce
+// again.
+type ApplicationStart struct {
+	Application   string
+	Program       string
+	Title         string
+	StartedUnixMs int64
+	Launched      bool
+}
+
+// page carries at most the requested 1..64 starts, newest first. complete means
+// the log was exhausted; otherwise cursor continues it. complete_since_unix_ms
+// is zero while every retained start is listed; otherwise starts at or before
+// it may have been evicted. stale means the cursor's log changed or belongs to
+// another runtime: restart from an empty cursor. Other outcomes carry no starts
+// or cursor.
+type ApplicationStartPage struct {
+	Outcome             ApplicationOutcome
+	Starts              []ApplicationStart
+	Cursor              string
+	Complete            bool
+	CompleteSinceUnixMs int64
+}
+
 type oaResolverResolveArguments struct {
 	Request ResolveRequest
 }
@@ -2281,8 +2362,30 @@ type oaRegistryObserveArguments struct {
 	WaitMs int64
 }
 
+type oaRegistryV2DeclarationsArguments struct {
+}
+
+type oaRegistryV2DeclareArguments struct {
+	ExpectedRevision string
+	Declaration      DeclarationWithExtensions
+}
+
+type oaRegistryV2WithdrawArguments struct {
+	ExpectedRevision string
+	Name             string
+}
+
+type oaRegistryV2ObserveArguments struct {
+	Cursor string
+	WaitMs int64
+}
+
 type oaApplicationsRegisterArguments struct {
 	Descriptor ApplicationDescriptor
+}
+
+type oaApplicationsAskConfirmationArguments struct {
+	Application string
 }
 
 type oaApplicationsRemoveArguments struct {
@@ -2305,6 +2408,11 @@ type oaApplicationsObserveArguments struct {
 
 type oaApplicationsActivateArguments struct {
 	Application string
+}
+
+type oaApplicationsListStartsArguments struct {
+	Cursor string
+	Limit  int64
 }
 
 type oaServiceFrame struct {
@@ -2355,7 +2463,27 @@ type oaRegistryObserveResult struct {
 	Value DeclarationObservation
 }
 
+type oaRegistryV2DeclarationsResult struct {
+	Value DeclarationListV2
+}
+
+type oaRegistryV2DeclareResult struct {
+	Value DeclarationChange
+}
+
+type oaRegistryV2WithdrawResult struct {
+	Value DeclarationChange
+}
+
+type oaRegistryV2ObserveResult struct {
+	Value DeclarationObservationV2
+}
+
 type oaApplicationsRegisterResult struct {
+	Value ApplicationChange
+}
+
+type oaApplicationsAskConfirmationResult struct {
 	Value ApplicationChange
 }
 
@@ -2377,6 +2505,10 @@ type oaApplicationsObserveResult struct {
 
 type oaApplicationsActivateResult struct {
 	Value ApplicationActivationResult
+}
+
+type oaApplicationsListStartsResult struct {
+	Value ApplicationStartPage
 }
 
 func encResolveRequest(out []byte, v *ResolveRequest, depth int) []byte {
@@ -2871,6 +3003,24 @@ func encDeclarationHost(out []byte, v *DeclarationHost, depth int) []byte {
 	return append(out, '}')
 }
 
+func encDeclarationExtension(out []byte, v *DeclarationExtension, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "profile")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Profile)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "key")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Key)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
 func encDeclaration(out []byte, v *Declaration, depth int) []byte {
 	if !(v.Transport).Known() {
 		panic(&Refusal{Word: "bad_enum", Offset: 0})
@@ -2972,6 +3122,26 @@ func encDeclaration(out []byte, v *Declaration, depth int) []byte {
 		out = esc(out, "host")
 		out = append(out, ':', ' ')
 		out = encDeclarationHost(out, v.Host, depth+1)
+	}
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encDeclarationWithExtensions(out []byte, v *DeclarationWithExtensions, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "declaration")
+	out = append(out, ':', ' ')
+	out = encDeclaration(out, &v.Declaration, depth+1)
+	if len(v.SupportedExtensions) != 0 {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "supported_extensions")
+		out = append(out, ':', ' ')
+		out = encList(out, v.SupportedExtensions, depth+1, encDeclarationExtension)
 	}
 	out = append(out, '\n')
 	out = pad(out, depth)
@@ -3156,6 +3326,80 @@ func encDeclarationObservation(out []byte, v *DeclarationObservation, depth int)
 	out = esc(out, "declarations")
 	out = append(out, ':', ' ')
 	out = encList(out, v.Declarations, depth+1, encDeclarationState)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encDeclarationStateV2(out []byte, v *DeclarationStateV2, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "state")
+	out = append(out, ':', ' ')
+	out = encDeclarationState(out, &v.State, depth+1)
+	if len(v.SupportedExtensions) != 0 {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "supported_extensions")
+		out = append(out, ':', ' ')
+		out = encList(out, v.SupportedExtensions, depth+1, encDeclarationExtension)
+	}
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encDeclarationListV2(out []byte, v *DeclarationListV2, depth int) []byte {
+	if !(v.Outcome).Known() {
+		panic(&Refusal{Word: "bad_enum", Offset: 0})
+	}
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "outcome")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Outcome.String())
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "revision")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Revision)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "declarations")
+	out = append(out, ':', ' ')
+	out = encList(out, v.Declarations, depth+1, encDeclarationStateV2)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encDeclarationObservationV2(out []byte, v *DeclarationObservationV2, depth int) []byte {
+	if !(v.Outcome).Known() {
+		panic(&Refusal{Word: "bad_enum", Offset: 0})
+	}
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "outcome")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Outcome.String())
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "cursor")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Cursor)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "declarations")
+	out = append(out, ':', ' ')
+	out = encList(out, v.Declarations, depth+1, encDeclarationStateV2)
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -3359,6 +3603,18 @@ func encApplicationEntry(out []byte, v *ApplicationEntry, depth int) []byte {
 	out = esc(out, "scope")
 	out = append(out, ':', ' ')
 	out = esc(out, v.Scope.String())
+	if v.SelfRegistered {
+		out = append(out, ',')
+		out = append(out, '\n')
+		out = pad(out, depth+1)
+		out = esc(out, "self_registered")
+		out = append(out, ':', ' ')
+		if v.SelfRegistered {
+			out = append(out, 't', 'r', 'u', 'e')
+		} else {
+			out = append(out, 'f', 'a', 'l', 's', 'e')
+		}
+	}
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -3455,6 +3711,89 @@ func encApplicationActivationResult(out []byte, v *ApplicationActivationResult, 
 	return append(out, '}')
 }
 
+func encApplicationStart(out []byte, v *ApplicationStart, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "application")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Application)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "program")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Program)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "title")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Title)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "started_unix_ms")
+	out = append(out, ':', ' ')
+	out = num(out, v.StartedUnixMs)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "launched")
+	out = append(out, ':', ' ')
+	if v.Launched {
+		out = append(out, 't', 'r', 'u', 'e')
+	} else {
+		out = append(out, 'f', 'a', 'l', 's', 'e')
+	}
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encApplicationStartPage(out []byte, v *ApplicationStartPage, depth int) []byte {
+	if !(v.Outcome).Known() {
+		panic(&Refusal{Word: "bad_enum", Offset: 0})
+	}
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "outcome")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Outcome.String())
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "starts")
+	out = append(out, ':', ' ')
+	out = encList(out, v.Starts, depth+1, encApplicationStart)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "cursor")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Cursor)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "complete")
+	out = append(out, ':', ' ')
+	if v.Complete {
+		out = append(out, 't', 'r', 'u', 'e')
+	} else {
+		out = append(out, 'f', 'a', 'l', 's', 'e')
+	}
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "complete_since_unix_ms")
+	out = append(out, ':', ' ')
+	out = num(out, v.CompleteSinceUnixMs)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
 func encOAResolverResolveArguments(out []byte, v *oaResolverResolveArguments, depth int) []byte {
 	out = append(out, '{')
 	out = append(out, '\n')
@@ -3536,6 +3875,65 @@ func encOARegistryObserveArguments(out []byte, v *oaRegistryObserveArguments, de
 	return append(out, '}')
 }
 
+func encOARegistryV2DeclarationsArguments(out []byte, v *oaRegistryV2DeclarationsArguments, depth int) []byte {
+	out = append(out, '{')
+	return append(out, '}')
+}
+
+func encOARegistryV2DeclareArguments(out []byte, v *oaRegistryV2DeclareArguments, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "expected_revision")
+	out = append(out, ':', ' ')
+	out = esc(out, v.ExpectedRevision)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "declaration")
+	out = append(out, ':', ' ')
+	out = encDeclarationWithExtensions(out, &v.Declaration, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOARegistryV2WithdrawArguments(out []byte, v *oaRegistryV2WithdrawArguments, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "expected_revision")
+	out = append(out, ':', ' ')
+	out = esc(out, v.ExpectedRevision)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "name")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Name)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOARegistryV2ObserveArguments(out []byte, v *oaRegistryV2ObserveArguments, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "cursor")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Cursor)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "wait_ms")
+	out = append(out, ':', ' ')
+	out = num(out, v.WaitMs)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
 func encOAApplicationsRegisterArguments(out []byte, v *oaApplicationsRegisterArguments, depth int) []byte {
 	out = append(out, '{')
 	out = append(out, '\n')
@@ -3543,6 +3941,18 @@ func encOAApplicationsRegisterArguments(out []byte, v *oaApplicationsRegisterArg
 	out = esc(out, "descriptor")
 	out = append(out, ':', ' ')
 	out = encApplicationDescriptor(out, &v.Descriptor, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOAApplicationsAskConfirmationArguments(out []byte, v *oaApplicationsAskConfirmationArguments, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "application")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Application)
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -3615,6 +4025,24 @@ func encOAApplicationsActivateArguments(out []byte, v *oaApplicationsActivateArg
 	out = esc(out, "application")
 	out = append(out, ':', ' ')
 	out = esc(out, v.Application)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOAApplicationsListStartsArguments(out []byte, v *oaApplicationsListStartsArguments, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "cursor")
+	out = append(out, ':', ' ')
+	out = esc(out, v.Cursor)
+	out = append(out, ',')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "limit")
+	out = append(out, ':', ' ')
+	out = num(out, v.Limit)
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -3792,7 +4220,67 @@ func encOARegistryObserveResult(out []byte, v *oaRegistryObserveResult, depth in
 	return append(out, '}')
 }
 
+func encOARegistryV2DeclarationsResult(out []byte, v *oaRegistryV2DeclarationsResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encDeclarationListV2(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOARegistryV2DeclareResult(out []byte, v *oaRegistryV2DeclareResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encDeclarationChange(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOARegistryV2WithdrawResult(out []byte, v *oaRegistryV2WithdrawResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encDeclarationChange(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOARegistryV2ObserveResult(out []byte, v *oaRegistryV2ObserveResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encDeclarationObservationV2(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
 func encOAApplicationsRegisterResult(out []byte, v *oaApplicationsRegisterResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encApplicationChange(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOAApplicationsAskConfirmationResult(out []byte, v *oaApplicationsAskConfirmationResult, depth int) []byte {
 	out = append(out, '{')
 	out = append(out, '\n')
 	out = pad(out, depth+1)
@@ -3859,6 +4347,18 @@ func encOAApplicationsActivateResult(out []byte, v *oaApplicationsActivateResult
 	out = esc(out, "value")
 	out = append(out, ':', ' ')
 	out = encApplicationActivationResult(out, &v.Value, depth+1)
+	out = append(out, '\n')
+	out = pad(out, depth)
+	return append(out, '}')
+}
+
+func encOAApplicationsListStartsResult(out []byte, v *oaApplicationsListStartsResult, depth int) []byte {
+	out = append(out, '{')
+	out = append(out, '\n')
+	out = pad(out, depth+1)
+	out = esc(out, "value")
+	out = append(out, ':', ' ')
+	out = encApplicationStartPage(out, &v.Value, depth+1)
 	out = append(out, '\n')
 	out = pad(out, depth)
 	return append(out, '}')
@@ -5682,6 +6182,75 @@ func (r *reader) decodeDeclarationHost() (*DeclarationHost, error) {
 	return v, nil
 }
 
+func (r *reader) decodeDeclarationExtension() (*DeclarationExtension, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationExtension{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "profile":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Profile = x
+			case "key":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Key = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
 func (r *reader) decodeDeclaration() (*Declaration, error) {
 	if r.at() != '{' {
 		return nil, r.refuse("wrong_type")
@@ -5880,6 +6449,75 @@ func (r *reader) decodeDeclaration() (*Declaration, error) {
 		if !(v.Role).Known() {
 			return nil, r.refuse("bad_enum")
 		}
+	}
+	return v, nil
+}
+
+func (r *reader) decodeDeclarationWithExtensions() (*DeclarationWithExtensions, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationWithExtensions{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "declaration":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclaration()
+				if err != nil {
+					return nil, err
+				}
+				v.Declaration = *x
+			case "supported_extensions":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := decodeList(r, (*reader).decodeDeclarationExtension)
+				if err != nil {
+					return nil, err
+				}
+				v.SupportedExtensions = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
 	}
 	return v, nil
 }
@@ -6348,6 +6986,247 @@ func (r *reader) decodeDeclarationObservation() (*DeclarationObservation, error)
 				}
 				seen |= 4
 				x, err := decodeList(r, (*reader).decodeDeclarationState)
+				if err != nil {
+					return nil, err
+				}
+				v.Declarations = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&7 != 7 {
+		return nil, r.refuse("missing_field")
+	}
+	if !(v.Outcome).Known() {
+		return nil, r.refuse("bad_enum")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeDeclarationStateV2() (*DeclarationStateV2, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationStateV2{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "state":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclarationState()
+				if err != nil {
+					return nil, err
+				}
+				v.State = *x
+			case "supported_extensions":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := decodeList(r, (*reader).decodeDeclarationExtension)
+				if err != nil {
+					return nil, err
+				}
+				v.SupportedExtensions = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeDeclarationListV2() (*DeclarationListV2, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationListV2{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "outcome":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				word, ok := ParseDeclarationListOutcome(x)
+				if !ok {
+					return nil, r.refuse("bad_enum")
+				}
+				v.Outcome = word
+			case "revision":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Revision = x
+			case "declarations":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := decodeList(r, (*reader).decodeDeclarationStateV2)
+				if err != nil {
+					return nil, err
+				}
+				v.Declarations = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&7 != 7 {
+		return nil, r.refuse("missing_field")
+	}
+	if !(v.Outcome).Known() {
+		return nil, r.refuse("bad_enum")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeDeclarationObservationV2() (*DeclarationObservationV2, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &DeclarationObservationV2{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "outcome":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				word, ok := ParseDeclarationListOutcome(x)
+				if !ok {
+					return nil, r.refuse("bad_enum")
+				}
+				v.Outcome = word
+			case "cursor":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Cursor = x
+			case "declarations":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := decodeList(r, (*reader).decodeDeclarationStateV2)
 				if err != nil {
 					return nil, err
 				}
@@ -6962,6 +7841,16 @@ func (r *reader) decodeApplicationEntry() (*ApplicationEntry, error) {
 					return nil, r.refuse("bad_enum")
 				}
 				v.Scope = word
+			case "self_registered":
+				if seen&8 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 8
+				x, err := r.boolean()
+				if err != nil {
+					return nil, err
+				}
+				v.SelfRegistered = x
 			default:
 				return nil, r.refuse("unknown_field")
 			}
@@ -7246,6 +8135,211 @@ func (r *reader) decodeApplicationActivationResult() (*ApplicationActivationResu
 	r.pos++
 	r.depth--
 	if seen&15 != 15 {
+		return nil, r.refuse("missing_field")
+	}
+	if !(v.Outcome).Known() {
+		return nil, r.refuse("bad_enum")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeApplicationStart() (*ApplicationStart, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &ApplicationStart{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "application":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Application = x
+			case "program":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Program = x
+			case "title":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Title = x
+			case "started_unix_ms":
+				if seen&8 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 8
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.StartedUnixMs = x
+			case "launched":
+				if seen&16 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 16
+				x, err := r.boolean()
+				if err != nil {
+					return nil, err
+				}
+				v.Launched = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&31 != 31 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeApplicationStartPage() (*ApplicationStartPage, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &ApplicationStartPage{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "outcome":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				word, ok := ParseApplicationOutcome(x)
+				if !ok {
+					return nil, r.refuse("bad_enum")
+				}
+				v.Outcome = word
+			case "starts":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := decodeList(r, (*reader).decodeApplicationStart)
+				if err != nil {
+					return nil, err
+				}
+				v.Starts = x
+			case "cursor":
+				if seen&4 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 4
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Cursor = x
+			case "complete":
+				if seen&8 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 8
+				x, err := r.boolean()
+				if err != nil {
+					return nil, err
+				}
+				v.Complete = x
+			case "complete_since_unix_ms":
+				if seen&16 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 16
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.CompleteSinceUnixMs = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&31 != 31 {
 		return nil, r.refuse("missing_field")
 	}
 	if !(v.Outcome).Known() {
@@ -7628,6 +8722,249 @@ func (r *reader) decodeOARegistryObserveArguments() (*oaRegistryObserveArguments
 	return v, nil
 }
 
+func (r *reader) decodeOARegistryV2DeclarationsArguments() (*oaRegistryV2DeclarationsArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2DeclarationsArguments{}
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			_ = key
+			return nil, r.refuse("unknown_field")
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2DeclareArguments() (*oaRegistryV2DeclareArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2DeclareArguments{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "expected_revision":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.ExpectedRevision = x
+			case "declaration":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.decodeDeclarationWithExtensions()
+				if err != nil {
+					return nil, err
+				}
+				v.Declaration = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2WithdrawArguments() (*oaRegistryV2WithdrawArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2WithdrawArguments{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "expected_revision":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.ExpectedRevision = x
+			case "name":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Name = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2ObserveArguments() (*oaRegistryV2ObserveArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2ObserveArguments{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "cursor":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Cursor = x
+			case "wait_ms":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.WaitMs = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
 func (r *reader) decodeOAApplicationsRegisterArguments() (*oaApplicationsRegisterArguments, error) {
 	if r.at() != '{' {
 		return nil, r.refuse("wrong_type")
@@ -7666,6 +9003,65 @@ func (r *reader) decodeOAApplicationsRegisterArguments() (*oaApplicationsRegiste
 					return nil, err
 				}
 				v.Descriptor = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOAApplicationsAskConfirmationArguments() (*oaApplicationsAskConfirmationArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaApplicationsAskConfirmationArguments{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "application":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Application = x
 			default:
 				return nil, r.refuse("unknown_field")
 			}
@@ -7997,6 +9393,75 @@ func (r *reader) decodeOAApplicationsActivateArguments() (*oaApplicationsActivat
 	r.pos++
 	r.depth--
 	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOAApplicationsListStartsArguments() (*oaApplicationsListStartsArguments, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaApplicationsListStartsArguments{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "cursor":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.str()
+				if err != nil {
+					return nil, err
+				}
+				v.Cursor = x
+			case "limit":
+				if seen&2 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 2
+				x, err := r.integer(-9223372036854775808, 9223372036854775807)
+				if err != nil {
+					return nil, err
+				}
+				v.Limit = x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&3 != 3 {
 		return nil, r.refuse("missing_field")
 	}
 	return v, nil
@@ -8672,6 +10137,242 @@ func (r *reader) decodeOARegistryObserveResult() (*oaRegistryObserveResult, erro
 	return v, nil
 }
 
+func (r *reader) decodeOARegistryV2DeclarationsResult() (*oaRegistryV2DeclarationsResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2DeclarationsResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclarationListV2()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2DeclareResult() (*oaRegistryV2DeclareResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2DeclareResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclarationChange()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2WithdrawResult() (*oaRegistryV2WithdrawResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2WithdrawResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclarationChange()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOARegistryV2ObserveResult() (*oaRegistryV2ObserveResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaRegistryV2ObserveResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeDeclarationObservationV2()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
 func (r *reader) decodeOAApplicationsRegisterResult() (*oaApplicationsRegisterResult, error) {
 	if r.at() != '{' {
 		return nil, r.refuse("wrong_type")
@@ -8681,6 +10382,65 @@ func (r *reader) decodeOAApplicationsRegisterResult() (*oaApplicationsRegisterRe
 	}
 	r.pos++
 	v := &oaApplicationsRegisterResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeApplicationChange()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOAApplicationsAskConfirmationResult() (*oaApplicationsAskConfirmationResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaApplicationsAskConfirmationResult{}
 	var seen uint32
 	r.ws()
 	if r.at() != '}' {
@@ -9001,6 +10761,65 @@ func (r *reader) decodeOAApplicationsActivateResult() (*oaApplicationsActivateRe
 				}
 				seen |= 1
 				x, err := r.decodeApplicationActivationResult()
+				if err != nil {
+					return nil, err
+				}
+				v.Value = *x
+			default:
+				return nil, r.refuse("unknown_field")
+			}
+			r.ws()
+			if r.at() != ',' {
+				break
+			}
+			r.pos++
+		}
+	}
+	if r.at() != '}' {
+		return nil, r.refuse("malformed")
+	}
+	r.pos++
+	r.depth--
+	if seen&1 != 1 {
+		return nil, r.refuse("missing_field")
+	}
+	return v, nil
+}
+
+func (r *reader) decodeOAApplicationsListStartsResult() (*oaApplicationsListStartsResult, error) {
+	if r.at() != '{' {
+		return nil, r.refuse("wrong_type")
+	}
+	if err := r.enter(); err != nil {
+		return nil, err
+	}
+	r.pos++
+	v := &oaApplicationsListStartsResult{}
+	var seen uint32
+	r.ws()
+	if r.at() != '}' {
+		for {
+			r.ws()
+			if r.at() != '"' {
+				return nil, r.refuse("malformed")
+			}
+			key, err := r.str()
+			if err != nil {
+				return nil, err
+			}
+			r.ws()
+			if r.at() != ':' {
+				return nil, r.refuse("malformed")
+			}
+			r.pos++
+			r.ws()
+			switch key {
+			case "value":
+				if seen&1 != 0 {
+					return nil, r.refuse("duplicate_field")
+				}
+				seen |= 1
+				x, err := r.decodeApplicationStartPage()
 				if err != nil {
 					return nil, err
 				}
@@ -10196,13 +12015,444 @@ func (d *RegistryDispatcher) invokeObserve(args *oaRegistryObserveArguments) (pa
 	return
 }
 
+type RegistryV2 interface {
+	Declarations() (DeclarationListV2, error)
+	Declare(expectedRevision string, declaration DeclarationWithExtensions) (DeclarationChange, error)
+	Withdraw(expectedRevision, name string) (DeclarationChange, error)
+	Observe(cursor string, waitMs int64) (DeclarationObservationV2, error)
+}
+type RegistryV2Transport interface {
+	FrameExchanger
+}
+type RegistryV2Client struct{ transport RegistryV2Transport }
+
+func NewRegistryV2Client(t RegistryV2Transport) *RegistryV2Client {
+	return &RegistryV2Client{transport: t}
+}
+
+type RegistryV2Dispatcher struct{ Handler RegistryV2 }
+
+func (c *RegistryV2Client) Declarations() (result DeclarationListV2, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaRegistryV2DeclarationsArguments{}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/registry@2", Method: "Declarations", Arguments: Raw(encOARegistryV2DeclarationsArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaRegistryV2DeclarationsResult
+	decoded, err = r.decodeOARegistryV2DeclarationsResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
+func (c *RegistryV2Client) Declare(expectedRevision string, declaration DeclarationWithExtensions) (result DeclarationChange, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaRegistryV2DeclareArguments{ExpectedRevision: expectedRevision, Declaration: declaration}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/registry@2", Method: "Declare", Arguments: Raw(encOARegistryV2DeclareArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaRegistryV2DeclareResult
+	decoded, err = r.decodeOARegistryV2DeclareResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
+func (c *RegistryV2Client) Withdraw(expectedRevision, name string) (result DeclarationChange, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaRegistryV2WithdrawArguments{ExpectedRevision: expectedRevision, Name: name}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/registry@2", Method: "Withdraw", Arguments: Raw(encOARegistryV2WithdrawArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaRegistryV2WithdrawResult
+	decoded, err = r.decodeOARegistryV2WithdrawResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
+func (c *RegistryV2Client) Observe(cursor string, waitMs int64) (result DeclarationObservationV2, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaRegistryV2ObserveArguments{Cursor: cursor, WaitMs: waitMs}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/registry@2", Method: "Observe", Arguments: Raw(encOARegistryV2ObserveArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaRegistryV2ObserveResult
+	decoded, err = r.decodeOARegistryV2ObserveResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
+
+// DescribeService is this dispatcher's service as abstraction.facade/endpoint@1 Describe lists it:
+// ready unless its handler implements Ready() (bool, string) and reports otherwise.
+func (d *RegistryV2Dispatcher) DescribeService() (contract string, ready bool, why string) {
+	if h, ok := d.Handler.(interface{ Ready() (bool, string) }); ok {
+		if ready, why = h.Ready(); ready {
+			why = ""
+		}
+		return "abstraction.facade/registry@2", ready, why
+	}
+	return "abstraction.facade/registry@2", true, ""
+}
+
+// DescribeServiceMetadata returns optional handler display facts for Describe.
+// They grant no authority and do not change service admission.
+func (d *RegistryV2Dispatcher) DescribeServiceMetadata() (guarantees []string, capabilities map[string]string) {
+	if h, ok := d.Handler.(interface {
+		DescribeMetadata() ([]string, map[string]string)
+	}); ok {
+		return h.DescribeMetadata()
+	}
+	return nil, nil
+}
+
+// ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
+func (d *RegistryV2Dispatcher) ServiceContract() string { return "abstraction.facade/registry@2" }
+func (d *RegistryV2Dispatcher) WriteFrame(frame []byte) error {
+	v, err := servicePayload(frame)
+	if err != nil {
+		return err
+	}
+	if v.Service != "abstraction.facade/registry@2" {
+		return DispatchError("unknown_service")
+	}
+	switch v.Method {
+	case "Declarations":
+		return DispatchError("wrong_mode")
+	case "Declare":
+		return DispatchError("wrong_mode")
+	case "Withdraw":
+		return DispatchError("wrong_mode")
+	case "Observe":
+		return DispatchError("wrong_mode")
+	default:
+		return DispatchError("unknown_method")
+	}
+}
+func (d *RegistryV2Dispatcher) ExchangeFrame(frame []byte) ([]byte, error) {
+	v, err := servicePayload(frame)
+	if err != nil {
+		return nil, err
+	}
+	if v.Service == EndpointContract {
+		return DescribeEndpoint(frame, "", "", d)
+	}
+	if v.Service != "abstraction.facade/registry@2" {
+		return serviceReply(v, "", DispatchError("unknown_service"))
+	}
+	switch v.Method {
+	case "Declarations":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOARegistryV2DeclarationsArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeDeclarations(args)
+		return serviceReply(v, payload, err)
+	case "Declare":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOARegistryV2DeclareArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeDeclare(args)
+		return serviceReply(v, payload, err)
+	case "Withdraw":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOARegistryV2WithdrawArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeWithdraw(args)
+		return serviceReply(v, payload, err)
+	case "Observe":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOARegistryV2ObserveArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeObserve(args)
+		return serviceReply(v, payload, err)
+	default:
+		return serviceReply(v, "", DispatchError("unknown_method"))
+	}
+}
+func (d *RegistryV2Dispatcher) invokeDeclarations(args *oaRegistryV2DeclarationsArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result DeclarationListV2
+	result, err = d.Handler.Declarations()
+	if err != nil {
+		return
+	}
+	value := oaRegistryV2DeclarationsResult{Value: result}
+	payload = Raw(encOARegistryV2DeclarationsResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOARegistryV2DeclarationsResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+func (d *RegistryV2Dispatcher) invokeDeclare(args *oaRegistryV2DeclareArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result DeclarationChange
+	result, err = d.Handler.Declare(args.ExpectedRevision, args.Declaration)
+	if err != nil {
+		return
+	}
+	value := oaRegistryV2DeclareResult{Value: result}
+	payload = Raw(encOARegistryV2DeclareResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOARegistryV2DeclareResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+func (d *RegistryV2Dispatcher) invokeWithdraw(args *oaRegistryV2WithdrawArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result DeclarationChange
+	result, err = d.Handler.Withdraw(args.ExpectedRevision, args.Name)
+	if err != nil {
+		return
+	}
+	value := oaRegistryV2WithdrawResult{Value: result}
+	payload = Raw(encOARegistryV2WithdrawResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOARegistryV2WithdrawResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+func (d *RegistryV2Dispatcher) invokeObserve(args *oaRegistryV2ObserveArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result DeclarationObservationV2
+	result, err = d.Handler.Observe(args.Cursor, args.WaitMs)
+	if err != nil {
+		return
+	}
+	value := oaRegistryV2ObserveResult{Value: result}
+	payload = Raw(encOARegistryV2ObserveResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOARegistryV2ObserveResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+
 type Applications interface {
 	Register(descriptor ApplicationDescriptor) (ApplicationChange, error)
+	AskConfirmation(application string) (ApplicationChange, error)
 	Remove(application string) (ApplicationChange, error)
 	Announce(presence ApplicationPresence) (ApplicationChange, error)
 	Withdraw(application, instance string) (ApplicationChange, error)
 	Observe(cursor string, waitMs int64) (ApplicationPage, error)
 	Activate(application string) (ApplicationActivationResult, error)
+	ListStarts(cursor string, limit int64) (ApplicationStartPage, error)
 }
 type ApplicationsTransport interface {
 	FrameExchanger
@@ -10226,7 +12476,7 @@ func (c *ApplicationsClient) Register(descriptor ApplicationDescriptor) (result 
 		}
 	}()
 	args := oaApplicationsRegisterArguments{Descriptor: descriptor}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Register", Arguments: Raw(encOAApplicationsRegisterArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Register", Arguments: Raw(encOAApplicationsRegisterArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10257,6 +12507,48 @@ func (c *ApplicationsClient) Register(descriptor ApplicationDescriptor) (result 
 	result = decoded.Value
 	return
 }
+func (c *ApplicationsClient) AskConfirmation(application string) (result ApplicationChange, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaApplicationsAskConfirmationArguments{Application: application}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "AskConfirmation", Arguments: Raw(encOAApplicationsAskConfirmationArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaApplicationsAskConfirmationResult
+	decoded, err = r.decodeOAApplicationsAskConfirmationResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
 func (c *ApplicationsClient) Remove(application string) (result ApplicationChange, err error) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -10268,7 +12560,7 @@ func (c *ApplicationsClient) Remove(application string) (result ApplicationChang
 		}
 	}()
 	args := oaApplicationsRemoveArguments{Application: application}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Remove", Arguments: Raw(encOAApplicationsRemoveArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Remove", Arguments: Raw(encOAApplicationsRemoveArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10310,7 +12602,7 @@ func (c *ApplicationsClient) Announce(presence ApplicationPresence) (result Appl
 		}
 	}()
 	args := oaApplicationsAnnounceArguments{Presence: presence}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Announce", Arguments: Raw(encOAApplicationsAnnounceArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Announce", Arguments: Raw(encOAApplicationsAnnounceArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10352,7 +12644,7 @@ func (c *ApplicationsClient) Withdraw(application, instance string) (result Appl
 		}
 	}()
 	args := oaApplicationsWithdrawArguments{Application: application, Instance: instance}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Withdraw", Arguments: Raw(encOAApplicationsWithdrawArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Withdraw", Arguments: Raw(encOAApplicationsWithdrawArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10394,7 +12686,7 @@ func (c *ApplicationsClient) Observe(cursor string, waitMs int64) (result Applic
 		}
 	}()
 	args := oaApplicationsObserveArguments{Cursor: cursor, WaitMs: waitMs}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Observe", Arguments: Raw(encOAApplicationsObserveArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Observe", Arguments: Raw(encOAApplicationsObserveArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10436,7 +12728,7 @@ func (c *ApplicationsClient) Activate(application string) (result ApplicationAct
 		}
 	}()
 	args := oaApplicationsActivateArguments{Application: application}
-	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@1", Method: "Activate", Arguments: Raw(encOAApplicationsActivateArguments(nil, &args, 1))}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "Activate", Arguments: Raw(encOAApplicationsActivateArguments(nil, &args, 1))}
 	frame := encOAServiceFrame(nil, &v, 0)
 	if _, err = servicePayload(frame); err != nil {
 		return
@@ -10467,6 +12759,48 @@ func (c *ApplicationsClient) Activate(application string) (result ApplicationAct
 	result = decoded.Value
 	return
 }
+func (c *ApplicationsClient) ListStarts(cursor string, limit int64) (result ApplicationStartPage, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if e, ok := p.(*Refusal); ok {
+				err = e
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	args := oaApplicationsListStartsArguments{Cursor: cursor, Limit: limit}
+	v := oaServiceFrame{Version: 1, Service: "abstraction.facade/applications@2", Method: "ListStarts", Arguments: Raw(encOAApplicationsListStartsArguments(nil, &args, 1))}
+	frame := encOAServiceFrame(nil, &v, 0)
+	if _, err = servicePayload(frame); err != nil {
+		return
+	}
+	var response []byte
+	response, err = c.transport.ExchangeFrame(frame)
+	if err != nil {
+		return
+	}
+	var payload Raw
+	payload, err = serviceResponse(response, v.Service, v.Method)
+	if err != nil {
+		return
+	}
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	var decoded *oaApplicationsListStartsResult
+	decoded, err = r.decodeOAApplicationsListStartsResult()
+	if err != nil {
+		return
+	}
+	_ = decoded
+	r.ws()
+	if r.pos != len(r.buf) {
+		err = r.refuse("trailing_bytes")
+		return
+	}
+	result = decoded.Value
+	return
+}
 
 // DescribeService is this dispatcher's service as abstraction.facade/endpoint@1 Describe lists it:
 // ready unless its handler implements Ready() (bool, string) and reports otherwise.
@@ -10475,9 +12809,9 @@ func (d *ApplicationsDispatcher) DescribeService() (contract string, ready bool,
 		if ready, why = h.Ready(); ready {
 			why = ""
 		}
-		return "abstraction.facade/applications@1", ready, why
+		return "abstraction.facade/applications@2", ready, why
 	}
-	return "abstraction.facade/applications@1", true, ""
+	return "abstraction.facade/applications@2", true, ""
 }
 
 // DescribeServiceMetadata returns optional handler display facts for Describe.
@@ -10492,17 +12826,19 @@ func (d *ApplicationsDispatcher) DescribeServiceMetadata() (guarantees []string,
 }
 
 // ServiceContract is the wire name ServeEndpoint routes this dispatcher's frames by.
-func (d *ApplicationsDispatcher) ServiceContract() string { return "abstraction.facade/applications@1" }
+func (d *ApplicationsDispatcher) ServiceContract() string { return "abstraction.facade/applications@2" }
 func (d *ApplicationsDispatcher) WriteFrame(frame []byte) error {
 	v, err := servicePayload(frame)
 	if err != nil {
 		return err
 	}
-	if v.Service != "abstraction.facade/applications@1" {
+	if v.Service != "abstraction.facade/applications@2" {
 		return DispatchError("unknown_service")
 	}
 	switch v.Method {
 	case "Register":
+		return DispatchError("wrong_mode")
+	case "AskConfirmation":
 		return DispatchError("wrong_mode")
 	case "Remove":
 		return DispatchError("wrong_mode")
@@ -10513,6 +12849,8 @@ func (d *ApplicationsDispatcher) WriteFrame(frame []byte) error {
 	case "Observe":
 		return DispatchError("wrong_mode")
 	case "Activate":
+		return DispatchError("wrong_mode")
+	case "ListStarts":
 		return DispatchError("wrong_mode")
 	default:
 		return DispatchError("unknown_method")
@@ -10526,7 +12864,7 @@ func (d *ApplicationsDispatcher) ExchangeFrame(frame []byte) ([]byte, error) {
 	if v.Service == EndpointContract {
 		return DescribeEndpoint(frame, "", "", d)
 	}
-	if v.Service != "abstraction.facade/applications@1" {
+	if v.Service != "abstraction.facade/applications@2" {
 		return serviceReply(v, "", DispatchError("unknown_service"))
 	}
 	switch v.Method {
@@ -10542,6 +12880,19 @@ func (d *ApplicationsDispatcher) ExchangeFrame(frame []byte) ([]byte, error) {
 			return serviceReply(v, "", r.refuse("trailing_bytes"))
 		}
 		payload, err := d.invokeRegister(args)
+		return serviceReply(v, payload, err)
+	case "AskConfirmation":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOAApplicationsAskConfirmationArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeAskConfirmation(args)
 		return serviceReply(v, payload, err)
 	case "Remove":
 		r := &reader{buf: []byte(v.Arguments), depth: 1}
@@ -10608,6 +12959,19 @@ func (d *ApplicationsDispatcher) ExchangeFrame(frame []byte) ([]byte, error) {
 		}
 		payload, err := d.invokeActivate(args)
 		return serviceReply(v, payload, err)
+	case "ListStarts":
+		r := &reader{buf: []byte(v.Arguments), depth: 1}
+		r.ws()
+		args, err := r.decodeOAApplicationsListStartsArguments()
+		if err != nil {
+			return serviceReply(v, "", err)
+		}
+		r.ws()
+		if r.pos != len(r.buf) {
+			return serviceReply(v, "", r.refuse("trailing_bytes"))
+		}
+		payload, err := d.invokeListStarts(args)
+		return serviceReply(v, payload, err)
 	default:
 		return serviceReply(v, "", DispatchError("unknown_method"))
 	}
@@ -10633,6 +12997,38 @@ func (d *ApplicationsDispatcher) invokeRegister(args *oaApplicationsRegisterArgu
 	r := &reader{buf: []byte(payload), depth: 1}
 	r.ws()
 	if _, e := r.decodeOAApplicationsRegisterResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+func (d *ApplicationsDispatcher) invokeAskConfirmation(args *oaApplicationsAskConfirmationArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result ApplicationChange
+	result, err = d.Handler.AskConfirmation(args.Application)
+	if err != nil {
+		return
+	}
+	value := oaApplicationsAskConfirmationResult{Value: result}
+	payload = Raw(encOAApplicationsAskConfirmationResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOAApplicationsAskConfirmationResult(); e != nil {
 		payload = ""
 		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
 		return
@@ -10793,6 +13189,38 @@ func (d *ApplicationsDispatcher) invokeActivate(args *oaApplicationsActivateArgu
 	r := &reader{buf: []byte(payload), depth: 1}
 	r.ws()
 	if _, e := r.decodeOAApplicationsActivateResult(); e != nil {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+		return
+	}
+	r.ws()
+	if r.pos != len(r.buf) {
+		payload = ""
+		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+	}
+	return
+}
+func (d *ApplicationsDispatcher) invokeListStarts(args *oaApplicationsListStartsArguments) (payload Raw, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			payload = ""
+			if _, ok := p.(*Refusal); ok {
+				err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
+			} else {
+				err = &ServiceError{Code: ServiceErrorCodeHandlerError, Message: "handler failed"}
+			}
+		}
+	}()
+	var result ApplicationStartPage
+	result, err = d.Handler.ListStarts(args.Cursor, args.Limit)
+	if err != nil {
+		return
+	}
+	value := oaApplicationsListStartsResult{Value: result}
+	payload = Raw(encOAApplicationsListStartsResult(nil, &value, 1))
+	r := &reader{buf: []byte(payload), depth: 1}
+	r.ws()
+	if _, e := r.decodeOAApplicationsListStartsResult(); e != nil {
 		payload = ""
 		err = &ServiceError{Code: ServiceErrorCodeInvalidResult}
 		return

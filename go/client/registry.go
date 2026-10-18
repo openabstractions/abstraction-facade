@@ -10,12 +10,14 @@ import (
 
 // RegistryContract is the runtime's provider registry profile.
 const RegistryContract = "abstraction.facade/registry@1"
+const RegistryV2Contract = "abstraction.facade/registry@2"
 
 // Registry calls abstraction.facade/registry@1: the provider declarations a
 // person placed in the runtime and the runtime's reading of each. It is an
 // operator tool; applications resolve and never read it. Each call is a rights
 // decision the runtime makes for this program (provider.manage).
 type Registry struct{ transport listen.FrameClient }
+type RegistryV2 struct{ transport listen.FrameClient }
 
 // ResolveRegistry binds the selected runtime's provider registry.
 func (m *Machine) ResolveRegistry(ctx context.Context, need Requirements) (*Registry, error) {
@@ -25,6 +27,55 @@ func (m *Machine) ResolveRegistry(ctx context.Context, need Requirements) (*Regi
 	}
 	// Observe waits up to 30 seconds inside one call.
 	return &Registry{transport: endpoint.WithDefaults(35*time.Second, 1<<20)}, nil
+}
+
+// ResolveRegistryV2 binds the registry profile that carries per-profile
+// supported extension inventories.
+func (m *Machine) ResolveRegistryV2(ctx context.Context, need Requirements) (*RegistryV2, error) {
+	endpoint, err := m.resolve(ctx, "abstraction.facade", RegistryV2Contract, need)
+	if err != nil {
+		return nil, err
+	}
+	return &RegistryV2{transport: endpoint.WithDefaults(35*time.Second, 1<<20)}, nil
+}
+
+func (r *RegistryV2) client(ctx context.Context) (*wire.RegistryV2Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return wire.NewRegistryV2Client(r.transport.WithContext(ctx)), nil
+}
+
+func (r *RegistryV2) Declarations(ctx context.Context) (wire.DeclarationListV2, error) {
+	c, err := r.client(ctx)
+	if err != nil {
+		return wire.DeclarationListV2{}, err
+	}
+	return c.Declarations()
+}
+
+func (r *RegistryV2) Declare(ctx context.Context, expectedRevision string, declaration wire.DeclarationWithExtensions) (wire.DeclarationChange, error) {
+	c, err := r.client(ctx)
+	if err != nil {
+		return wire.DeclarationChange{}, err
+	}
+	return c.Declare(expectedRevision, declaration)
+}
+
+func (r *RegistryV2) Withdraw(ctx context.Context, expectedRevision, name string) (wire.DeclarationChange, error) {
+	c, err := r.client(ctx)
+	if err != nil {
+		return wire.DeclarationChange{}, err
+	}
+	return c.Withdraw(expectedRevision, name)
+}
+
+func (r *RegistryV2) Observe(ctx context.Context, cursor string, wait time.Duration) (wire.DeclarationObservationV2, error) {
+	c, err := r.client(ctx)
+	if err != nil {
+		return wire.DeclarationObservationV2{}, err
+	}
+	return c.Observe(cursor, wait.Milliseconds())
 }
 
 func (r *Registry) client(ctx context.Context) (*wire.RegistryClient, error) {

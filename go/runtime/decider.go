@@ -35,6 +35,22 @@ func absentDecider(decisions Decider) bool {
 	return v.Kind() == reflect.Pointer && v.IsNil()
 }
 
+// QuietDecider is a Decider that can also decide without admitting a
+// first-use question. A host whose Require admits questions implements it,
+// so a decision consulted only to find a deny asks the person nothing.
+type QuietDecider interface {
+	RequireQuietly(ctx context.Context, peer *identity.Peer, action, resource string) error
+}
+
+// quietDecision is requireDecision through RequireQuietly where the decider
+// has it, and through Require otherwise.
+func quietDecision(ctx context.Context, decisions Decider, peer *identity.Peer, action, resource string, unavailable error) error {
+	if quiet, ok := decisions.(QuietDecider); ok && !absentDecider(decisions) && action != "" {
+		return classifyDecision(quiet.RequireQuietly(ctx, peer, action, resource), unavailable)
+	}
+	return requireDecision(ctx, decisions, peer, action, resource, unavailable)
+}
+
 // requireDecision returns nil for a permit, the decision error for an evaluated
 // refusal (denied, not_granted, forbidden), and unavailable joined with the
 // cause for every decision that could not be obtained, including an absent
@@ -43,7 +59,12 @@ func requireDecision(ctx context.Context, decisions Decider, peer *identity.Peer
 	if absentDecider(decisions) || action == "" {
 		return unavailable
 	}
-	err := decisions.Require(ctx, peer, action, resource)
+	return classifyDecision(decisions.Require(ctx, peer, action, resource), unavailable)
+}
+
+// classifyDecision keeps an evaluated refusal as it is and joins every other
+// error with unavailable.
+func classifyDecision(err error, unavailable error) error {
 	if err == nil {
 		return nil
 	}

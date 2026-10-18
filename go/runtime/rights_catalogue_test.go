@@ -159,3 +159,9 @@ func TestResolvedRightsCatalogueRegistrationExpiryAndProvenance(t *testing.T) {
 		t.Fatal("retired action decided", opened, err)
 	}
 }
+
+func TestResourceRightsActionsIncludesLogSourceRead(t *testing.T) {
+	if !slices.Contains(ResourceRightsActions(), LogSourceAction) {
+		t.Fatalf("resource rights catalogue omits log source action %q", LogSourceAction)
+	}
+}

@@ -7,13 +7,33 @@ import (
 	wire "github.com/openabstractions/abstraction-facade/go/abstraction/facade"
 )
 
-type discoveryInference struct{ transcription, speech, image bool }
+type discoveryInference struct{ transcription, speech, image, chatV2, selection bool }
 
-func (d *discoveryInference) Serve(context.Context) error  { return nil }
-func (d *discoveryInference) Close() error                 { return nil }
-func (d *discoveryInference) TranscriptionAvailable() bool { return d.transcription }
-func (d *discoveryInference) SpeechAvailable() bool        { return d.speech }
-func (d *discoveryInference) ImageAvailable() bool         { return d.image }
+func (d *discoveryInference) Serve(context.Context) error        { return nil }
+func (d *discoveryInference) Close() error                       { return nil }
+func (d *discoveryInference) TranscriptionAvailable() bool       { return d.transcription }
+func (d *discoveryInference) SpeechAvailable() bool              { return d.speech }
+func (d *discoveryInference) ImageAvailable() bool               { return d.image }
+func (d *discoveryInference) ChatV2Available() bool              { return d.chatV2 }
+func (d *discoveryInference) SelectionOperatorV2Available() bool { return d.selection }
+
+func TestInferenceSelectionDiscoveryRequiresReadyProvider(t *testing.T) {
+	for _, ready := range []bool{false, true} {
+		h := &Host{}
+		h.addInferenceCandidate(Options{Inference: &discoveryInference{chatV2: ready, selection: ready}, InferenceEndpoint: "inference-endpoint"})
+		foundChat, foundSelection := false, false
+		for _, candidate := range h.candidates {
+			foundChat = foundChat || candidate.Reference.Contract == InferenceChatV2Contract
+			foundSelection = foundSelection || candidate.Reference.Contract == InferenceSelectionOperatorV2Contract
+			if candidate.Reference.Contract == "abstraction.inference/selection-operator@1" {
+				t.Fatal("retired unpublished selection-operator@1 remains discoverable")
+			}
+		}
+		if foundChat != ready || foundSelection != ready {
+			t.Fatalf("ready %v, chat@2 %v, selection-operator@2 %v", ready, foundChat, foundSelection)
+		}
+	}
+}
 
 func TestTranscriptionDiscoveryRequiresReadyProvider(t *testing.T) {
 	for _, ready := range []bool{false, true} {

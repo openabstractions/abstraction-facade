@@ -329,6 +329,39 @@ func (c *JobsClient) validateRead(result api.ResultRead, id api.RequestIdentity,
 	return c.validateResult(api.AcceptanceResult{Outcome: api.AcceptanceOutcomeAccepted, Receipt: &chunk.Receipt}, id, c.required)
 }
 
+// LinkResult asks the job service to hard-link a completed result to
+// destination, an absolute path on this machine that does not exist yet
+// (JOB-A17). The service never copies: another volume, a file system without
+// hard links or a remote binding is a typed refusal, and the caller then
+// reads with ReadResult or CopyResult. A linked reply carries the original
+// receipt and the result's size.
+func (c *JobsClient) LinkResult(ctx context.Context, id api.RequestIdentity, destination string) (api.ResultLink, error) {
+	if err := jobIdentity(id); err != nil {
+		return api.ResultLink{}, err
+	}
+	if destination == "" || len(destination) > 4096 {
+		return api.ResultLink{}, jobError("invalid_request", "destination must be 1..4096 bytes")
+	}
+	result, err := api.NewOperationControlClient(jobCall{ctx, c.transport}).LinkResult(id, destination)
+	if err != nil {
+		return api.ResultLink{}, err
+	}
+	invalid := func() error { return jobError("invalid_result", "inconsistent result link") }
+	if result.Outcome != api.LinkOutcomeLinked {
+		if !result.Outcome.Known() || result.Receipt != nil || result.Size != 0 {
+			return api.ResultLink{}, invalid()
+		}
+		return result, nil
+	}
+	if result.Receipt == nil || result.Size < 0 {
+		return api.ResultLink{}, invalid()
+	}
+	if err := c.validateResult(api.AcceptanceResult{Outcome: api.AcceptanceOutcomeAccepted, Receipt: result.Receipt}, id, c.required); err != nil {
+		return api.ResultLink{}, err
+	}
+	return result, nil
+}
+
 // ResolveJobOperations requires observation/result support during new discovery.
 // Already accepted work remains bound to its retained endpoint and owner.
 func (m *Machine) ResolveJobOperations(ctx context.Context, need Requirements) (*JobsClient, error) {

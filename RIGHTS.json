@@ -1,0 +1,168 @@
+{
+  "format": "openabstractions-rights@1",
+  "owner": "abstraction.facade",
+  "generated": "Do not edit. Run rights-catalogue --write from the existing compiled catalogue.",
+  "source": "github.com/openabstractions/abstraction-facade/go/grants",
+  "availability": "Compiled catalogue reference: served and selector support use the named receiving-service context. Connected-runtime discovery supplies current availability. Facade Applications is experimental. Definitions grant no access.",
+  "compiled_receivers": {
+    "credentials": true,
+    "application_logs": true
+  },
+  "definitions": [
+    {
+      "definition": {
+        "action": "abstraction.facade/application.activate",
+        "owner_contract": "abstraction.facade/applications@2",
+        "operations": [
+          "abstraction.facade/applications@2#Activate"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/applications@2"
+        ],
+        "disclosure": "Bring up registered app and report readiness.",
+        "lifecycle": "One registered app; activation command comes from trusted descriptor.",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/application.activate",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "One registered app; activation command comes from trusted descriptor.",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    },
+    {
+      "definition": {
+        "action": "abstraction.facade/application.announce",
+        "owner_contract": "abstraction.facade/applications@2",
+        "operations": [
+          "abstraction.facade/applications@2#Announce",
+          "abstraction.facade/applications@2#Withdraw"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/applications@2"
+        ],
+        "disclosure": "Publish/withdraw app presence.",
+        "lifecycle": "One registered application, own executable/session/presence.",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/application.announce",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "One registered application, own executable/session/presence.",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    },
+    {
+      "definition": {
+        "action": "abstraction.facade/application.manage",
+        "owner_contract": "abstraction.facade/applications@2",
+        "operations": [
+          "abstraction.facade/applications@2#Register",
+          "abstraction.facade/applications@2#Remove"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/applications@2"
+        ],
+        "disclosure": "Register/remove application activation descriptor.",
+        "lifecycle": "Whole experimental applications directory.",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/application.manage",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "Whole experimental applications directory.",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    },
+    {
+      "definition": {
+        "action": "abstraction.facade/application.read",
+        "owner_contract": "abstraction.facade/applications@2",
+        "operations": [
+          "abstraction.facade/applications@2#Observe"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/applications@2"
+        ],
+        "disclosure": "Read filtered directory/presence.",
+        "lifecycle": "One app per current filtering check; account directory response includes permitted apps.",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/application.read",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "One app per current filtering check; account directory response includes permitted apps.",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    },
+    {
+      "definition": {
+        "action": "abstraction.facade/application.register_self",
+        "owner_contract": "abstraction.facade/applications@2",
+        "operations": [
+          "abstraction.facade/applications@2#Register"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/applications@2"
+        ],
+        "disclosure": "Register the caller's own application descriptor; the registered program receives no read, announce or activation permission from it.",
+        "lifecycle": "One account; the caller's own program only. The account-wide register default permits it unless the program's own rule or the switch refuses (rights RIGHTS-R22).",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/application.register_self",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "One account; the caller's own program only. The account-wide register default permits it unless the program's own rule or the switch refuses (rights RIGHTS-R22).",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    },
+    {
+      "definition": {
+        "action": "abstraction.facade/provider.manage",
+        "owner_contract": "abstraction.facade/registry@1",
+        "operations": [
+          "abstraction.facade/registry@1#Declarations",
+          "abstraction.facade/registry@1#Declare",
+          "abstraction.facade/registry@1#Withdraw",
+          "abstraction.facade/registry@1#Observe",
+          "abstraction.facade/registry@2#Declarations",
+          "abstraction.facade/registry@2#Declare",
+          "abstraction.facade/registry@2#Withdraw",
+          "abstraction.facade/registry@2#Observe"
+        ],
+        "resource_profile": "abstraction.rights/legacy-exact-string@1",
+        "resource_type": "string (legacy exact resource)",
+        "enforced_by": [
+          "abstraction.facade/registry@1",
+          "abstraction.facade/registry@2"
+        ],
+        "disclosure": "List/edit/withdraw provider declaration; trusted add can assign provider hold/inventory.provide and operator complete rights.",
+        "lifecycle": "All provider/program declarations in receiving account, including future providers.",
+        "first_use": "none",
+        "served": true
+      },
+      "label": "abstraction.facade/provider.manage",
+      "supported_selectors": [],
+      "first_use_selectors": [],
+      "collection": "All provider/program declarations in receiving account, including future providers.",
+      "all_effect": "",
+      "request_type": "string (legacy exact resource)"
+    }
+  ],
+  "bundles": []
+}

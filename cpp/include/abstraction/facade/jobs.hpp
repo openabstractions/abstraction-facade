@@ -139,6 +139,25 @@ public:
         validate_result(accepted, identity, required_);
         return result;
     }
+    // JOB-A17: the bound job service owns linking a completed result. Typed
+    // refusals leave the caller free to read or copy through this same binding.
+    job_api::ResultLink link_result(const job_api::RequestIdentity& identity, const std::string& destination) override {
+        validate_identity(identity);
+        if (destination.empty() || destination.size() > 4096)
+            throw job_api::ServiceError("invalid_request", "destination must be 1..4096 bytes");
+        job_api::OperationControlClient<ipc::FrameTransport> client(transport_);
+        auto result = client.link_result(identity, destination);
+        if (result.outcome != job_api::LinkOutcome::Linked) {
+            if (wire_name(result.outcome).empty() || result.receipt || result.size != 0)
+                throw job_api::ServiceError("invalid_result", "inconsistent result link");
+            return result;
+        }
+        if (!result.receipt || result.size < 0)
+            throw job_api::ServiceError("invalid_result", "inconsistent result link");
+        job_api::AcceptanceResult accepted; accepted.outcome = job_api::AcceptanceOutcome::Accepted; accepted.receipt = result.receipt;
+        validate_result(accepted, identity, required_);
+        return result;
+    }
     struct ResultCopy {
         std::int64_t confirmed = 0;
         std::exception_ptr error;

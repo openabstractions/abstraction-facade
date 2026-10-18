@@ -1,5 +1,7 @@
 # Outside job consumer
 
+*For maintainers running the C++ job tests.*
+
 The existing no-argument checks and `--runtime ENDPOINT --jobs KEY` admission
 mode remain available. Configure with `-DOA_TEST_DOWNLOAD_REQUEST=ON` to add
 `--execute ENDPOINT HTTP_URL KEY`. This mode uses generated request vocabulary,

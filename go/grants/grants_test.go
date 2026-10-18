@@ -44,7 +44,7 @@ func TestBundlesNameExactRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Rule{{"abstraction.job/acceptance.submit", "abstraction.job/acceptance@1"}, {"abstraction.model/lookup", "hf"}, {"abstraction.credentials/apply", "credential:hf"}}
+	want := []Rule{{"abstraction.job/acceptance.submit", "job:download"}, {"abstraction.model/lookup", "hf"}, {"abstraction.credentials/apply", "credential:hf"}}
 	if !reflect.DeepEqual(downloads, want) {
 		t.Fatalf("downloads %v, want %v", downloads, want)
 	}
@@ -52,9 +52,22 @@ func TestBundlesNameExactRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = []Rule{{"abstraction.router/inventory.read", "abstraction.router/inventory"}, {"abstraction.router/route", "abstraction.router/routes"}, {"abstraction.inference/complete", "host:openrouter"}, {"abstraction.credentials/apply", "credential:openrouter"}}
+	want = []Rule{{"abstraction.router/inventory.read", "abstraction.router/inventory"}, {"abstraction.router/route", "abstraction.router/routes"},
+		{"abstraction.job/acceptance.submit", "job:inference"}, {"abstraction.inference/complete", "host:openrouter"}, {"abstraction.credentials/apply", "credential:openrouter"}}
 	if !reflect.DeepEqual(inference, want) {
 		t.Fatalf("inference %v, want %v", inference, want)
+	}
+	// An inference bundle naming output profiles adds each one's write and
+	// read, and nothing else: no input profile, no other output.
+	video, err := Rules(Inference, For{Hosts: []string{"modelhost"}, Outputs: []string{"video", "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []Rule{{"abstraction.router/inventory.read", "abstraction.router/inventory"}, {"abstraction.router/route", "abstraction.router/routes"},
+		{"abstraction.job/acceptance.submit", "job:inference"}, {"abstraction.inference/complete", "host:modelhost"},
+		{ContentWriteAction, "output:video"}, {ContentReadAction, "output:video"}, {ContentWriteAction, "output:image"}, {ContentReadAction, "output:image"}}
+	if !reflect.DeepEqual(video, want) {
+		t.Fatalf("inference with outputs %v, want %v", video, want)
 	}
 	for _, bad := range []struct {
 		bundle string
@@ -62,6 +75,8 @@ func TestBundlesNameExactRules(t *testing.T) {
 	}{
 		{"everything", For{}}, {Inference, For{}}, {Inference, For{Hosts: []string{"a"}, Registries: []string{"hf"}}},
 		{Downloads, For{Hosts: []string{"a"}}}, {Downloads, For{Registries: []string{"h f"}}}, {Downloads, For{Credentials: []string{""}}},
+		{Inference, For{Hosts: []string{"a"}, Outputs: []string{"live"}}}, {Inference, For{Hosts: []string{"a"}, Outputs: []string{"input:image"}}},
+		{Downloads, For{Outputs: []string{"image"}}},
 	} {
 		if _, err := Rules(bad.bundle, bad.f); !errors.Is(err, ErrBundle) {
 			t.Fatalf("%s %+v: %v", bad.bundle, bad.f, err)
@@ -104,5 +119,27 @@ func TestWriteStopsAtTheFirstRuleThatDoesNotApply(t *testing.T) {
 	result, err = Write(ctx, lost, "rev-0", subject, rules, 0, "allow downloads")
 	if err == nil || result.Outcome != "uncertain" || len(result.Landed) != 2 || *result.Stopped != rules[2] {
 		t.Fatalf("lost reply %+v %v", result, err)
+	}
+}
+
+// INF-S7: the inference bundle names speech output as it names image and
+// video: content.write and content.read on output:speech, a pair whose read
+// reaches only the program's own results. Another word is no output profile.
+func TestTheInferenceBundleNamesSpeechOutput(t *testing.T) {
+	speech, err := Rules(Inference, For{Hosts: []string{"modelhost"}, Outputs: []string{"speech"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Rule{{"abstraction.router/inventory.read", "abstraction.router/inventory"}, {"abstraction.router/route", "abstraction.router/routes"},
+		{"abstraction.job/acceptance.submit", "job:inference"}, {"abstraction.inference/complete", "host:modelhost"},
+		{ContentWriteAction, "output:speech"}, {ContentReadAction, "output:speech"}}
+	if !reflect.DeepEqual(speech, want) {
+		t.Fatalf("inference with speech output %v, want %v", speech, want)
+	}
+	if !PairedOutput(ContentWriteAction, "output:speech") {
+		t.Fatal("output:speech is not an output pair")
+	}
+	if _, err := Rules(Inference, For{Hosts: []string{"modelhost"}, Outputs: []string{"live"}}); !errors.Is(err, ErrBundle) {
+		t.Fatalf("live output %v", err)
 	}
 }

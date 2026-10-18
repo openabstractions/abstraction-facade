@@ -10,8 +10,9 @@ import (
 
 // RegistryContract is the provider registry profile a registry service publishes.
 const RegistryContract = "abstraction.facade/registry@1"
+const RegistryV2Contract = "abstraction.facade/registry@2"
 
-// RegistryService is a separately composed abstraction.facade/registry@1 host
+// RegistryService is a separately composed registry@1 and registry@2 host
 // over the runtime's provider declarations, already listening on
 // Options.RegistryEndpoint. The runtime serves it, publishes the profile and
 // closes it with the runtime. Its rights action goes in Options.RightsActions.
@@ -34,8 +35,10 @@ func (h *Host) addRegistryCandidate(options Options) {
 	}
 	h.registry = options.Registry
 	h.registryIndex = len(h.candidates)
-	h.candidates = append(h.candidates, resolution.Candidate{Ready: true, Reference: wire.ServiceReference{
-		Provider: "openabstractions.user-runtime", Capability: "abstraction.facade", Contract: RegistryContract,
-		Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RegistryEndpoint, Guarantees: []string{},
-	}})
+	for _, contract := range []string{RegistryContract, RegistryV2Contract} {
+		h.candidates = append(h.candidates, resolution.Candidate{Ready: true, Reference: wire.ServiceReference{
+			Provider: "openabstractions.user-runtime", Capability: "abstraction.facade", Contract: contract,
+			Scope: wire.ScopeLocal, Transport: resolution.LocalTransport, Endpoint: options.RegistryEndpoint, Guarantees: []string{},
+		}})
+	}
 }

@@ -733,6 +733,24 @@ function writeDeclarationHost(out, v, depth) {
   out.byte(0x7d);
 }
 
+function writeDeclarationExtension(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "profile");
+  out.ascii(": ");
+  esc(out, v.profile);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "key");
+  out.ascii(": ");
+  esc(out, v.key);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
 function writeDeclaration(out, v, depth) {
     if (typeof v.transport !== "string") throw new Refusal("wrong_type",0);
     if (v.transport !== "oa-native@1" && v.transport !== "oa-remote@1" && v.transport !== "http@1") { throw new Refusal("bad_enum",0); }
@@ -831,6 +849,26 @@ function writeDeclaration(out, v, depth) {
     esc(out, "host");
     out.ascii(": ");
     writeDeclarationHost(out, v.host, depth + 1);
+  }
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeDeclarationWithExtensions(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "declaration");
+  out.ascii(": ");
+  writeDeclaration(out, v.declaration, depth + 1);
+  if (v.supportedExtensions.length !== 0) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "supported_extensions");
+    out.ascii(": ");
+    writeList(out, v.supportedExtensions, depth + 1, writeDeclarationExtension);
   }
   out.byte(0x0a);
   pad(out, depth);
@@ -1006,6 +1044,78 @@ function writeDeclarationObservation(out, v, depth) {
   esc(out, "declarations");
   out.ascii(": ");
   writeList(out, v.declarations, depth + 1, writeDeclarationState);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeDeclarationStateV2(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "state");
+  out.ascii(": ");
+  writeDeclarationState(out, v.state, depth + 1);
+  if (v.supportedExtensions.length !== 0) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "supported_extensions");
+    out.ascii(": ");
+    writeList(out, v.supportedExtensions, depth + 1, writeDeclarationExtension);
+  }
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeDeclarationListV2(out, v, depth) {
+    if (typeof v.outcome !== "string") throw new Refusal("wrong_type",0);
+    if (v.outcome !== "page" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw new Refusal("bad_enum",0); }
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "outcome");
+  out.ascii(": ");
+  esc(out, v.outcome);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "revision");
+  out.ascii(": ");
+  esc(out, v.revision);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "declarations");
+  out.ascii(": ");
+  writeList(out, v.declarations, depth + 1, writeDeclarationStateV2);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeDeclarationObservationV2(out, v, depth) {
+    if (typeof v.outcome !== "string") throw new Refusal("wrong_type",0);
+    if (v.outcome !== "page" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw new Refusal("bad_enum",0); }
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "outcome");
+  out.ascii(": ");
+  esc(out, v.outcome);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "cursor");
+  out.ascii(": ");
+  esc(out, v.cursor);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "declarations");
+  out.ascii(": ");
+  writeList(out, v.declarations, depth + 1, writeDeclarationStateV2);
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -1208,6 +1318,14 @@ function writeApplicationEntry(out, v, depth) {
   esc(out, "scope");
   out.ascii(": ");
   esc(out, v.scope);
+  if (v.selfRegistered) {
+    out.byte(0x2c);
+    out.byte(0x0a);
+    pad(out, depth + 1);
+    esc(out, "self_registered");
+    out.ascii(": ");
+    out.ascii(v.selfRegistered ? "true" : "false");
+  }
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -1297,6 +1415,80 @@ function writeApplicationActivationResult(out, v, depth) {
   out.byte(0x7d);
 }
 
+function writeApplicationStart(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "application");
+  out.ascii(": ");
+  esc(out, v.application);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "program");
+  out.ascii(": ");
+  esc(out, v.program);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "title");
+  out.ascii(": ");
+  esc(out, v.title);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "started_unix_ms");
+  out.ascii(": ");
+  num(out, v.startedUnixMs);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "launched");
+  out.ascii(": ");
+  out.ascii(v.launched ? "true" : "false");
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeApplicationStartPage(out, v, depth) {
+    if (typeof v.outcome !== "string") throw new Refusal("wrong_type",0);
+    if (v.outcome !== "applied" && v.outcome !== "page" && v.outcome !== "unknown" && v.outcome !== "stale" && v.outcome !== "conflict" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw new Refusal("bad_enum",0); }
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "outcome");
+  out.ascii(": ");
+  esc(out, v.outcome);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "starts");
+  out.ascii(": ");
+  writeList(out, v.starts, depth + 1, writeApplicationStart);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "cursor");
+  out.ascii(": ");
+  esc(out, v.cursor);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "complete");
+  out.ascii(": ");
+  out.ascii(v.complete ? "true" : "false");
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "complete_since_unix_ms");
+  out.ascii(": ");
+  num(out, v.completeSinceUnixMs);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
 function writeOAResolverResolveArguments(out, v, depth) {
   out.byte(0x7b);
   out.byte(0x0a);
@@ -1378,6 +1570,65 @@ function writeOARegistryObserveArguments(out, v, depth) {
   out.byte(0x7d);
 }
 
+function writeOARegistryV2DeclarationsArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2DeclareArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "expected_revision");
+  out.ascii(": ");
+  esc(out, v.expectedRevision);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "declaration");
+  out.ascii(": ");
+  writeDeclarationWithExtensions(out, v.declaration, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2WithdrawArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "expected_revision");
+  out.ascii(": ");
+  esc(out, v.expectedRevision);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "name");
+  out.ascii(": ");
+  esc(out, v.name);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2ObserveArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "cursor");
+  out.ascii(": ");
+  esc(out, v.cursor);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "wait_ms");
+  out.ascii(": ");
+  num(out, v.waitMs);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
 function writeOAApplicationsRegisterArguments(out, v, depth) {
   out.byte(0x7b);
   out.byte(0x0a);
@@ -1385,6 +1636,18 @@ function writeOAApplicationsRegisterArguments(out, v, depth) {
   esc(out, "descriptor");
   out.ascii(": ");
   writeApplicationDescriptor(out, v.descriptor, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOAApplicationsAskConfirmationArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "application");
+  out.ascii(": ");
+  esc(out, v.application);
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -1457,6 +1720,24 @@ function writeOAApplicationsActivateArguments(out, v, depth) {
   esc(out, "application");
   out.ascii(": ");
   esc(out, v.application);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOAApplicationsListStartsArguments(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "cursor");
+  out.ascii(": ");
+  esc(out, v.cursor);
+  out.byte(0x2c);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "limit");
+  out.ascii(": ");
+  num(out, v.limit);
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -1630,7 +1911,67 @@ function writeOARegistryObserveResult(out, v, depth) {
   out.byte(0x7d);
 }
 
+function writeOARegistryV2DeclarationsResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeDeclarationListV2(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2DeclareResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeDeclarationChange(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2WithdrawResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeDeclarationChange(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOARegistryV2ObserveResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeDeclarationObservationV2(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
 function writeOAApplicationsRegisterResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeApplicationChange(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOAApplicationsAskConfirmationResult(out, v, depth) {
   out.byte(0x7b);
   out.byte(0x0a);
   pad(out, depth + 1);
@@ -1697,6 +2038,18 @@ function writeOAApplicationsActivateResult(out, v, depth) {
   esc(out, "value");
   out.ascii(": ");
   writeApplicationActivationResult(out, v.value, depth + 1);
+  out.byte(0x0a);
+  pad(out, depth);
+  out.byte(0x7d);
+}
+
+function writeOAApplicationsListStartsResult(out, v, depth) {
+  out.byte(0x7b);
+  out.byte(0x0a);
+  pad(out, depth + 1);
+  esc(out, "value");
+  out.ascii(": ");
+  writeApplicationStartPage(out, v.value, depth + 1);
   out.byte(0x0a);
   pad(out, depth);
   out.byte(0x7d);
@@ -2164,6 +2517,15 @@ export function newDeclarationHost() {
   return { base: "", kind: "", hosted: false, credential: "", ceiling: null };
 }
 
+// One required inference extension key a provider or remote runtime asserts it
+// can examine for a declared profile. This operator-managed inventory lets the
+// selecting runtime refuse unknown required keys before activating a provider;
+// the selected service still validates values and model-specific support before
+// accepting work.
+export function newDeclarationExtension() {
+  return { profile: "", key: "" };
+}
+
 // One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
 // role names what it is, and each role validates its own fields (FAC-R6). A
 // provider declares program, the absolute executable path the runtime launches
@@ -2180,11 +2542,23 @@ export function newDeclarationHost() {
 // of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
 // profile:<name> is what a host or a remote serves. models is the 0..64
 // distinct model names a native inference provider is trusted to serve, each
-// 1..256 UTF-8 bytes without controls. on_demand launches program as a
-// supervised child when a resolution first needs it; attach reads a provider
-// something else started.
+// 1..256 UTF-8 bytes without controls; an entry <profile>:<model> whose profile
+// the declaration serves (a listed profile whose contract it declares, or chat
+// for a chat-only declaration listing none) serves model for that profile
+// alone, any other entry serves every served profile, and a model named chat:x
+// is written chat:chat:x (abstraction.router ROUTE-D9). on_demand launches
+// program as a supervised child when a resolution first needs it; attach reads
+// a provider something else started. Extension inventory lives in registry@2
+// and is omitted from this strict registry@1 projection.
 export function newDeclaration() {
   return { name: "", program: "", arguments: [], endpoint: "", transport: "", contracts: [], guarantees: [], resources: [], activation: "", remote: null, models: [], role: "", host: null };
+}
+
+// One atomic registry@2 edit. The extension inventory is validated against the
+// declaration's served inference profiles and stored with that declaration
+// generation. An empty inventory asserts no required extension support.
+export function newDeclarationWithExtensions() {
+  return { declaration: newDeclaration(), supportedExtensions: [] };
 }
 
 // The router's latest reading of a host declaration: whether its last survey
@@ -2241,6 +2615,24 @@ export function newDeclarationChange() {
 // wait_ms ends. invalid means wait_ms is outside 0..30000. Refusals carry an
 // empty cursor and no declarations.
 export function newDeclarationObservation() {
+  return { outcome: "", cursor: "", declarations: [] };
+}
+
+// The registry@1 state and the extension inventory from the same declaration
+// snapshot.
+export function newDeclarationStateV2() {
+  return { state: newDeclarationState(), supportedExtensions: [] };
+}
+
+// The registry@2 declarations and their edit revision. Refusals carry an empty
+// revision and no declarations.
+export function newDeclarationListV2() {
+  return { outcome: "", revision: "", declarations: [] };
+}
+
+// The registry@2 declarations and readings from one snapshot. The cursor
+// includes extension inventory changes.
+export function newDeclarationObservationV2() {
   return { outcome: "", cursor: "", declarations: [] };
 }
 
@@ -2301,9 +2693,13 @@ export function newApplicationInstance() {
 // One installed application's descriptor with its currently leased instances.
 // scope records directory provenance; this local profile supplies local and
 // never imports remote announcements. An empty instance list makes no claim
-// about whether an unregistered process is running.
+// about whether an unregistered process is running. self_registered is present
+// and true while the entry was registered by its own program under the
+// account-wide registration default and the person has not answered Keep to the
+// runtime's question about it (AskConfirmation). Only such entries carry the
+// field.
 export function newApplicationEntry() {
-  return { descriptor: newApplicationDescriptor(), instances: [], scope: "" };
+  return { descriptor: newApplicationDescriptor(), instances: [], scope: "", selfRegistered: false };
 }
 
 // applied confirms the change; an announcement returns its opaque instance.
@@ -2335,6 +2731,28 @@ export function newApplicationActivationResult() {
   return { outcome: "", instance: "", started: false, reason: "" };
 }
 
+// One time an application became present in this runtime: the first announced
+// instance of a registered application in a local session where none of its
+// instances was live. application, program and title are the descriptor's at
+// that time. launched is true when this runtime's own activation attempt for
+// the application in that session was waiting for it; false means the
+// application announced itself. It records a fresh announcement, not process
+// lineage, and a runtime restart makes every running application announce
+// again.
+export function newApplicationStart() {
+  return { application: "", program: "", title: "", startedUnixMs: 0n, launched: false };
+}
+
+// page carries at most the requested 1..64 starts, newest first. complete means
+// the log was exhausted; otherwise cursor continues it. complete_since_unix_ms
+// is zero while every retained start is listed; otherwise starts at or before
+// it may have been evicted. stale means the cursor's log changed or belongs to
+// another runtime: restart from an empty cursor. Other outcomes carry no starts
+// or cursor.
+export function newApplicationStartPage() {
+  return { outcome: "", starts: [], cursor: "", complete: false, completeSinceUnixMs: 0n };
+}
+
 function newOAResolverResolveArguments() {
   return { request: newResolveRequest() };
 }
@@ -2363,8 +2781,28 @@ function newOARegistryObserveArguments() {
   return { cursor: "", waitMs: 0n };
 }
 
+function newOARegistryV2DeclarationsArguments() {
+  return { };
+}
+
+function newOARegistryV2DeclareArguments() {
+  return { expectedRevision: "", declaration: newDeclarationWithExtensions() };
+}
+
+function newOARegistryV2WithdrawArguments() {
+  return { expectedRevision: "", name: "" };
+}
+
+function newOARegistryV2ObserveArguments() {
+  return { cursor: "", waitMs: 0n };
+}
+
 function newOAApplicationsRegisterArguments() {
   return { descriptor: newApplicationDescriptor() };
+}
+
+function newOAApplicationsAskConfirmationArguments() {
+  return { application: "" };
 }
 
 function newOAApplicationsRemoveArguments() {
@@ -2385,6 +2823,10 @@ function newOAApplicationsObserveArguments() {
 
 function newOAApplicationsActivateArguments() {
   return { application: "" };
+}
+
+function newOAApplicationsListStartsArguments() {
+  return { cursor: "", limit: 0n };
 }
 
 function newOAServiceFrame() {
@@ -2427,7 +2869,27 @@ function newOARegistryObserveResult() {
   return { value: newDeclarationObservation() };
 }
 
+function newOARegistryV2DeclarationsResult() {
+  return { value: newDeclarationListV2() };
+}
+
+function newOARegistryV2DeclareResult() {
+  return { value: newDeclarationChange() };
+}
+
+function newOARegistryV2WithdrawResult() {
+  return { value: newDeclarationChange() };
+}
+
+function newOARegistryV2ObserveResult() {
+  return { value: newDeclarationObservationV2() };
+}
+
 function newOAApplicationsRegisterResult() {
+  return { value: newApplicationChange() };
+}
+
+function newOAApplicationsAskConfirmationResult() {
   return { value: newApplicationChange() };
 }
 
@@ -2449,6 +2911,10 @@ function newOAApplicationsObserveResult() {
 
 function newOAApplicationsActivateResult() {
   return { value: newApplicationActivationResult() };
+}
+
+function newOAApplicationsListStartsResult() {
+  return { value: newApplicationStartPage() };
 }
 
 function readResolveRequest(r) {
@@ -3088,6 +3554,45 @@ function readDeclarationHost(r) {
   return v;
 }
 
+function readDeclarationExtension(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationExtension();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "profile") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.profile = r.string();
+      } else if (key === "key") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.key = r.string();
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
+  return v;
+}
+
 function readDeclaration(r) {
   if (r.at() !== 0x7b) throw r.refuse("wrong_type");
   r.enter();
@@ -3173,6 +3678,45 @@ function readDeclaration(r) {
     if ((seen & 2048) !== 0) {
     if (v.role !== "provider" && v.role !== "host" && v.role !== "remote") { throw r.refuse("bad_enum"); }
     }
+  return v;
+}
+
+function readDeclarationWithExtensions(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationWithExtensions();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "declaration") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.declaration = readDeclaration(r);
+      } else if (key === "supported_extensions") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.supportedExtensions = readList(r, readDeclarationExtension);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
   return v;
 }
 
@@ -3406,6 +3950,133 @@ function readDeclarationObservation(r) {
         if (seen & 4) throw r.refuse("duplicate_field");
         seen |= 4;
         v.declarations = readList(r, readDeclarationState);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 7) >>> 0) !== 7) throw r.refuse("missing_field");
+    if (v.outcome !== "page" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw r.refuse("bad_enum"); }
+  return v;
+}
+
+function readDeclarationStateV2(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationStateV2();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "state") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.state = readDeclarationState(r);
+      } else if (key === "supported_extensions") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.supportedExtensions = readList(r, readDeclarationExtension);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readDeclarationListV2(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationListV2();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "outcome") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.outcome = r.string();
+      } else if (key === "revision") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.revision = r.string();
+      } else if (key === "declarations") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.declarations = readList(r, readDeclarationStateV2);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 7) >>> 0) !== 7) throw r.refuse("missing_field");
+    if (v.outcome !== "page" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw r.refuse("bad_enum"); }
+  return v;
+}
+
+function readDeclarationObservationV2(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newDeclarationObservationV2();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "outcome") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.outcome = r.string();
+      } else if (key === "cursor") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.cursor = r.string();
+      } else if (key === "declarations") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.declarations = readList(r, readDeclarationStateV2);
       } else {
         throw r.refuse("unknown_field");
       }
@@ -3728,6 +4399,10 @@ function readApplicationEntry(r) {
         if (seen & 4) throw r.refuse("duplicate_field");
         seen |= 4;
         v.scope = r.string();
+      } else if (key === "self_registered") {
+        if (seen & 8) throw r.refuse("duplicate_field");
+        seen |= 8;
+        v.selfRegistered = r.boolean();
       } else {
         throw r.refuse("unknown_field");
       }
@@ -3877,6 +4552,109 @@ function readApplicationActivationResult(r) {
   r.depth--;
   if (((seen & 15) >>> 0) !== 15) throw r.refuse("missing_field");
     if (v.outcome !== "ready" && v.outcome !== "unknown" && v.outcome !== "disabled" && v.outcome !== "forbidden" && v.outcome !== "invalid" && v.outcome !== "launch_refused" && v.outcome !== "identity_refused" && v.outcome !== "not_ready" && v.outcome !== "unavailable") { throw r.refuse("bad_enum"); }
+  return v;
+}
+
+function readApplicationStart(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newApplicationStart();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "application") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.application = r.string();
+      } else if (key === "program") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.program = r.string();
+      } else if (key === "title") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.title = r.string();
+      } else if (key === "started_unix_ms") {
+        if (seen & 8) throw r.refuse("duplicate_field");
+        seen |= 8;
+        v.startedUnixMs = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else if (key === "launched") {
+        if (seen & 16) throw r.refuse("duplicate_field");
+        seen |= 16;
+        v.launched = r.boolean();
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 31) >>> 0) !== 31) throw r.refuse("missing_field");
+  return v;
+}
+
+function readApplicationStartPage(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newApplicationStartPage();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "outcome") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.outcome = r.string();
+      } else if (key === "starts") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.starts = readList(r, readApplicationStart);
+      } else if (key === "cursor") {
+        if (seen & 4) throw r.refuse("duplicate_field");
+        seen |= 4;
+        v.cursor = r.string();
+      } else if (key === "complete") {
+        if (seen & 8) throw r.refuse("duplicate_field");
+        seen |= 8;
+        v.complete = r.boolean();
+      } else if (key === "complete_since_unix_ms") {
+        if (seen & 16) throw r.refuse("duplicate_field");
+        seen |= 16;
+        v.completeSinceUnixMs = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 31) >>> 0) !== 31) throw r.refuse("missing_field");
+    if (v.outcome !== "applied" && v.outcome !== "page" && v.outcome !== "unknown" && v.outcome !== "stale" && v.outcome !== "conflict" && v.outcome !== "invalid" && v.outcome !== "forbidden" && v.outcome !== "unavailable") { throw r.refuse("bad_enum"); }
   return v;
 }
 
@@ -4125,6 +4903,154 @@ function readOARegistryObserveArguments(r) {
   return v;
 }
 
+function readOARegistryV2DeclarationsArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2DeclarationsArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (false) {
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  return v;
+}
+
+function readOARegistryV2DeclareArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2DeclareArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "expected_revision") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.expectedRevision = r.string();
+      } else if (key === "declaration") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.declaration = readDeclarationWithExtensions(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOARegistryV2WithdrawArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2WithdrawArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "expected_revision") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.expectedRevision = r.string();
+      } else if (key === "name") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.name = r.string();
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOARegistryV2ObserveArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2ObserveArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "cursor") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.cursor = r.string();
+      } else if (key === "wait_ms") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.waitMs = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
+  return v;
+}
+
 function readOAApplicationsRegisterArguments(r) {
   if (r.at() !== 0x7b) throw r.refuse("wrong_type");
   r.enter();
@@ -4145,6 +5071,41 @@ function readOAApplicationsRegisterArguments(r) {
         if (seen & 1) throw r.refuse("duplicate_field");
         seen |= 1;
         v.descriptor = readApplicationDescriptor(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOAApplicationsAskConfirmationArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOAApplicationsAskConfirmationArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "application") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.application = r.string();
       } else {
         throw r.refuse("unknown_field");
       }
@@ -4340,6 +5301,45 @@ function readOAApplicationsActivateArguments(r) {
   r.pos++;
   r.depth--;
   if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOAApplicationsListStartsArguments(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOAApplicationsListStartsArguments();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "cursor") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.cursor = r.string();
+      } else if (key === "limit") {
+        if (seen & 2) throw r.refuse("duplicate_field");
+        seen |= 2;
+        v.limit = r.integer(-9223372036854775808n, 9223372036854775807n);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 3) >>> 0) !== 3) throw r.refuse("missing_field");
   return v;
 }
 
@@ -4725,11 +5725,186 @@ function readOARegistryObserveResult(r) {
   return v;
 }
 
+function readOARegistryV2DeclarationsResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2DeclarationsResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readDeclarationListV2(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOARegistryV2DeclareResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2DeclareResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readDeclarationChange(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOARegistryV2WithdrawResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2WithdrawResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readDeclarationChange(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOARegistryV2ObserveResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOARegistryV2ObserveResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readDeclarationObservationV2(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
 function readOAApplicationsRegisterResult(r) {
   if (r.at() !== 0x7b) throw r.refuse("wrong_type");
   r.enter();
   r.pos++;
   const v = newOAApplicationsRegisterResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readApplicationChange(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
+function readOAApplicationsAskConfirmationResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOAApplicationsAskConfirmationResult();
   let seen = 0;
   r.ws();
   if (r.at() !== 0x7d) {
@@ -4935,6 +6110,41 @@ function readOAApplicationsActivateResult(r) {
   return v;
 }
 
+function readOAApplicationsListStartsResult(r) {
+  if (r.at() !== 0x7b) throw r.refuse("wrong_type");
+  r.enter();
+  r.pos++;
+  const v = newOAApplicationsListStartsResult();
+  let seen = 0;
+  r.ws();
+  if (r.at() !== 0x7d) {
+    for (;;) {
+      r.ws();
+      if (r.at() !== 0x22) throw r.refuse("malformed");
+      const key = r.string();
+      r.ws();
+      if (r.at() !== 0x3a) throw r.refuse("malformed");
+      r.pos++;
+      r.ws();
+      if (key === "value") {
+        if (seen & 1) throw r.refuse("duplicate_field");
+        seen |= 1;
+        v.value = readApplicationStartPage(r);
+      } else {
+        throw r.refuse("unknown_field");
+      }
+      r.ws();
+      if (r.at() !== 0x2c) break;
+      r.pos++;
+    }
+  }
+  if (r.at() !== 0x7d) throw r.refuse("malformed");
+  r.pos++;
+  r.depth--;
+  if (((seen & 1) >>> 0) !== 1) throw r.refuse("missing_field");
+  return v;
+}
+
 export function decode(data) {
   const r = new Reader(data);
   r.ws();
@@ -5017,22 +6227,29 @@ _serviceRecords["Description"] = [["outcome","string","never"],["program","strin
 _serviceRecords["RemoteTrust"] = [["serverName","string","never"],["roots","string","never"],["certificate","string","never"],["key","string","never"],["credential","string","zero"],];
 _serviceRecords["DeclarationCeiling"] = [["tokensPerDay","i64","zero"],["microsPerDay","i64","zero"],["requestsPerDay","i64","zero"],["imagesPerDay","i64","zero"],["audioSecondsPerDay","i64","zero"],["charactersPerDay","i64","zero"],];
 _serviceRecords["DeclarationHost"] = [["base","string","never"],["kind","string","never"],["hosted","bool","never"],["credential","string","zero"],["ceiling","DeclarationCeiling","absent"],];
+_serviceRecords["DeclarationExtension"] = [["profile","string","never"],["key","string","never"],];
 _serviceRecords["Declaration"] = [["name","string","never"],["program","string","never"],["arguments","list<string>","never"],["endpoint","string","never"],["transport","string","never"],["contracts","list<string>","never"],["guarantees","list<string>","zero"],["resources","list<string>","zero"],["activation","string","never"],["remote","RemoteTrust","absent"],["models","list<string>","zero"],["role","string","zero"],["host","DeclarationHost","absent"],];
+_serviceRecords["DeclarationWithExtensions"] = [["declaration","Declaration","never"],["supportedExtensions","list<DeclarationExtension>","zero"],];
 _serviceRecords["HostReading"] = [["up","bool","never"],["why","string","never"],];
 _serviceRecords["DeclarationState"] = [["declaration","Declaration","never"],["declaredBy","string","never"],["declaredUnixMs","i64","never"],["readiness","string","never"],["why","string","never"],["restarts","i64","never"],["described","list<ServiceState>","never"],["accepted","list<string>","zero"],["role","string","zero"],["host","HostReading","absent"],];
 _serviceRecords["DeclarationList"] = [["outcome","string","never"],["revision","string","never"],["declarations","list<DeclarationState>","never"],];
 _serviceRecords["DeclarationChange"] = [["outcome","string","never"],["revision","string","never"],["reason","string","never"],];
 _serviceRecords["DeclarationObservation"] = [["outcome","string","never"],["cursor","string","never"],["declarations","list<DeclarationState>","never"],];
+_serviceRecords["DeclarationStateV2"] = [["state","DeclarationState","never"],["supportedExtensions","list<DeclarationExtension>","zero"],];
+_serviceRecords["DeclarationListV2"] = [["outcome","string","never"],["revision","string","never"],["declarations","list<DeclarationStateV2>","never"],];
+_serviceRecords["DeclarationObservationV2"] = [["outcome","string","never"],["cursor","string","never"],["declarations","list<DeclarationStateV2>","never"],];
 _serviceRecords["ApplicationInterface"] = [["name","string","never"],["protocol","string","never"],["contract","string","never"],];
 _serviceRecords["ApplicationActivationRecipe"] = [["arguments","list<string>","never"],["readiness","ApplicationInterface","never"],["readinessTimeoutMs","i64","never"],];
 _serviceRecords["ApplicationDescriptor"] = [["name","string","never"],["program","string","never"],["title","string","never"],["startGuidance","string","never"],["activation","ApplicationActivationRecipe","absent"],];
 _serviceRecords["ApplicationContext"] = [["name","string","never"],["title","string","never"],["revision","string","never"],];
 _serviceRecords["ApplicationPresence"] = [["application","string","never"],["instance","string","never"],["interfaces","list<ApplicationInterface>","never"],["contexts","list<ApplicationContext>","never"],["leaseMs","i64","never"],];
 _serviceRecords["ApplicationInstance"] = [["instance","string","never"],["interfaces","list<ApplicationInterface>","never"],["contexts","list<ApplicationContext>","never"],["expiresUnixMs","i64","never"],];
-_serviceRecords["ApplicationEntry"] = [["descriptor","ApplicationDescriptor","never"],["instances","list<ApplicationInstance>","never"],["scope","string","never"],];
+_serviceRecords["ApplicationEntry"] = [["descriptor","ApplicationDescriptor","never"],["instances","list<ApplicationInstance>","never"],["scope","string","never"],["selfRegistered","bool","zero"],];
 _serviceRecords["ApplicationChange"] = [["outcome","string","never"],["instance","string","never"],["reason","string","never"],];
 _serviceRecords["ApplicationPage"] = [["outcome","string","never"],["cursor","string","never"],["applications","list<ApplicationEntry>","never"],];
 _serviceRecords["ApplicationActivationResult"] = [["outcome","string","never"],["instance","string","never"],["started","bool","never"],["reason","string","never"],];
+_serviceRecords["ApplicationStart"] = [["application","string","never"],["program","string","never"],["title","string","never"],["startedUnixMs","i64","never"],["launched","bool","never"],];
+_serviceRecords["ApplicationStartPage"] = [["outcome","string","never"],["starts","list<ApplicationStart>","never"],["cursor","string","never"],["complete","bool","never"],["completeSinceUnixMs","i64","never"],];
 _serviceRecords["OAResolverResolveArguments"] = [["request","ResolveRequest","never"],];
 _serviceRecords["OACallerObserveArguments"] = [];
 _serviceRecords["OAEndpointDescribeArguments"] = [];
@@ -5040,12 +6257,18 @@ _serviceRecords["OARegistryDeclarationsArguments"] = [];
 _serviceRecords["OARegistryDeclareArguments"] = [["expectedRevision","string","never"],["declaration","Declaration","never"],];
 _serviceRecords["OARegistryWithdrawArguments"] = [["expectedRevision","string","never"],["name","string","never"],];
 _serviceRecords["OARegistryObserveArguments"] = [["cursor","string","never"],["waitMs","i64","never"],];
+_serviceRecords["OARegistryV2DeclarationsArguments"] = [];
+_serviceRecords["OARegistryV2DeclareArguments"] = [["expectedRevision","string","never"],["declaration","DeclarationWithExtensions","never"],];
+_serviceRecords["OARegistryV2WithdrawArguments"] = [["expectedRevision","string","never"],["name","string","never"],];
+_serviceRecords["OARegistryV2ObserveArguments"] = [["cursor","string","never"],["waitMs","i64","never"],];
 _serviceRecords["OAApplicationsRegisterArguments"] = [["descriptor","ApplicationDescriptor","never"],];
+_serviceRecords["OAApplicationsAskConfirmationArguments"] = [["application","string","never"],];
 _serviceRecords["OAApplicationsRemoveArguments"] = [["application","string","never"],];
 _serviceRecords["OAApplicationsAnnounceArguments"] = [["presence","ApplicationPresence","never"],];
 _serviceRecords["OAApplicationsWithdrawArguments"] = [["application","string","never"],["instance","string","never"],];
 _serviceRecords["OAApplicationsObserveArguments"] = [["cursor","string","never"],["waitMs","i64","never"],];
 _serviceRecords["OAApplicationsActivateArguments"] = [["application","string","never"],];
+_serviceRecords["OAApplicationsListStartsArguments"] = [["cursor","string","never"],["limit","i64","never"],];
 _serviceRecords["OAServiceFrame"] = [["version","i32","never"],["service","string","never"],["method","string","never"],["arguments","json","never"],];
 _serviceRecords["OAServiceReply"] = [["version","i32","never"],["service","string","never"],["method","string","never"],["ok","bool","never"],["payload","json","never"],];
 _serviceRecords["OAServiceError"] = [["code","string","never"],["message","string","never"],];
@@ -5056,12 +6279,18 @@ _serviceRecords["OARegistryDeclarationsResult"] = [["value","DeclarationList","n
 _serviceRecords["OARegistryDeclareResult"] = [["value","DeclarationChange","never"],];
 _serviceRecords["OARegistryWithdrawResult"] = [["value","DeclarationChange","never"],];
 _serviceRecords["OARegistryObserveResult"] = [["value","DeclarationObservation","never"],];
+_serviceRecords["OARegistryV2DeclarationsResult"] = [["value","DeclarationListV2","never"],];
+_serviceRecords["OARegistryV2DeclareResult"] = [["value","DeclarationChange","never"],];
+_serviceRecords["OARegistryV2WithdrawResult"] = [["value","DeclarationChange","never"],];
+_serviceRecords["OARegistryV2ObserveResult"] = [["value","DeclarationObservationV2","never"],];
 _serviceRecords["OAApplicationsRegisterResult"] = [["value","ApplicationChange","never"],];
+_serviceRecords["OAApplicationsAskConfirmationResult"] = [["value","ApplicationChange","never"],];
 _serviceRecords["OAApplicationsRemoveResult"] = [["value","ApplicationChange","never"],];
 _serviceRecords["OAApplicationsAnnounceResult"] = [["value","ApplicationChange","never"],];
 _serviceRecords["OAApplicationsWithdrawResult"] = [["value","ApplicationChange","never"],];
 _serviceRecords["OAApplicationsObserveResult"] = [["value","ApplicationPage","never"],];
 _serviceRecords["OAApplicationsActivateResult"] = [["value","ApplicationActivationResult","never"],];
+_serviceRecords["OAApplicationsListStartsResult"] = [["value","ApplicationStartPage","never"],];
 
 function _serviceRequest(service, method, argumentsBytes) {
   return _serviceEncode(writeOAServiceFrame, {
@@ -5186,6 +6415,61 @@ export class RegistryClient {
 }
 export const RegistryService = Object.freeze({wireName:"abstraction.facade/registry@1",Client:RegistryClient});
 
+export class RegistryV2Client {
+  constructor(transport) { this._transport = transport; }
+
+  async declarations() {
+    const _args = newOARegistryV2DeclarationsArguments();
+    _serviceCheck("OARegistryV2DeclarationsArguments", _args);
+    const _payload = _serviceEncode(writeOARegistryV2DeclarationsArguments, _args, 1);
+    _serviceDecode(readOARegistryV2DeclarationsArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/registry@2", "Declarations", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/registry@2", "Declarations");
+    const _result = _serviceDecode(readOARegistryV2DeclarationsResult, _reply, 1);
+    return _result.value;
+  }
+
+  async declare(expectedRevision, declaration) {
+    const _args = newOARegistryV2DeclareArguments();
+    _args.expectedRevision = expectedRevision;
+    _args.declaration = declaration;
+    _serviceCheck("OARegistryV2DeclareArguments", _args);
+    const _payload = _serviceEncode(writeOARegistryV2DeclareArguments, _args, 1);
+    _serviceDecode(readOARegistryV2DeclareArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/registry@2", "Declare", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/registry@2", "Declare");
+    const _result = _serviceDecode(readOARegistryV2DeclareResult, _reply, 1);
+    return _result.value;
+  }
+
+  async withdraw(expectedRevision, name) {
+    const _args = newOARegistryV2WithdrawArguments();
+    _args.expectedRevision = expectedRevision;
+    _args.name = name;
+    _serviceCheck("OARegistryV2WithdrawArguments", _args);
+    const _payload = _serviceEncode(writeOARegistryV2WithdrawArguments, _args, 1);
+    _serviceDecode(readOARegistryV2WithdrawArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/registry@2", "Withdraw", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/registry@2", "Withdraw");
+    const _result = _serviceDecode(readOARegistryV2WithdrawResult, _reply, 1);
+    return _result.value;
+  }
+
+  async observe(cursor, waitMs) {
+    const _args = newOARegistryV2ObserveArguments();
+    _args.cursor = cursor;
+    _args.waitMs = waitMs;
+    _serviceCheck("OARegistryV2ObserveArguments", _args);
+    const _payload = _serviceEncode(writeOARegistryV2ObserveArguments, _args, 1);
+    _serviceDecode(readOARegistryV2ObserveArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/registry@2", "Observe", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/registry@2", "Observe");
+    const _result = _serviceDecode(readOARegistryV2ObserveResult, _reply, 1);
+    return _result.value;
+  }
+}
+export const RegistryV2Service = Object.freeze({wireName:"abstraction.facade/registry@2",Client:RegistryV2Client});
+
 export class ApplicationsClient {
   constructor(transport) { this._transport = transport; }
 
@@ -5195,9 +6479,21 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsRegisterArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsRegisterArguments, _args, 1);
     _serviceDecode(readOAApplicationsRegisterArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Register", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Register");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Register", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Register");
     const _result = _serviceDecode(readOAApplicationsRegisterResult, _reply, 1);
+    return _result.value;
+  }
+
+  async askConfirmation(application) {
+    const _args = newOAApplicationsAskConfirmationArguments();
+    _args.application = application;
+    _serviceCheck("OAApplicationsAskConfirmationArguments", _args);
+    const _payload = _serviceEncode(writeOAApplicationsAskConfirmationArguments, _args, 1);
+    _serviceDecode(readOAApplicationsAskConfirmationArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/applications@2", "AskConfirmation", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "AskConfirmation");
+    const _result = _serviceDecode(readOAApplicationsAskConfirmationResult, _reply, 1);
     return _result.value;
   }
 
@@ -5207,8 +6503,8 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsRemoveArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsRemoveArguments, _args, 1);
     _serviceDecode(readOAApplicationsRemoveArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Remove", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Remove");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Remove", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Remove");
     const _result = _serviceDecode(readOAApplicationsRemoveResult, _reply, 1);
     return _result.value;
   }
@@ -5219,8 +6515,8 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsAnnounceArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsAnnounceArguments, _args, 1);
     _serviceDecode(readOAApplicationsAnnounceArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Announce", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Announce");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Announce", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Announce");
     const _result = _serviceDecode(readOAApplicationsAnnounceResult, _reply, 1);
     return _result.value;
   }
@@ -5232,8 +6528,8 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsWithdrawArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsWithdrawArguments, _args, 1);
     _serviceDecode(readOAApplicationsWithdrawArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Withdraw", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Withdraw");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Withdraw", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Withdraw");
     const _result = _serviceDecode(readOAApplicationsWithdrawResult, _reply, 1);
     return _result.value;
   }
@@ -5245,8 +6541,8 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsObserveArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsObserveArguments, _args, 1);
     _serviceDecode(readOAApplicationsObserveArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Observe", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Observe");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Observe", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Observe");
     const _result = _serviceDecode(readOAApplicationsObserveResult, _reply, 1);
     return _result.value;
   }
@@ -5257,10 +6553,23 @@ export class ApplicationsClient {
     _serviceCheck("OAApplicationsActivateArguments", _args);
     const _payload = _serviceEncode(writeOAApplicationsActivateArguments, _args, 1);
     _serviceDecode(readOAApplicationsActivateArguments, _payload, 1);
-    const _request = _serviceRequest("abstraction.facade/applications@1", "Activate", _payload);
-    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@1", "Activate");
+    const _request = _serviceRequest("abstraction.facade/applications@2", "Activate", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "Activate");
     const _result = _serviceDecode(readOAApplicationsActivateResult, _reply, 1);
     return _result.value;
   }
+
+  async listStarts(cursor, limit) {
+    const _args = newOAApplicationsListStartsArguments();
+    _args.cursor = cursor;
+    _args.limit = limit;
+    _serviceCheck("OAApplicationsListStartsArguments", _args);
+    const _payload = _serviceEncode(writeOAApplicationsListStartsArguments, _args, 1);
+    _serviceDecode(readOAApplicationsListStartsArguments, _payload, 1);
+    const _request = _serviceRequest("abstraction.facade/applications@2", "ListStarts", _payload);
+    const _reply = _serviceResponse(await this._transport.exchangeFrame(_request), "abstraction.facade/applications@2", "ListStarts");
+    const _result = _serviceDecode(readOAApplicationsListStartsResult, _reply, 1);
+    return _result.value;
+  }
 }
-export const ApplicationsService = Object.freeze({wireName:"abstraction.facade/applications@1",Client:ApplicationsClient});
+export const ApplicationsService = Object.freeze({wireName:"abstraction.facade/applications@2",Client:ApplicationsClient});

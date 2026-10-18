@@ -1,6 +1,8 @@
 # Resolved model calls
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 This optional crate adds `InferenceMachine` to the pure facade `Machine<C>`.
 `resolve_inference(vec![], abstraction_facade_native::Scope::Local)` returns `Chat<C>` for

@@ -28,19 +28,21 @@ type jobHost struct {
 	owner        string
 	policy       func(*identity.Peer) bool
 	methodPolicy acceptanceprovider.MethodPolicy
-	ctx          context.Context
-	cancel       context.CancelFunc
-	closeOnce    sync.Once
-	lifecycle    sync.Mutex
-	serving      bool
-	closed       bool
-	rootLease    io.Closer
-	releaseOnce  sync.Once
-	workers      sync.WaitGroup
-	slots        chan struct{}
-	onError      func(error)
-	onStopped    func()
-	execution    bool
+	// unhook removes the rights change subscription standing added.
+	unhook      func()
+	ctx         context.Context
+	cancel      context.CancelFunc
+	closeOnce   sync.Once
+	lifecycle   sync.Mutex
+	serving     bool
+	closed      bool
+	rootLease   io.Closer
+	releaseOnce sync.Once
+	workers     sync.WaitGroup
+	slots       chan struct{}
+	onError     func(error)
+	onStopped   func()
+	execution   bool
 }
 
 func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*identity.Peer) bool, executor acceptanceprovider.Executor, managed bool) (*jobHost, error) {
@@ -70,6 +72,20 @@ func listenJobs(endpoint, root, logicalOwner, osOwner string, policy func(*ident
 	keep = true
 	ctx, cancel := context.WithCancel(context.Background())
 	return &jobHost{rootLease: lease, listener: listen.Sessions(l, listen.SessionOptions{MaxSessions: 64}), provider: p, owner: osOwner, policy: policy, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 64), execution: executor != nil}, nil
+}
+
+// standing has the provider decide accepted work again while it runs, and
+// recheck every unfinished job on each committed rights change
+// (abstraction-job JOB-A18). Called once, before serving.
+func (h *jobHost) standing(decide acceptanceprovider.StandingDecider, changes func(func()) func()) {
+	if decide == nil {
+		return
+	}
+	h.provider.SetStanding(decide)
+	if changes != nil {
+		provider, ctx := h.provider, h.ctx
+		h.unhook = changes(func() { provider.RecheckSoon(ctx) })
+	}
 }
 
 func (h *jobHost) candidate(endpoint string) resolution.Candidate {
@@ -167,7 +183,13 @@ func (h *jobHost) Close() error {
 		if !serving {
 			defer h.releaseRoot()
 		}
+		if h.unhook != nil {
+			h.unhook()
+		}
 		h.cancel()
+		// A recheck pass the rights change hook started returns before the
+		// root is released, and writes nothing after Close (JOB-A18).
+		h.provider.StopRechecks()
 		err = h.listener.Close()
 		// Remove readiness before any in-flight provider calls are drained.
 		if h.onStopped != nil {

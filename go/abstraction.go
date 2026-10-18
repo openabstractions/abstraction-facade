@@ -40,6 +40,7 @@ type JobsOptions = client.JobsOptions
 const (
 	ApplicationsContract       = client.ApplicationsContract
 	AsksContract               = client.AsksContract
+	AsksChoicesContract        = client.AsksChoicesContract
 	AsksOperatorContract       = client.AsksOperatorContract
 	ConfigContract             = client.ConfigContract
 	ConfigEditorContract       = client.ConfigEditorContract
@@ -59,6 +60,7 @@ const (
 	LogReaderContract          = client.LogReaderContract
 	ModelContract              = client.ModelContract
 	RegistryContract           = client.RegistryContract
+	RegistryV2Contract         = client.RegistryV2Contract
 	ResourceLeasesContract     = client.ResourceLeasesContract
 	ResourceTableContract      = client.ResourceTableContract
 	RightsContract             = client.RightsContract

@@ -11,6 +11,9 @@ func Endpoint(service string) (string, error) { return core.Endpoint(service) }
 func InstalledEndpoint(service string) (string, error) {
 	return core.InstalledEndpoint(service)
 }
+func IsolatedXPCEndpoint(name, service string) (string, error) {
+	return core.IsolatedXPCEndpoint(name, service)
+}
 
 type Selection = core.Selection
 

@@ -13,6 +13,88 @@ import (
 	rightsclient "github.com/openabstractions/abstraction-rights/go/client"
 )
 
+// JOB-A13: submission is decided per kind. A program holding the inference
+// bundle's submit rule (job:inference) cannot queue a download; a rule on the
+// download kind, or one on the acceptance contract, lets it.
+func TestSubmitRightsAreScopedByJobKind(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("current Program proof limitation")
+	}
+	eachDecider(t, []string{JobSubmitAction}, func(t *testing.T, f deciderFixture, o Options) {
+		enforce := JobPolicyFromRights(f.decider, JobRightsActions)
+		subjects := make(chan rightsclient.Subject, 16)
+		o.JobMethodPolicy = func(ctx context.Context, peer *identity.Peer, service, method string) error {
+			if subject, e := rightsclient.SubjectFromPeer(peer); e == nil {
+				select {
+				case subjects <- subject:
+				default:
+				}
+			}
+			return enforce(ctx, peer, service, method)
+		}
+		_, stop := runJobRuntime(t, o)
+		defer stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		jobs, err := client.New(o.Endpoint).ResolveJobs(ctx, client.Requirements{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		window, err := jobs.GetHistoryWindow(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		download := func(key string) api.Submission {
+			return api.Submission{Identity: api.RequestIdentity{Key: key, HistoryEpoch: window.HistoryEpoch}, Kind: "download", Spec: []byte(`{}`)}
+		}
+		if first, err := jobs.Submit(ctx, download("kind-probe")); err != nil || first.Outcome.String() != "forbidden" {
+			t.Fatalf("submit with no rule %+v %v", first, err)
+		}
+		var subject rightsclient.Subject
+		select {
+		case subject = <-subjects:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if err := f.policy.Set(subject, JobSubmitAction, JobKindResource("inference"), true); err != nil {
+			t.Fatal(err)
+		}
+		if refused, err := jobs.Submit(ctx, download("inference-bundle-download")); err != nil || refused.Outcome.String() != "forbidden" {
+			t.Fatalf("a download under the inference kind's rule %+v %v", refused, err)
+		}
+		if err := f.policy.Set(subject, JobSubmitAction, JobKindResource("download"), true); err != nil {
+			t.Fatal(err)
+		}
+		if accepted, err := jobs.Submit(ctx, download("download-kind-download")); err != nil || accepted.Outcome.String() != "accepted" {
+			t.Fatalf("a download under the download kind's rule %+v %v", accepted, err)
+		}
+		// An explicit deny on one kind wins over a permit on the contract:
+		// that kind is refused and the other still admitted.
+		inference := func(key string) api.Submission {
+			return api.Submission{Identity: api.RequestIdentity{Key: key, HistoryEpoch: window.HistoryEpoch}, Kind: "inference", Spec: []byte(`{}`)}
+		}
+		if err := f.policy.Set(subject, JobSubmitAction, JobResource, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.policy.Set(subject, JobSubmitAction, JobKindResource("inference"), false); err != nil {
+			t.Fatal(err)
+		}
+		if refused, err := jobs.Submit(ctx, inference("kind-denied-inference")); err != nil || refused.Outcome.String() != "forbidden" {
+			t.Fatalf("an inference job under a contract permit and a kind deny %+v %v", refused, err)
+		}
+		if accepted, err := jobs.Submit(ctx, download("contract-permitted-download")); err != nil || accepted.Outcome.String() != "accepted" {
+			t.Fatalf("a download under a contract permit beside an inference deny %+v %v", accepted, err)
+		}
+		// A denial on the contract itself refuses every kind.
+		if err := f.policy.Set(subject, JobSubmitAction, JobResource, false); err != nil {
+			t.Fatal(err)
+		}
+		if denied, err := jobs.Submit(ctx, download("contract-denied-download")); err != nil || denied.Outcome.String() != "forbidden" {
+			t.Fatalf("a download under a contract denial %+v %v", denied, err)
+		}
+	})
+}
+
 func TestResolvedRightsEnforceJobSubmissionAndOwnCancellation(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("current Program proof limitation")

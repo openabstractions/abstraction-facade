@@ -253,3 +253,30 @@ func (m *Machine) ResolveLogObserver(ctx context.Context, need Requirements) (*l
 	}
 	return logging.NewObserverWithTransport(ep), nil
 }
+
+// ResolveLogApplicationReader binds reader@2 with receiver-attributed app filtering.
+func (m *Machine) ResolveLogApplicationReader(ctx context.Context, need Requirements) (*logging.ApplicationReader, error) {
+	ep, err := m.resolve(ctx, "abstraction.logging", LogApplicationReaderContract, need)
+	if err != nil {
+		return nil, err
+	}
+	return logging.NewApplicationReaderWithTransport(ep), nil
+}
+
+// ResolveLogApplicationObserver binds observer@2 with bounded empty progress pages.
+func (m *Machine) ResolveLogApplicationObserver(ctx context.Context, need Requirements) (*logging.ApplicationObserver, error) {
+	ep, err := m.resolve(ctx, "abstraction.logging", LogApplicationObserverContract, need)
+	if err != nil {
+		return nil, err
+	}
+	return logging.NewApplicationObserverWithTransport(ep), nil
+}
+
+// ResolveLogSourceReader selects a provider advertising bounded native-source reads.
+func (m *Machine) ResolveLogSourceReader(ctx context.Context, need Requirements) (*logging.SourceReader, error) {
+	ep, err := m.resolve(ctx, "abstraction.logging", LogSourceReaderContract, need)
+	if err != nil {
+		return nil, err
+	}
+	return logging.NewSourceReaderWithTransport(ep), nil
+}

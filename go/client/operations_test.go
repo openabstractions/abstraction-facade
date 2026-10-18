@@ -103,7 +103,10 @@ func TestResultChunkValidation(t *testing.T) {
 	}
 }
 
-type operationHandler struct{ calls int }
+type operationHandler struct {
+	calls int
+	link  *api.ResultLink
+}
 
 func (h *operationHandler) ObserveWork(id api.RequestIdentity) (api.ObservationResult, error) {
 	h.calls++
@@ -112,6 +115,42 @@ func (h *operationHandler) ObserveWork(id api.RequestIdentity) (api.ObservationR
 func (h *operationHandler) ReadResult(id api.RequestIdentity, offset, max int64) (api.ResultRead, error) {
 	h.calls++
 	return chunk(id), nil
+}
+func (h *operationHandler) LinkResult(id api.RequestIdentity, destination string) (api.ResultLink, error) {
+	h.calls++
+	if h.link != nil {
+		return *h.link, nil
+	}
+	receipt := chunk(id).Chunk.Receipt
+	return api.ResultLink{Outcome: api.LinkOutcomeLinked, Receipt: &receipt, Size: 3}, nil
+}
+
+// JOB-A17: the client sends LinkResult through the generated protocol and
+// refuses a reply that breaks its shape: a refusal carrying a receipt or a
+// size, or a link without one.
+func TestLinkResultUsesGeneratedProtocolAndChecksTheReply(t *testing.T) {
+	c, _, _ := jobsFixture(t)
+	h := &operationHandler{}
+	c.transport = &operationTransport{dispatcher: api.OperationControlDispatcher{Handler: h}}
+	id := api.RequestIdentity{Key: "key", HistoryEpoch: "epoch"}
+	ctx := context.Background()
+	if r, err := c.LinkResult(ctx, id, `C:\provider\engine-downloads\x`); err != nil || r.Outcome != api.LinkOutcomeLinked || r.Size != 3 {
+		t.Fatal(r, err)
+	}
+	if _, err := c.LinkResult(ctx, id, ""); err == nil || h.calls != 1 {
+		t.Fatal("an empty destination was sent")
+	}
+	receipt := chunk(id).Chunk.Receipt
+	for _, bad := range []api.ResultLink{{Outcome: api.LinkOutcomeOtherVolume, Receipt: &receipt}, {Outcome: api.LinkOutcomeExists, Size: 1}, {Outcome: api.LinkOutcomeLinked}} {
+		h.link = &bad
+		if _, err := c.LinkResult(ctx, id, `C:\x`); err == nil {
+			t.Fatalf("inconsistent link reply accepted: %+v", bad)
+		}
+	}
+	h.link = &api.ResultLink{Outcome: api.LinkOutcomeRemote}
+	if r, err := c.LinkResult(ctx, id, `C:\x`); err != nil || r.Outcome != api.LinkOutcomeRemote {
+		t.Fatal(r, err)
+	}
 }
 
 type operationTransport struct {

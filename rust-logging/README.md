@@ -1,6 +1,8 @@
 # Rust logging facade
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 This optional development crate depends on the pure facade core and generated
 logging API. It has no native dependency. Import `LoggingMachine` for resolved

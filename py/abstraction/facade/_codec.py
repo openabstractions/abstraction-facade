@@ -506,6 +506,18 @@ class DeclarationHost:
 
 
 @dataclasses.dataclass(kw_only=True)
+class DeclarationExtension:
+    """One required inference extension key a provider or remote runtime asserts it
+    can examine for a declared profile. This operator-managed inventory lets the
+    selecting runtime refuse unknown required keys before activating a provider;
+    the selected service still validates values and model-specific support
+    before accepting work."""
+
+    profile: str = ""
+    key: str = ""
+
+
+@dataclasses.dataclass(kw_only=True)
 class Declaration:
     """One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and
     unique. role names what it is, and each role validates its own fields
@@ -523,9 +535,14 @@ class Declaration:
     distinct <kind>:<name> of declaration_resource_kinds, name 1..64 bytes of
     a-z 0-9 _ . -; profile:<name> is what a host or a remote serves. models is
     the 0..64 distinct model names a native inference provider is trusted to
-    serve, each 1..256 UTF-8 bytes without controls. on_demand launches program
-    as a supervised child when a resolution first needs it; attach reads a
-    provider something else started."""
+    serve, each 1..256 UTF-8 bytes without controls; an entry <profile>:<model>
+    whose profile the declaration serves (a listed profile whose contract it
+    declares, or chat for a chat-only declaration listing none) serves model for
+    that profile alone, any other entry serves every served profile, and a model
+    named chat:x is written chat:chat:x (abstraction.router ROUTE-D9). on_demand
+    launches program as a supervised child when a resolution first needs it;
+    attach reads a provider something else started. Extension inventory lives in
+    registry@2 and is omitted from this strict registry@1 projection."""
 
     name: str = ""
     program: str = ""
@@ -540,6 +557,16 @@ class Declaration:
     models: list[str] = dataclasses.field(default_factory=list)
     role: DeclarationRole | None = None
     host: DeclarationHost | None = None
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeclarationWithExtensions:
+    """One atomic registry@2 edit. The extension inventory is validated against the
+    declaration's served inference profiles and stored with that declaration
+    generation. An empty inventory asserts no required extension support."""
+
+    declaration: Declaration = dataclasses.field(default_factory=Declaration)
+    supported_extensions: list[DeclarationExtension] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -624,6 +651,35 @@ class DeclarationObservation:
     outcome: DeclarationListOutcome | None = None
     cursor: str = ""
     declarations: list[DeclarationState] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeclarationStateV2:
+    """The registry@1 state and the extension inventory from the same declaration
+    snapshot."""
+
+    state: DeclarationState = dataclasses.field(default_factory=DeclarationState)
+    supported_extensions: list[DeclarationExtension] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeclarationListV2:
+    """The registry@2 declarations and their edit revision. Refusals carry an empty
+    revision and no declarations."""
+
+    outcome: DeclarationListOutcome | None = None
+    revision: str = ""
+    declarations: list[DeclarationStateV2] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(kw_only=True)
+class DeclarationObservationV2:
+    """The registry@2 declarations and readings from one snapshot. The cursor
+    includes extension inventory changes."""
+
+    outcome: DeclarationListOutcome | None = None
+    cursor: str = ""
+    declarations: list[DeclarationStateV2] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -715,11 +771,16 @@ class ApplicationEntry:
     """One installed application's descriptor with its currently leased instances.
     scope records directory provenance; this local profile supplies local and
     never imports remote announcements. An empty instance list makes no claim
-    about whether an unregistered process is running."""
+    about whether an unregistered process is running. self_registered is present
+    and true while the entry was registered by its own program under the
+    account-wide registration default and the person has not answered Keep to
+    the runtime's question about it (AskConfirmation). Only such entries carry
+    the field."""
 
     descriptor: ApplicationDescriptor = dataclasses.field(default_factory=ApplicationDescriptor)
     instances: list[ApplicationInstance] = dataclasses.field(default_factory=list)
     scope: Scope | None = None
+    self_registered: bool = False
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -765,6 +826,40 @@ class ApplicationActivationResult:
 
 
 @dataclasses.dataclass(kw_only=True)
+class ApplicationStart:
+    """One time an application became present in this runtime: the first announced
+    instance of a registered application in a local session where none of its
+    instances was live. application, program and title are the descriptor's at
+    that time. launched is true when this runtime's own activation attempt for
+    the application in that session was waiting for it; false means the
+    application announced itself. It records a fresh announcement, not process
+    lineage, and a runtime restart makes every running application announce
+    again."""
+
+    application: str = ""
+    program: str = ""
+    title: str = ""
+    started_unix_ms: int = 0
+    launched: bool = False
+
+
+@dataclasses.dataclass(kw_only=True)
+class ApplicationStartPage:
+    """page carries at most the requested 1..64 starts, newest first. complete
+    means the log was exhausted; otherwise cursor continues it.
+    complete_since_unix_ms is zero while every retained start is listed;
+    otherwise starts at or before it may have been evicted. stale means the
+    cursor's log changed or belongs to another runtime: restart from an empty
+    cursor. Other outcomes carry no starts or cursor."""
+
+    outcome: ApplicationOutcome | None = None
+    starts: list[ApplicationStart] = dataclasses.field(default_factory=list)
+    cursor: str = ""
+    complete: bool = False
+    complete_since_unix_ms: int = 0
+
+
+@dataclasses.dataclass(kw_only=True)
 class _ResolverResolveArguments:
     request: ResolveRequest = dataclasses.field(default_factory=ResolveRequest)
 
@@ -803,8 +898,36 @@ class _RegistryObserveArguments:
 
 
 @dataclasses.dataclass(kw_only=True)
+class _RegistryV2DeclarationsArguments:
+    pass
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2DeclareArguments:
+    expected_revision: str = ""
+    declaration: DeclarationWithExtensions = dataclasses.field(default_factory=DeclarationWithExtensions)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2WithdrawArguments:
+    expected_revision: str = ""
+    name: str = ""
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2ObserveArguments:
+    cursor: str = ""
+    wait_ms: int = 0
+
+
+@dataclasses.dataclass(kw_only=True)
 class _ApplicationsRegisterArguments:
     descriptor: ApplicationDescriptor = dataclasses.field(default_factory=ApplicationDescriptor)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _ApplicationsAskConfirmationArguments:
+    application: str = ""
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -832,6 +955,12 @@ class _ApplicationsObserveArguments:
 @dataclasses.dataclass(kw_only=True)
 class _ApplicationsActivateArguments:
     application: str = ""
+
+
+@dataclasses.dataclass(kw_only=True)
+class _ApplicationsListStartsArguments:
+    cursor: str = ""
+    limit: int = 0
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -893,7 +1022,32 @@ class _RegistryObserveResult:
 
 
 @dataclasses.dataclass(kw_only=True)
+class _RegistryV2DeclarationsResult:
+    value: DeclarationListV2 = dataclasses.field(default_factory=DeclarationListV2)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2DeclareResult:
+    value: DeclarationChange = dataclasses.field(default_factory=DeclarationChange)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2WithdrawResult:
+    value: DeclarationChange = dataclasses.field(default_factory=DeclarationChange)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _RegistryV2ObserveResult:
+    value: DeclarationObservationV2 = dataclasses.field(default_factory=DeclarationObservationV2)
+
+
+@dataclasses.dataclass(kw_only=True)
 class _ApplicationsRegisterResult:
+    value: ApplicationChange = dataclasses.field(default_factory=ApplicationChange)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _ApplicationsAskConfirmationResult:
     value: ApplicationChange = dataclasses.field(default_factory=ApplicationChange)
 
 
@@ -920,6 +1074,11 @@ class _ApplicationsObserveResult:
 @dataclasses.dataclass(kw_only=True)
 class _ApplicationsActivateResult:
     value: ApplicationActivationResult = dataclasses.field(default_factory=ApplicationActivationResult)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _ApplicationsListStartsResult:
+    value: ApplicationStartPage = dataclasses.field(default_factory=ApplicationStartPage)
 
 
 def _write_resolve_request(out, v, depth):
@@ -1374,6 +1533,24 @@ def _write_declaration_host(out, v, depth):
     out += b"}"
 
 
+def _write_declaration_extension(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "profile")
+    out += b": "
+    _esc(out, v.profile)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "key")
+    out += b": "
+    _esc(out, v.key)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
 def _write_declaration(out, v, depth):
     _closed_enum(DeclarationTransport, v.transport)
     _closed_enum(Activation, v.activation)
@@ -1463,6 +1640,25 @@ def _write_declaration(out, v, depth):
         _esc(out, "host")
         out += b": "
         _write_declaration_host(out, v.host, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_declaration_with_extensions(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "declaration")
+    out += b": "
+    _write_declaration(out, v.declaration, depth + 1)
+    if v.supported_extensions:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "supported_extensions")
+        out += b": "
+        _write_list(out, v.supported_extensions, depth + 1, _write_declaration_extension)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -1628,6 +1824,75 @@ def _write_declaration_observation(out, v, depth):
     _esc(out, "declarations")
     out += b": "
     _write_list(out, v.declarations, depth + 1, _write_declaration_state)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_declaration_state_v2(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "state")
+    out += b": "
+    _write_declaration_state(out, v.state, depth + 1)
+    if v.supported_extensions:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "supported_extensions")
+        out += b": "
+        _write_list(out, v.supported_extensions, depth + 1, _write_declaration_extension)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_declaration_list_v2(out, v, depth):
+    _closed_enum(DeclarationListOutcome, v.outcome)
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "outcome")
+    out += b": "
+    _esc(out, v.outcome)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "revision")
+    out += b": "
+    _esc(out, v.revision)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "declarations")
+    out += b": "
+    _write_list(out, v.declarations, depth + 1, _write_declaration_state_v2)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_declaration_observation_v2(out, v, depth):
+    _closed_enum(DeclarationListOutcome, v.outcome)
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "outcome")
+    out += b": "
+    _esc(out, v.outcome)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "cursor")
+    out += b": "
+    _esc(out, v.cursor)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "declarations")
+    out += b": "
+    _write_list(out, v.declarations, depth + 1, _write_declaration_state_v2)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -1828,6 +2093,13 @@ def _write_application_entry(out, v, depth):
     _esc(out, "scope")
     out += b": "
     _esc(out, v.scope)
+    if v.self_registered:
+        out += b","
+        out += b"\n"
+        _pad(out, depth + 1)
+        _esc(out, "self_registered")
+        out += b": "
+        out += b"true" if v.self_registered else b"false"
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -1914,6 +2186,79 @@ def _write_application_activation_result(out, v, depth):
     out += b"}"
 
 
+def _write_application_start(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "application")
+    out += b": "
+    _esc(out, v.application)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "program")
+    out += b": "
+    _esc(out, v.program)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "title")
+    out += b": "
+    _esc(out, v.title)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "started_unix_ms")
+    out += b": "
+    _num(out, v.started_unix_ms)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "launched")
+    out += b": "
+    out += b"true" if v.launched else b"false"
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_application_start_page(out, v, depth):
+    _closed_enum(ApplicationOutcome, v.outcome)
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "outcome")
+    out += b": "
+    _esc(out, v.outcome)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "starts")
+    out += b": "
+    _write_list(out, v.starts, depth + 1, _write_application_start)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "cursor")
+    out += b": "
+    _esc(out, v.cursor)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "complete")
+    out += b": "
+    out += b"true" if v.complete else b"false"
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "complete_since_unix_ms")
+    out += b": "
+    _num(out, v.complete_since_unix_ms)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
 def _write_oa_resolver_resolve_arguments(out, v, depth):
     out += b"{"
     out += b"\n"
@@ -1995,6 +2340,65 @@ def _write_oa_registry_observe_arguments(out, v, depth):
     out += b"}"
 
 
+def _write_oa_registry_v2_declarations_arguments(out, v, depth):
+    out += b"{"
+    out += b"}"
+
+
+def _write_oa_registry_v2_declare_arguments(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "expected_revision")
+    out += b": "
+    _esc(out, v.expected_revision)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "declaration")
+    out += b": "
+    _write_declaration_with_extensions(out, v.declaration, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_registry_v2_withdraw_arguments(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "expected_revision")
+    out += b": "
+    _esc(out, v.expected_revision)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "name")
+    out += b": "
+    _esc(out, v.name)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_registry_v2_observe_arguments(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "cursor")
+    out += b": "
+    _esc(out, v.cursor)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "wait_ms")
+    out += b": "
+    _num(out, v.wait_ms)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
 def _write_oa_applications_register_arguments(out, v, depth):
     out += b"{"
     out += b"\n"
@@ -2002,6 +2406,18 @@ def _write_oa_applications_register_arguments(out, v, depth):
     _esc(out, "descriptor")
     out += b": "
     _write_application_descriptor(out, v.descriptor, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_applications_ask_confirmation_arguments(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "application")
+    out += b": "
+    _esc(out, v.application)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -2074,6 +2490,24 @@ def _write_oa_applications_activate_arguments(out, v, depth):
     _esc(out, "application")
     out += b": "
     _esc(out, v.application)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_applications_list_starts_arguments(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "cursor")
+    out += b": "
+    _esc(out, v.cursor)
+    out += b","
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "limit")
+    out += b": "
+    _num(out, v.limit)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -2247,7 +2681,67 @@ def _write_oa_registry_observe_result(out, v, depth):
     out += b"}"
 
 
+def _write_oa_registry_v2_declarations_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_declaration_list_v2(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_registry_v2_declare_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_declaration_change(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_registry_v2_withdraw_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_declaration_change(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_registry_v2_observe_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_declaration_observation_v2(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
 def _write_oa_applications_register_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_application_change(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_applications_ask_confirmation_result(out, v, depth):
     out += b"{"
     out += b"\n"
     _pad(out, depth + 1)
@@ -2314,6 +2808,18 @@ def _write_oa_applications_activate_result(out, v, depth):
     _esc(out, "value")
     out += b": "
     _write_application_activation_result(out, v.value, depth + 1)
+    out += b"\n"
+    _pad(out, depth)
+    out += b"}"
+
+
+def _write_oa_applications_list_starts_result(out, v, depth):
+    out += b"{"
+    out += b"\n"
+    _pad(out, depth + 1)
+    _esc(out, "value")
+    out += b": "
+    _write_application_start_page(out, v.value, depth + 1)
     out += b"\n"
     _pad(out, depth)
     out += b"}"
@@ -3439,6 +3945,50 @@ def _read_declaration_host(r):
     return v
 
 
+def _read_declaration_extension(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationExtension()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "profile":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.profile = r.string()
+            elif key == "key":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.key = r.string()
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
+    return v
+
+
 def _read_declaration(r):
     if r.at() != _LBRACE:
         raise r.refuse("wrong_type")
@@ -3548,6 +4098,50 @@ def _read_declaration(r):
             v.role = DeclarationRole(v.role)
         except ValueError:
             raise r.refuse("bad_enum") from None
+    return v
+
+
+def _read_declaration_with_extensions(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationWithExtensions()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "declaration":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.declaration = _read_declaration(r)
+            elif key == "supported_extensions":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.supported_extensions = _read_list(r, _read_declaration_extension)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
     return v
 
 
@@ -3828,6 +4422,156 @@ def _read_declaration_observation(r):
                     raise r.refuse("duplicate_field")
                 seen |= 4
                 v.declarations = _read_list(r, _read_declaration_state)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 7 != 7:
+        raise r.refuse("missing_field")
+    try:
+        v.outcome = DeclarationListOutcome(v.outcome)
+    except ValueError:
+        raise r.refuse("bad_enum") from None
+    return v
+
+
+def _read_declaration_state_v2(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationStateV2()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "state":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.state = _read_declaration_state(r)
+            elif key == "supported_extensions":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.supported_extensions = _read_list(r, _read_declaration_extension)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_declaration_list_v2(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationListV2()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "outcome":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.outcome = r.string()
+            elif key == "revision":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.revision = r.string()
+            elif key == "declarations":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.declarations = _read_list(r, _read_declaration_state_v2)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 7 != 7:
+        raise r.refuse("missing_field")
+    try:
+        v.outcome = DeclarationListOutcome(v.outcome)
+    except ValueError:
+        raise r.refuse("bad_enum") from None
+    return v
+
+
+def _read_declaration_observation_v2(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = DeclarationObservationV2()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "outcome":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.outcome = r.string()
+            elif key == "cursor":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.cursor = r.string()
+            elif key == "declarations":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.declarations = _read_list(r, _read_declaration_state_v2)
             else:
                 raise r.refuse("unknown_field")
             r.ws()
@@ -4200,6 +4944,11 @@ def _read_application_entry(r):
                     raise r.refuse("duplicate_field")
                 seen |= 4
                 v.scope = r.string()
+            elif key == "self_registered":
+                if seen & 8:
+                    raise r.refuse("duplicate_field")
+                seen |= 8
+                v.self_registered = r.boolean()
             else:
                 raise r.refuse("unknown_field")
             r.ws()
@@ -4378,6 +5127,128 @@ def _read_application_activation_result(r):
         raise r.refuse("missing_field")
     try:
         v.outcome = ApplicationActivationOutcome(v.outcome)
+    except ValueError:
+        raise r.refuse("bad_enum") from None
+    return v
+
+
+def _read_application_start(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = ApplicationStart()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "application":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.application = r.string()
+            elif key == "program":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.program = r.string()
+            elif key == "title":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.title = r.string()
+            elif key == "started_unix_ms":
+                if seen & 8:
+                    raise r.refuse("duplicate_field")
+                seen |= 8
+                v.started_unix_ms = r.integer(-9223372036854775808, 9223372036854775807)
+            elif key == "launched":
+                if seen & 16:
+                    raise r.refuse("duplicate_field")
+                seen |= 16
+                v.launched = r.boolean()
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 31 != 31:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_application_start_page(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = ApplicationStartPage()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "outcome":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.outcome = r.string()
+            elif key == "starts":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.starts = _read_list(r, _read_application_start)
+            elif key == "cursor":
+                if seen & 4:
+                    raise r.refuse("duplicate_field")
+                seen |= 4
+                v.cursor = r.string()
+            elif key == "complete":
+                if seen & 8:
+                    raise r.refuse("duplicate_field")
+                seen |= 8
+                v.complete = r.boolean()
+            elif key == "complete_since_unix_ms":
+                if seen & 16:
+                    raise r.refuse("duplicate_field")
+                seen |= 16
+                v.complete_since_unix_ms = r.integer(-9223372036854775808, 9223372036854775807)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 31 != 31:
+        raise r.refuse("missing_field")
+    try:
+        v.outcome = ApplicationOutcome(v.outcome)
     except ValueError:
         raise r.refuse("bad_enum") from None
     return v
@@ -4656,6 +5527,172 @@ def _read_oa_registry_observe_arguments(r):
     return v
 
 
+def _read_oa_registry_v2_declarations_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2DeclarationsArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if False:
+                pass
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    return v
+
+
+def _read_oa_registry_v2_declare_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2DeclareArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "expected_revision":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.expected_revision = r.string()
+            elif key == "declaration":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.declaration = _read_declaration_with_extensions(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_registry_v2_withdraw_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2WithdrawArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "expected_revision":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.expected_revision = r.string()
+            elif key == "name":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.name = r.string()
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_registry_v2_observe_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2ObserveArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "cursor":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.cursor = r.string()
+            elif key == "wait_ms":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.wait_ms = r.integer(-9223372036854775808, 9223372036854775807)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
+        raise r.refuse("missing_field")
+    return v
+
+
 def _read_oa_applications_register_arguments(r):
     if r.at() != _LBRACE:
         raise r.refuse("wrong_type")
@@ -4680,6 +5717,45 @@ def _read_oa_applications_register_arguments(r):
                     raise r.refuse("duplicate_field")
                 seen |= 1
                 v.descriptor = _read_application_descriptor(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_applications_ask_confirmation_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _ApplicationsAskConfirmationArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "application":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.application = r.string()
             else:
                 raise r.refuse("unknown_field")
             r.ws()
@@ -4896,6 +5972,50 @@ def _read_oa_applications_activate_arguments(r):
     r.pos += 1
     r.depth -= 1
     if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_applications_list_starts_arguments(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _ApplicationsListStartsArguments()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "cursor":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.cursor = r.string()
+            elif key == "limit":
+                if seen & 2:
+                    raise r.refuse("duplicate_field")
+                seen |= 2
+                v.limit = r.integer(-9223372036854775808, 9223372036854775807)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 3 != 3:
         raise r.refuse("missing_field")
     return v
 
@@ -5330,12 +6450,207 @@ def _read_oa_registry_observe_result(r):
     return v
 
 
+def _read_oa_registry_v2_declarations_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2DeclarationsResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_declaration_list_v2(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_registry_v2_declare_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2DeclareResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_declaration_change(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_registry_v2_withdraw_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2WithdrawResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_declaration_change(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_registry_v2_observe_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _RegistryV2ObserveResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_declaration_observation_v2(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
 def _read_oa_applications_register_result(r):
     if r.at() != _LBRACE:
         raise r.refuse("wrong_type")
     r.enter()
     r.pos += 1
     v = _ApplicationsRegisterResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_application_change(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
+def _read_oa_applications_ask_confirmation_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _ApplicationsAskConfirmationResult()
     seen = 0
     r.ws()
     if r.at() != _RBRACE:
@@ -5564,6 +6879,45 @@ def _read_oa_applications_activate_result(r):
     return v
 
 
+def _read_oa_applications_list_starts_result(r):
+    if r.at() != _LBRACE:
+        raise r.refuse("wrong_type")
+    r.enter()
+    r.pos += 1
+    v = _ApplicationsListStartsResult()
+    seen = 0
+    r.ws()
+    if r.at() != _RBRACE:
+        while True:
+            r.ws()
+            if r.at() != _QUOTE:
+                raise r.refuse("malformed")
+            key = r.string()
+            r.ws()
+            if r.at() != _COLON:
+                raise r.refuse("malformed")
+            r.pos += 1
+            r.ws()
+            if key == "value":
+                if seen & 1:
+                    raise r.refuse("duplicate_field")
+                seen |= 1
+                v.value = _read_application_start_page(r)
+            else:
+                raise r.refuse("unknown_field")
+            r.ws()
+            if r.at() != _COMMA:
+                break
+            r.pos += 1
+    if r.at() != _RBRACE:
+        raise r.refuse("malformed")
+    r.pos += 1
+    r.depth -= 1
+    if seen & 1 != 1:
+        raise r.refuse("missing_field")
+    return v
+
+
 def decode(data):
     r = _Reader(bytes(data))
     r.ws()
@@ -5708,22 +7062,29 @@ _SERVICE_RECORDS = {
     "RemoteTrust": (RemoteTrust, [("server_name", "string", "never"), ("roots", "string", "never"), ("certificate", "string", "never"), ("key", "string", "never"), ("credential", "string", "zero"), ]),
     "DeclarationCeiling": (DeclarationCeiling, [("tokens_per_day", "i64", "zero"), ("micros_per_day", "i64", "zero"), ("requests_per_day", "i64", "zero"), ("images_per_day", "i64", "zero"), ("audio_seconds_per_day", "i64", "zero"), ("characters_per_day", "i64", "zero"), ]),
     "DeclarationHost": (DeclarationHost, [("base", "string", "never"), ("kind", "string", "never"), ("hosted", "bool", "never"), ("credential", "string", "zero"), ("ceiling", "DeclarationCeiling", "absent"), ]),
+    "DeclarationExtension": (DeclarationExtension, [("profile", "string", "never"), ("key", "string", "never"), ]),
     "Declaration": (Declaration, [("name", "string", "never"), ("program", "string", "never"), ("arguments", "list<string>", "never"), ("endpoint", "string", "never"), ("transport", "enum", "never"), ("contracts", "list<string>", "never"), ("guarantees", "list<string>", "zero"), ("resources", "list<string>", "zero"), ("activation", "enum", "never"), ("remote", "RemoteTrust", "absent"), ("models", "list<string>", "zero"), ("role", "enum", "zero"), ("host", "DeclarationHost", "absent"), ]),
+    "DeclarationWithExtensions": (DeclarationWithExtensions, [("declaration", "Declaration", "never"), ("supported_extensions", "list<DeclarationExtension>", "zero"), ]),
     "HostReading": (HostReading, [("up", "bool", "never"), ("why", "string", "never"), ]),
     "DeclarationState": (DeclarationState, [("declaration", "Declaration", "never"), ("declared_by", "string", "never"), ("declared_unix_ms", "i64", "never"), ("readiness", "enum", "never"), ("why", "string", "never"), ("restarts", "i64", "never"), ("described", "list<ServiceState>", "never"), ("accepted", "list<string>", "zero"), ("role", "enum", "zero"), ("host", "HostReading", "absent"), ]),
     "DeclarationList": (DeclarationList, [("outcome", "enum", "never"), ("revision", "string", "never"), ("declarations", "list<DeclarationState>", "never"), ]),
     "DeclarationChange": (DeclarationChange, [("outcome", "enum", "never"), ("revision", "string", "never"), ("reason", "string", "never"), ]),
     "DeclarationObservation": (DeclarationObservation, [("outcome", "enum", "never"), ("cursor", "string", "never"), ("declarations", "list<DeclarationState>", "never"), ]),
+    "DeclarationStateV2": (DeclarationStateV2, [("state", "DeclarationState", "never"), ("supported_extensions", "list<DeclarationExtension>", "zero"), ]),
+    "DeclarationListV2": (DeclarationListV2, [("outcome", "enum", "never"), ("revision", "string", "never"), ("declarations", "list<DeclarationStateV2>", "never"), ]),
+    "DeclarationObservationV2": (DeclarationObservationV2, [("outcome", "enum", "never"), ("cursor", "string", "never"), ("declarations", "list<DeclarationStateV2>", "never"), ]),
     "ApplicationInterface": (ApplicationInterface, [("name", "string", "never"), ("protocol", "string", "never"), ("contract", "string", "never"), ]),
     "ApplicationActivationRecipe": (ApplicationActivationRecipe, [("arguments", "list<string>", "never"), ("readiness", "ApplicationInterface", "never"), ("readiness_timeout_ms", "i64", "never"), ]),
     "ApplicationDescriptor": (ApplicationDescriptor, [("name", "string", "never"), ("program", "string", "never"), ("title", "string", "never"), ("start_guidance", "string", "never"), ("activation", "ApplicationActivationRecipe", "absent"), ]),
     "ApplicationContext": (ApplicationContext, [("name", "string", "never"), ("title", "string", "never"), ("revision", "string", "never"), ]),
     "ApplicationPresence": (ApplicationPresence, [("application", "string", "never"), ("instance", "string", "never"), ("interfaces", "list<ApplicationInterface>", "never"), ("contexts", "list<ApplicationContext>", "never"), ("lease_ms", "i64", "never"), ]),
     "ApplicationInstance": (ApplicationInstance, [("instance", "string", "never"), ("interfaces", "list<ApplicationInterface>", "never"), ("contexts", "list<ApplicationContext>", "never"), ("expires_unix_ms", "i64", "never"), ]),
-    "ApplicationEntry": (ApplicationEntry, [("descriptor", "ApplicationDescriptor", "never"), ("instances", "list<ApplicationInstance>", "never"), ("scope", "enum", "never"), ]),
+    "ApplicationEntry": (ApplicationEntry, [("descriptor", "ApplicationDescriptor", "never"), ("instances", "list<ApplicationInstance>", "never"), ("scope", "enum", "never"), ("self_registered", "bool", "zero"), ]),
     "ApplicationChange": (ApplicationChange, [("outcome", "enum", "never"), ("instance", "string", "never"), ("reason", "string", "never"), ]),
     "ApplicationPage": (ApplicationPage, [("outcome", "enum", "never"), ("cursor", "string", "never"), ("applications", "list<ApplicationEntry>", "never"), ]),
     "ApplicationActivationResult": (ApplicationActivationResult, [("outcome", "enum", "never"), ("instance", "string", "never"), ("started", "bool", "never"), ("reason", "string", "never"), ]),
+    "ApplicationStart": (ApplicationStart, [("application", "string", "never"), ("program", "string", "never"), ("title", "string", "never"), ("started_unix_ms", "i64", "never"), ("launched", "bool", "never"), ]),
+    "ApplicationStartPage": (ApplicationStartPage, [("outcome", "enum", "never"), ("starts", "list<ApplicationStart>", "never"), ("cursor", "string", "never"), ("complete", "bool", "never"), ("complete_since_unix_ms", "i64", "never"), ]),
     "OAResolverResolveArguments": (_ResolverResolveArguments, [("request", "ResolveRequest", "never"), ]),
     "OACallerObserveArguments": (_CallerObserveArguments, []),
     "OAEndpointDescribeArguments": (_EndpointDescribeArguments, []),
@@ -5731,12 +7092,18 @@ _SERVICE_RECORDS = {
     "OARegistryDeclareArguments": (_RegistryDeclareArguments, [("expected_revision", "string", "never"), ("declaration", "Declaration", "never"), ]),
     "OARegistryWithdrawArguments": (_RegistryWithdrawArguments, [("expected_revision", "string", "never"), ("name", "string", "never"), ]),
     "OARegistryObserveArguments": (_RegistryObserveArguments, [("cursor", "string", "never"), ("wait_ms", "i64", "never"), ]),
+    "OARegistryV2DeclarationsArguments": (_RegistryV2DeclarationsArguments, []),
+    "OARegistryV2DeclareArguments": (_RegistryV2DeclareArguments, [("expected_revision", "string", "never"), ("declaration", "DeclarationWithExtensions", "never"), ]),
+    "OARegistryV2WithdrawArguments": (_RegistryV2WithdrawArguments, [("expected_revision", "string", "never"), ("name", "string", "never"), ]),
+    "OARegistryV2ObserveArguments": (_RegistryV2ObserveArguments, [("cursor", "string", "never"), ("wait_ms", "i64", "never"), ]),
     "OAApplicationsRegisterArguments": (_ApplicationsRegisterArguments, [("descriptor", "ApplicationDescriptor", "never"), ]),
+    "OAApplicationsAskConfirmationArguments": (_ApplicationsAskConfirmationArguments, [("application", "string", "never"), ]),
     "OAApplicationsRemoveArguments": (_ApplicationsRemoveArguments, [("application", "string", "never"), ]),
     "OAApplicationsAnnounceArguments": (_ApplicationsAnnounceArguments, [("presence", "ApplicationPresence", "never"), ]),
     "OAApplicationsWithdrawArguments": (_ApplicationsWithdrawArguments, [("application", "string", "never"), ("instance", "string", "never"), ]),
     "OAApplicationsObserveArguments": (_ApplicationsObserveArguments, [("cursor", "string", "never"), ("wait_ms", "i64", "never"), ]),
     "OAApplicationsActivateArguments": (_ApplicationsActivateArguments, [("application", "string", "never"), ]),
+    "OAApplicationsListStartsArguments": (_ApplicationsListStartsArguments, [("cursor", "string", "never"), ("limit", "i64", "never"), ]),
     "OAServiceFrame": (_ServiceFrame, [("version", "i32", "never"), ("service", "string", "never"), ("method", "string", "never"), ("arguments", "json", "never"), ]),
     "OAServiceReply": (_ServiceReply, [("version", "i32", "never"), ("service", "string", "never"), ("method", "string", "never"), ("ok", "bool", "never"), ("payload", "json", "never"), ]),
     "OAServiceError": (_ServiceError, [("code", "string", "never"), ("message", "string", "never"), ]),
@@ -5747,12 +7114,18 @@ _SERVICE_RECORDS = {
     "OARegistryDeclareResult": (_RegistryDeclareResult, [("value", "DeclarationChange", "never"), ]),
     "OARegistryWithdrawResult": (_RegistryWithdrawResult, [("value", "DeclarationChange", "never"), ]),
     "OARegistryObserveResult": (_RegistryObserveResult, [("value", "DeclarationObservation", "never"), ]),
+    "OARegistryV2DeclarationsResult": (_RegistryV2DeclarationsResult, [("value", "DeclarationListV2", "never"), ]),
+    "OARegistryV2DeclareResult": (_RegistryV2DeclareResult, [("value", "DeclarationChange", "never"), ]),
+    "OARegistryV2WithdrawResult": (_RegistryV2WithdrawResult, [("value", "DeclarationChange", "never"), ]),
+    "OARegistryV2ObserveResult": (_RegistryV2ObserveResult, [("value", "DeclarationObservationV2", "never"), ]),
     "OAApplicationsRegisterResult": (_ApplicationsRegisterResult, [("value", "ApplicationChange", "never"), ]),
+    "OAApplicationsAskConfirmationResult": (_ApplicationsAskConfirmationResult, [("value", "ApplicationChange", "never"), ]),
     "OAApplicationsRemoveResult": (_ApplicationsRemoveResult, [("value", "ApplicationChange", "never"), ]),
     "OAApplicationsAnnounceResult": (_ApplicationsAnnounceResult, [("value", "ApplicationChange", "never"), ]),
     "OAApplicationsWithdrawResult": (_ApplicationsWithdrawResult, [("value", "ApplicationChange", "never"), ]),
     "OAApplicationsObserveResult": (_ApplicationsObserveResult, [("value", "ApplicationPage", "never"), ]),
     "OAApplicationsActivateResult": (_ApplicationsActivateResult, [("value", "ApplicationActivationResult", "never"), ]),
+    "OAApplicationsListStartsResult": (_ApplicationsListStartsResult, [("value", "ApplicationStartPage", "never"), ]),
 }
 
 
@@ -5941,6 +7314,89 @@ class RegistryClient(Registry):
         return _result.value
 
 
+class RegistryV2:
+    """The local operator registry with per-profile required extension inventory.
+    It shares the authenticated endpoint, rights decision, revisions and
+    withdrawal authority with registry@1. A registry@1 reading omits extension
+    metadata; a registry@1 Declare creates an empty extension inventory."""
+
+    def declarations(self) -> DeclarationListV2:
+        """Read all declarations, readings and extension inventories under
+        provider.manage."""
+        raise NotImplementedError
+
+    def declare(self, expected_revision: str, declaration: DeclarationWithExtensions) -> DeclarationChange:
+        """Conditionally add the declaration and its extension inventory as one
+        generation, under provider.manage. The registry@1 Declare semantics for
+        rules and ownership apply."""
+        raise NotImplementedError
+
+    def withdraw(self, expected_revision: str, name: str) -> DeclarationChange:
+        """Conditionally withdraw a declaration under provider.manage, with the
+        registry@1 semantics."""
+        raise NotImplementedError
+
+    def observe(self, cursor: str, wait_ms: int) -> DeclarationObservationV2:
+        """Wait for declarations, readings or extension inventories to change,
+        under provider.manage."""
+        raise NotImplementedError
+
+
+class RegistryV2Client(RegistryV2):
+    """Calls abstraction.facade/registry@2 through a transport that exchanges frames."""
+
+    def __init__(self, transport):
+        self._transport = transport
+
+    def declarations(self) -> DeclarationListV2:
+        _args = _RegistryV2DeclarationsArguments()
+        _arguments = _service_encode(_write_oa_registry_v2_declarations_arguments, _args, 1)
+        _service_decode(_read_oa_registry_v2_declarations_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/registry@2", "Declarations", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/registry@2", "Declarations")
+        _result = _service_decode(_read_oa_registry_v2_declarations_result, _payload, 1)
+        return _result.value
+
+    def declare(self, expected_revision: str, declaration: DeclarationWithExtensions) -> DeclarationChange:
+        _service_check("string", expected_revision)
+        _service_check("DeclarationWithExtensions", declaration)
+        _args = _RegistryV2DeclareArguments()
+        _args.expected_revision = expected_revision
+        _args.declaration = declaration
+        _arguments = _service_encode(_write_oa_registry_v2_declare_arguments, _args, 1)
+        _service_decode(_read_oa_registry_v2_declare_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/registry@2", "Declare", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/registry@2", "Declare")
+        _result = _service_decode(_read_oa_registry_v2_declare_result, _payload, 1)
+        return _result.value
+
+    def withdraw(self, expected_revision: str, name: str) -> DeclarationChange:
+        _service_check("string", expected_revision)
+        _service_check("string", name)
+        _args = _RegistryV2WithdrawArguments()
+        _args.expected_revision = expected_revision
+        _args.name = name
+        _arguments = _service_encode(_write_oa_registry_v2_withdraw_arguments, _args, 1)
+        _service_decode(_read_oa_registry_v2_withdraw_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/registry@2", "Withdraw", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/registry@2", "Withdraw")
+        _result = _service_decode(_read_oa_registry_v2_withdraw_result, _payload, 1)
+        return _result.value
+
+    def observe(self, cursor: str, wait_ms: int) -> DeclarationObservationV2:
+        _service_check("string", cursor)
+        _service_check("i64", wait_ms)
+        _args = _RegistryV2ObserveArguments()
+        _args.cursor = cursor
+        _args.wait_ms = wait_ms
+        _arguments = _service_encode(_write_oa_registry_v2_observe_arguments, _args, 1)
+        _service_decode(_read_oa_registry_v2_observe_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/registry@2", "Observe", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/registry@2", "Observe")
+        _result = _service_decode(_read_oa_registry_v2_observe_result, _payload, 1)
+        return _result.value
+
+
 class Applications:
     """Experimental application-presence profile owned by the OA service.
     Persistent operator descriptors and transient app announcements have
@@ -5950,9 +7406,25 @@ class Applications:
     identity refuses access."""
 
     def register(self, descriptor: ApplicationDescriptor) -> ApplicationChange:
-        """Add an installed descriptor. Requires application.manage on account;
-        existing names conflict. Does not launch or grant use. Programs cannot
-        self-register."""
+        """Add an installed descriptor. Requires application.manage on account for
+        another program's descriptor, or application.register_self on account
+        for the caller's own program, which the account-wide registration
+        default permits; such an entry is self_registered until confirmed. A
+        title that reads as OpenAbstractions is invalid with reason title.
+        Existing names conflict; a program's second self-registration while one
+        is unconfirmed conflicts with reason unconfirmed. Does not launch or
+        grant use."""
+        raise NotImplementedError
+
+    def ask_confirmation(self, application: str) -> ApplicationChange:
+        """Ask the person again, through the runtime's own asks question
+        application.self_registered, whether to keep a self-registered entry.
+        Requires application.manage on account. The person's Keep clears
+        self_registered; Remove removes every unconfirmed entry of its program
+        and blocks that program from registering itself; closing or expiry
+        leaves it unconfirmed. A pending question is replayed. A confirmed or
+        operator-registered entry applies without asking; an unknown name is
+        unknown. An earlier applications@2 service returns unknown_method."""
         raise NotImplementedError
 
     def remove(self, application: str) -> ApplicationChange:
@@ -5990,9 +7462,17 @@ class Applications:
         application."""
         raise NotImplementedError
 
+    def list_starts(self, cursor: str, limit: int) -> ApplicationStartPage:
+        """Read the runtime's start log newest first, for this runtime's operator
+        programs only: any other caller, another account and a remote peer get
+        forbidden. Each start is kept seven days, at most 256. limit is 1..64;
+        cursor is empty or a previous page's, at most 256 bytes. An earlier
+        applications@2 service returns unknown_method."""
+        raise NotImplementedError
+
 
 class ApplicationsClient(Applications):
-    """Calls abstraction.facade/applications@1 through a transport that exchanges frames."""
+    """Calls abstraction.facade/applications@2 through a transport that exchanges frames."""
 
     def __init__(self, transport):
         self._transport = transport
@@ -6003,9 +7483,20 @@ class ApplicationsClient(Applications):
         _args.descriptor = descriptor
         _arguments = _service_encode(_write_oa_applications_register_arguments, _args, 1)
         _service_decode(_read_oa_applications_register_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Register", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Register")
+        _request = _service_request("abstraction.facade/applications@2", "Register", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Register")
         _result = _service_decode(_read_oa_applications_register_result, _payload, 1)
+        return _result.value
+
+    def ask_confirmation(self, application: str) -> ApplicationChange:
+        _service_check("string", application)
+        _args = _ApplicationsAskConfirmationArguments()
+        _args.application = application
+        _arguments = _service_encode(_write_oa_applications_ask_confirmation_arguments, _args, 1)
+        _service_decode(_read_oa_applications_ask_confirmation_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/applications@2", "AskConfirmation", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "AskConfirmation")
+        _result = _service_decode(_read_oa_applications_ask_confirmation_result, _payload, 1)
         return _result.value
 
     def remove(self, application: str) -> ApplicationChange:
@@ -6014,8 +7505,8 @@ class ApplicationsClient(Applications):
         _args.application = application
         _arguments = _service_encode(_write_oa_applications_remove_arguments, _args, 1)
         _service_decode(_read_oa_applications_remove_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Remove", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Remove")
+        _request = _service_request("abstraction.facade/applications@2", "Remove", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Remove")
         _result = _service_decode(_read_oa_applications_remove_result, _payload, 1)
         return _result.value
 
@@ -6025,8 +7516,8 @@ class ApplicationsClient(Applications):
         _args.presence = presence
         _arguments = _service_encode(_write_oa_applications_announce_arguments, _args, 1)
         _service_decode(_read_oa_applications_announce_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Announce", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Announce")
+        _request = _service_request("abstraction.facade/applications@2", "Announce", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Announce")
         _result = _service_decode(_read_oa_applications_announce_result, _payload, 1)
         return _result.value
 
@@ -6038,8 +7529,8 @@ class ApplicationsClient(Applications):
         _args.instance = instance
         _arguments = _service_encode(_write_oa_applications_withdraw_arguments, _args, 1)
         _service_decode(_read_oa_applications_withdraw_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Withdraw", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Withdraw")
+        _request = _service_request("abstraction.facade/applications@2", "Withdraw", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Withdraw")
         _result = _service_decode(_read_oa_applications_withdraw_result, _payload, 1)
         return _result.value
 
@@ -6051,8 +7542,8 @@ class ApplicationsClient(Applications):
         _args.wait_ms = wait_ms
         _arguments = _service_encode(_write_oa_applications_observe_arguments, _args, 1)
         _service_decode(_read_oa_applications_observe_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Observe", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Observe")
+        _request = _service_request("abstraction.facade/applications@2", "Observe", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Observe")
         _result = _service_decode(_read_oa_applications_observe_result, _payload, 1)
         return _result.value
 
@@ -6062,7 +7553,20 @@ class ApplicationsClient(Applications):
         _args.application = application
         _arguments = _service_encode(_write_oa_applications_activate_arguments, _args, 1)
         _service_decode(_read_oa_applications_activate_arguments, _arguments, 1)
-        _request = _service_request("abstraction.facade/applications@1", "Activate", _arguments)
-        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@1", "Activate")
+        _request = _service_request("abstraction.facade/applications@2", "Activate", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "Activate")
         _result = _service_decode(_read_oa_applications_activate_result, _payload, 1)
+        return _result.value
+
+    def list_starts(self, cursor: str, limit: int) -> ApplicationStartPage:
+        _service_check("string", cursor)
+        _service_check("i64", limit)
+        _args = _ApplicationsListStartsArguments()
+        _args.cursor = cursor
+        _args.limit = limit
+        _arguments = _service_encode(_write_oa_applications_list_starts_arguments, _args, 1)
+        _service_decode(_read_oa_applications_list_starts_arguments, _arguments, 1)
+        _request = _service_request("abstraction.facade/applications@2", "ListStarts", _arguments)
+        _payload = _service_response(self._transport.exchange_frame(_request), "abstraction.facade/applications@2", "ListStarts")
+        _result = _service_decode(_read_oa_applications_list_starts_result, _payload, 1)
         return _result.value

@@ -432,7 +432,7 @@ var probes = []Probe{
 			return r.Outcome.String(), map[string]any{"operation": operation}, err
 		}},
 	{Capability: "jobs", Operation: "submit", Contract: "abstraction.job/acceptance@1", Argument: "URL", Writes: true,
-		Rule: &Rule{host.JobSubmitAction, host.JobResource},
+		Rule: &Rule{host.JobSubmitAction, host.JobKindResource(download.Kind)},
 		Note: "WRITES: accepts a download of URL as this program; the same URL presents the same request again",
 		run: func(ctx context.Context, m *client.Machine, locator string) (string, any, error) {
 			c, err := m.ResolveJobs(ctx, local)

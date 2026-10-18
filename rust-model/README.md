@@ -1,6 +1,8 @@
 # abstraction-facade-model
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 Resolves `abstraction.model/resolver@1` through a facade `Machine` and wraps the
 generated client. `resolve` returns the typed lookup result after checking its

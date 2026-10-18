@@ -15,9 +15,12 @@ import (
 const (
 	LogHistoryAction   = "abstraction.logging/history.read"
 	LogHistoryResource = "abstraction.logging/history"
+	LogSourceAction    = logservice.SourceReadAction
 	// ModelLookupAction's resource is the requested registry name.
 	ModelLookupAction = "abstraction.model/lookup"
 )
+
+func LogSourceResource(id string) string { return logservice.SourceReadResource(id) }
 
 // The rights rule of an application Ask (ASK-R1).
 const (
@@ -37,7 +40,16 @@ func AskPolicyFromRights(decisions Decider) asksservice.AskPolicy {
 // post-wait recheck. No permit is cached.
 func HistoryPolicyFromRights(decisions Decider) logservice.HistoryPolicy {
 	return func(ctx context.Context, peer *identity.Peer) error {
-		return requireDecision(ctx, decisions, peer, LogHistoryAction, LogHistoryResource, logservice.ErrHistoryPolicyUnavailable)
+		return requireLegacyLogHistory(ctx, decisions, peer)
+	}
+}
+
+// SourcePolicyFromRights decides every native source read using the exact
+// source resource selected by the logging service. A history grant does not
+// imply access to a Windows channel or operating-system journal.
+func SourcePolicyFromRights(decisions Decider) logservice.SourcePolicy {
+	return func(ctx context.Context, peer *identity.Peer, action, resource string) error {
+		return requireDecision(ctx, decisions, peer, action, resource, logservice.ErrSourcePolicyUnavailable)
 	}
 }
 

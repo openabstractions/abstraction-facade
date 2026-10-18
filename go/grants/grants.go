@@ -15,6 +15,7 @@ import (
 	"time"
 
 	credentials "github.com/openabstractions/abstraction-credentials/go"
+	download "github.com/openabstractions/abstraction-download/go"
 	host "github.com/openabstractions/abstraction-facade/go/runtime"
 	inference "github.com/openabstractions/abstraction-inference/go"
 	rights "github.com/openabstractions/abstraction-rights/go/client"
@@ -45,7 +46,14 @@ type For struct {
 	// Credentials are the registered credential names the program may have
 	// applied for it, in either bundle.
 	Credentials []string `json:"credentials,omitempty"`
+	// Outputs are the output profiles (image, video, speech) an inference
+	// bundle lets the program write and read back; each covers only outputs
+	// the program's own work produced (inference INF-S7).
+	Outputs []string `json:"outputs,omitempty"`
 }
+
+// OutputProfiles are the output profiles an inference bundle may name.
+var OutputProfiles = []string{"image", "video", "speech"}
 
 // ErrBundle marks a bundle that cannot be named from its selection.
 var ErrBundle = errors.New("grants: invalid bundle")
@@ -55,11 +63,16 @@ func DefaultWhy(bundle string) string { return "allow " + bundle }
 
 // Rules returns the exact rules of a bundle, in the order they are written.
 //
-//   - downloads: acceptance.submit on the job acceptance contract, model lookup
-//     on each registry, and apply on each credential.
+//   - downloads: acceptance.submit for download jobs (job:download), model
+//     lookup on each registry, and apply on each credential.
 //   - inference: inventory.read on the router's inventory resource, route on
-//     the routes resource, complete on each host, and apply on each
-//     credential. At least one host is required.
+//     the routes resource, acceptance.submit for inference jobs
+//     (job:inference; image batches and video are submitted as jobs, and no
+//     other kind, a download among them, is let in), complete on each
+//     host, content.write and content.read on output:<profile> for each
+//     output profile it names, and apply on each credential. At least one
+//     host is required. No input profile is in it: an input is asked for
+//     with the request that consumes it (inference INF-V4).
 func Rules(bundle string, f For) ([]Rule, error) {
 	for _, list := range [][]string{f.Registries, f.Hosts, f.Credentials} {
 		for _, name := range list {
@@ -68,13 +81,18 @@ func Rules(bundle string, f For) ([]Rule, error) {
 			}
 		}
 	}
+	for _, output := range f.Outputs {
+		if !slices.Contains(OutputProfiles, output) {
+			return nil, fmt.Errorf("%w: %q is not an output profile; name %s", ErrBundle, output, strings.Join(OutputProfiles, ", "))
+		}
+	}
 	var rules []Rule
 	switch bundle {
 	case Downloads:
-		if len(f.Hosts) != 0 {
-			return nil, fmt.Errorf("%w: downloads names registries and credentials, not hosts", ErrBundle)
+		if len(f.Hosts) != 0 || len(f.Outputs) != 0 {
+			return nil, fmt.Errorf("%w: downloads names registries and credentials, not hosts or outputs", ErrBundle)
 		}
-		rules = append(rules, Rule{host.JobSubmitAction, host.JobResource})
+		rules = append(rules, Rule{host.JobSubmitAction, host.JobKindResource(download.Kind)})
 		for _, registry := range f.Registries {
 			rules = append(rules, Rule{host.ModelLookupAction, registry})
 		}
@@ -84,8 +102,12 @@ func Rules(bundle string, f For) ([]Rule, error) {
 		}
 		rules = append(rules, Rule{routerservice.ActionInventory, routerservice.ResourceInventory})
 		rules = append(rules, Rule{routerservice.ActionRoute, host.RoutesResource})
+		rules = append(rules, Rule{host.JobSubmitAction, host.JobKindResource(inference.InferenceJobKind)})
 		for _, name := range f.Hosts {
 			rules = append(rules, Rule{inference.ActionComplete, inference.ResourceHost(name)})
+		}
+		for _, output := range f.Outputs {
+			rules = append(rules, Rule{ContentWriteAction, "output:" + output}, Rule{ContentReadAction, "output:" + output})
 		}
 	default:
 		return nil, fmt.Errorf("%w: no bundle called %q; name %s", ErrBundle, bundle, strings.Join(Names(), " or "))

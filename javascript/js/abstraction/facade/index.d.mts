@@ -78,11 +78,16 @@ export interface ApplicationDescriptor {
 // One installed application's descriptor with its currently leased instances.
 // scope records directory provenance; this local profile supplies local and
 // never imports remote announcements. An empty instance list makes no claim
-// about whether an unregistered process is running.
+// about whether an unregistered process is running. self_registered is present
+// and true while the entry was registered by its own program under the
+// account-wide registration default and the person has not answered Keep to the
+// runtime's question about it (AskConfirmation). Only such entries carry the
+// field.
 export interface ApplicationEntry {
   descriptor: ApplicationDescriptor;
   instances: ApplicationInstance[];
   scope: Scope;
+  selfRegistered: boolean;
 }
 
 // A current caller-visible instance and its attributed metadata. Handle
@@ -134,11 +139,43 @@ export interface ApplicationPresence {
   leaseMs: bigint;
 }
 
+// One time an application became present in this runtime: the first announced
+// instance of a registered application in a local session where none of its
+// instances was live. application, program and title are the descriptor's at
+// that time. launched is true when this runtime's own activation attempt for
+// the application in that session was waiting for it; false means the
+// application announced itself. It records a fresh announcement, not process
+// lineage, and a runtime restart makes every running application announce
+// again.
+export interface ApplicationStart {
+  application: string;
+  program: string;
+  title: string;
+  startedUnixMs: bigint;
+  launched: boolean;
+}
+
+// page carries at most the requested 1..64 starts, newest first. complete means
+// the log was exhausted; otherwise cursor continues it. complete_since_unix_ms
+// is zero while every retained start is listed; otherwise starts at or before
+// it may have been evicted. stale means the cursor's log changed or belongs to
+// another runtime: restart from an empty cursor. Other outcomes carry no starts
+// or cursor.
+export interface ApplicationStartPage {
+  outcome: ApplicationOutcome;
+  starts: ApplicationStart[];
+  cursor: string;
+  complete: boolean;
+  completeSinceUnixMs: bigint;
+}
+
 /** Experimental application-presence profile owned by the OA service. Persistent operator descriptors and transient app announcements have distinct authority and lifetime. This is a local directory; MCP/UI metadata are claims, and invocation remains behind OA capability mediation. Native callers retain their actual account/program identity. Unsupported platform identity refuses access. */
 export declare class ApplicationsClient {
   constructor(transport: FrameTransport);
-  /** Add an installed descriptor. Requires application.manage on account; existing names conflict. Does not launch or grant use. Programs cannot self-register. */
+  /** Add an installed descriptor. Requires application.manage on account for another program's descriptor, or application.register_self on account for the caller's own program, which the account-wide registration default permits; such an entry is self_registered until confirmed. A title that reads as OpenAbstractions is invalid with reason title. Existing names conflict; a program's second self-registration while one is unconfirmed conflicts with reason unconfirmed. Does not launch or grant use. */
   register(descriptor: ApplicationDescriptor): Promise<ApplicationChange>;
+  /** Ask the person again, through the runtime's own asks question application.self_registered, whether to keep a self-registered entry. Requires application.manage on account. The person's Keep clears self_registered; Remove removes every unconfirmed entry of its program and blocks that program from registering itself; closing or expiry leaves it unconfirmed. A pending question is replayed. A confirmed or operator-registered entry applies without asking; an unknown name is unknown. An earlier applications@2 service returns unknown_method. */
+  askConfirmation(application: string): Promise<ApplicationChange>;
   /** Remove an installed descriptor and its presence. Requires application.manage on account. Does not terminate user applications. */
   remove(application: string): Promise<ApplicationChange>;
   /** Publish or renew presence. Requires application.announce on app:<name>, a bound native program and kernel session matching this runtime, and current owner/session/epoch for renewal. Claims never alter descriptors or grants. */
@@ -149,9 +186,11 @@ export declare class ApplicationsClient {
   observe(cursor: string, waitMs: bigint): Promise<ApplicationPage>;
   /** Reuse a matching descriptor-program-bound presence or share one bounded authorized start attempt in this local runtime session. Requires application.activate on app:<name>. Only the operator-registered typed recipe executes; guidance and announcements remain inert. Caller cancellation stops its wait and never terminates or restarts the application. */
   activate(application: string): Promise<ApplicationActivationResult>;
+  /** Read the runtime's start log newest first, for this runtime's operator programs only: any other caller, another account and a remote peer get forbidden. Each start is kept seven days, at most 256. limit is 1..64; cursor is empty or a previous page's, at most 256 bytes. An earlier applications@2 service returns unknown_method. */
+  listStarts(cursor: string, limit: bigint): Promise<ApplicationStartPage>;
 }
 
-export declare const ApplicationsService: Readonly<{ wireName: "abstraction.facade/applications@1"; Client: typeof ApplicationsClient }>;
+export declare const ApplicationsService: Readonly<{ wireName: "abstraction.facade/applications@2"; Client: typeof ApplicationsClient }>;
 
 // Read-only platform registration or supervisor evidence. Unknown means
 // observation is unavailable; unavailable requires actual evidence that the
@@ -239,9 +278,14 @@ export interface CapabilityObservation {
 // of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
 // profile:<name> is what a host or a remote serves. models is the 0..64
 // distinct model names a native inference provider is trusted to serve, each
-// 1..256 UTF-8 bytes without controls. on_demand launches program as a
-// supervised child when a resolution first needs it; attach reads a provider
-// something else started.
+// 1..256 UTF-8 bytes without controls; an entry <profile>:<model> whose profile
+// the declaration serves (a listed profile whose contract it declares, or chat
+// for a chat-only declaration listing none) serves model for that profile
+// alone, any other entry serves every served profile, and a model named chat:x
+// is written chat:chat:x (abstraction.router ROUTE-D9). on_demand launches
+// program as a supervised child when a resolution first needs it; attach reads
+// a provider something else started. Extension inventory lives in registry@2
+// and is omitted from this strict registry@1 projection.
 export interface Declaration {
   name: string;
   program: string;
@@ -287,6 +331,16 @@ export interface DeclarationChange {
 export type DeclarationEditOutcome = (typeof DeclarationEditOutcome)[keyof typeof DeclarationEditOutcome];
 export declare const DeclarationEditOutcome: Readonly<{ Applied: "applied"; Conflict: "conflict"; Unknown: "unknown"; Invalid: "invalid"; Forbidden: "forbidden"; Unavailable: "unavailable" }>;
 
+// One required inference extension key a provider or remote runtime asserts it
+// can examine for a declared profile. This operator-managed inventory lets the
+// selecting runtime refuse unknown required keys before activating a provider;
+// the selected service still validates values and model-specific support before
+// accepting work.
+export interface DeclarationExtension {
+  profile: string;
+  key: string;
+}
+
 // The foreign HTTP engine a declaration of role host names, the fields
 // abstraction.inference/operator@1 HostEntry carries. base is its https or
 // loopback http API root, with no user information, query or fragment. kind is
@@ -318,6 +372,14 @@ export interface DeclarationList {
 export type DeclarationListOutcome = (typeof DeclarationListOutcome)[keyof typeof DeclarationListOutcome];
 export declare const DeclarationListOutcome: Readonly<{ Page: "page"; Invalid: "invalid"; Forbidden: "forbidden"; Unavailable: "unavailable" }>;
 
+// The registry@2 declarations and their edit revision. Refusals carry an empty
+// revision and no declarations.
+export interface DeclarationListV2 {
+  outcome: DeclarationListOutcome;
+  revision: string;
+  declarations: DeclarationStateV2[];
+}
+
 // page carries every declaration and cursor, a digest of the declarations and
 // their readings. It answers once cursor differs from the cursor given, or when
 // wait_ms ends. invalid means wait_ms is outside 0..30000. Refusals carry an
@@ -326,6 +388,14 @@ export interface DeclarationObservation {
   outcome: DeclarationListOutcome;
   cursor: string;
   declarations: DeclarationState[];
+}
+
+// The registry@2 declarations and readings from one snapshot. The cursor
+// includes extension inventory changes.
+export interface DeclarationObservationV2 {
+  outcome: DeclarationListOutcome;
+  cursor: string;
+  declarations: DeclarationStateV2[];
 }
 
 export type DeclarationReadiness = (typeof DeclarationReadiness)[keyof typeof DeclarationReadiness];
@@ -367,8 +437,23 @@ export interface DeclarationState {
   host: HostReading | null;
 }
 
+// The registry@1 state and the extension inventory from the same declaration
+// snapshot.
+export interface DeclarationStateV2 {
+  state: DeclarationState;
+  supportedExtensions: DeclarationExtension[];
+}
+
 export type DeclarationTransport = (typeof DeclarationTransport)[keyof typeof DeclarationTransport];
 export declare const DeclarationTransport: Readonly<{ Native: "oa-native@1"; Remote: "oa-remote@1"; Http: "http@1" }>;
+
+// One atomic registry@2 edit. The extension inventory is validated against the
+// declaration's served inference profiles and stored with that declaration
+// generation. An empty inventory asserts no required extension support.
+export interface DeclarationWithExtensions {
+  declaration: Declaration;
+  supportedExtensions: DeclarationExtension[];
+}
 
 // described lists every service the endpoint hosts, in the endpoint's order.
 // program and version are the display name and version the provider gives
@@ -428,6 +513,21 @@ export declare class RegistryClient {
 }
 
 export declare const RegistryService: Readonly<{ wireName: "abstraction.facade/registry@1"; Client: typeof RegistryClient }>;
+
+/** The local operator registry with per-profile required extension inventory. It shares the authenticated endpoint, rights decision, revisions and withdrawal authority with registry@1. A registry@1 reading omits extension metadata; a registry@1 Declare creates an empty extension inventory. */
+export declare class RegistryV2Client {
+  constructor(transport: FrameTransport);
+  /** Read all declarations, readings and extension inventories under provider.manage. */
+  declarations(): Promise<DeclarationListV2>;
+  /** Conditionally add the declaration and its extension inventory as one generation, under provider.manage. The registry@1 Declare semantics for rules and ownership apply. */
+  declare(expectedRevision: string, declaration: DeclarationWithExtensions): Promise<DeclarationChange>;
+  /** Conditionally withdraw a declaration under provider.manage, with the registry@1 semantics. */
+  withdraw(expectedRevision: string, name: string): Promise<DeclarationChange>;
+  /** Wait for declarations, readings or extension inventories to change, under provider.manage. */
+  observe(cursor: string, waitMs: bigint): Promise<DeclarationObservationV2>;
+}
+
+export declare const RegistryV2Service: Readonly<{ wireName: "abstraction.facade/registry@2"; Client: typeof RegistryV2Client }>;
 
 // The explicit mutual-TLS trust of a remote runtime. server_name is the name
 // its certificate must carry. roots, certificate and key are absolute paths of
@@ -557,6 +657,10 @@ export declare function newApplicationPage(): ApplicationPage;
 
 export declare function newApplicationPresence(): ApplicationPresence;
 
+export declare function newApplicationStart(): ApplicationStart;
+
+export declare function newApplicationStartPage(): ApplicationStartPage;
+
 export declare function newBootstrapObservation(): BootstrapObservation;
 
 export declare function newCallerAttribute(): CallerAttribute;
@@ -571,13 +675,23 @@ export declare function newDeclarationCeiling(): DeclarationCeiling;
 
 export declare function newDeclarationChange(): DeclarationChange;
 
+export declare function newDeclarationExtension(): DeclarationExtension;
+
 export declare function newDeclarationHost(): DeclarationHost;
 
 export declare function newDeclarationList(): DeclarationList;
 
+export declare function newDeclarationListV2(): DeclarationListV2;
+
 export declare function newDeclarationObservation(): DeclarationObservation;
 
+export declare function newDeclarationObservationV2(): DeclarationObservationV2;
+
 export declare function newDeclarationState(): DeclarationState;
+
+export declare function newDeclarationStateV2(): DeclarationStateV2;
+
+export declare function newDeclarationWithExtensions(): DeclarationWithExtensions;
 
 export declare function newDescription(): Description;
 

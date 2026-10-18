@@ -1,6 +1,8 @@
 # Rust service client core
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications and capability-crate authors.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 `abstraction-facade-service` provides transport-independent `Machine<C>`, validated
 resolution and `Binding<C>`. Its only package dependency is the pure shared

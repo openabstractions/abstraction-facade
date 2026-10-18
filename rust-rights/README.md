@@ -1,6 +1,8 @@
 # Resolved rights decisions and policy administration
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 This optional crate adds `RightsMachine` to the pure facade `Machine<C>`.
 `resolve_rights(vec![], abstraction_facade_native::Scope::Local)` returns

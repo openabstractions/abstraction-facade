@@ -1,6 +1,8 @@
 # abstraction-facade-router
 
-Install status: source checkout only, version 0.0.0, not published to crates.io; no registry publish is planned for 0.3.0.
+*For Rust applications.*
+
+Install status: source checkout only, version 0.0.0, not published to crates.io.
 
 Resolves `abstraction.router/router@1` through a facade `Machine` and wraps the
 generated client. `models` and `hosts` read inventory; `pick` chooses a

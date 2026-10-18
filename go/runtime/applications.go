@@ -9,9 +9,9 @@ import (
 )
 
 // ApplicationsContract is the provider applications profile a applications service publishes.
-const ApplicationsContract = "abstraction.facade/applications@1"
+const ApplicationsContract = "abstraction.facade/applications@2"
 
-// ApplicationsService is a separately composed abstraction.facade/applications@1 host
+// ApplicationsService is a separately composed abstraction.facade/applications@2 host
 // over the runtime's application directory, already listening on
 // Options.ApplicationsEndpoint. The runtime serves it, publishes the profile and
 // closes it with the runtime. Its rights action goes in Options.RightsActions.

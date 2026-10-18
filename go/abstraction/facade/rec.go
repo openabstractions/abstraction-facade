@@ -220,12 +220,17 @@ type Description = canonical.Description
 type RemoteTrust = canonical.RemoteTrust
 type DeclarationCeiling = canonical.DeclarationCeiling
 type DeclarationHost = canonical.DeclarationHost
+type DeclarationExtension = canonical.DeclarationExtension
 type Declaration = canonical.Declaration
+type DeclarationWithExtensions = canonical.DeclarationWithExtensions
 type HostReading = canonical.HostReading
 type DeclarationState = canonical.DeclarationState
 type DeclarationList = canonical.DeclarationList
 type DeclarationChange = canonical.DeclarationChange
 type DeclarationObservation = canonical.DeclarationObservation
+type DeclarationStateV2 = canonical.DeclarationStateV2
+type DeclarationListV2 = canonical.DeclarationListV2
+type DeclarationObservationV2 = canonical.DeclarationObservationV2
 type ApplicationInterface = canonical.ApplicationInterface
 type ApplicationActivationRecipe = canonical.ApplicationActivationRecipe
 type ApplicationDescriptor = canonical.ApplicationDescriptor
@@ -236,6 +241,8 @@ type ApplicationEntry = canonical.ApplicationEntry
 type ApplicationChange = canonical.ApplicationChange
 type ApplicationPage = canonical.ApplicationPage
 type ApplicationActivationResult = canonical.ApplicationActivationResult
+type ApplicationStart = canonical.ApplicationStart
+type ApplicationStartPage = canonical.ApplicationStartPage
 
 func Encode(v *ResolveResult) []byte { return canonical.Encode(v) }
 
@@ -293,6 +300,15 @@ type RegistryClient = canonical.RegistryClient
 func NewRegistryClient(t RegistryTransport) *RegistryClient { return canonical.NewRegistryClient(t) }
 
 type RegistryDispatcher = canonical.RegistryDispatcher
+type RegistryV2 = canonical.RegistryV2
+type RegistryV2Transport = canonical.RegistryV2Transport
+type RegistryV2Client = canonical.RegistryV2Client
+
+func NewRegistryV2Client(t RegistryV2Transport) *RegistryV2Client {
+	return canonical.NewRegistryV2Client(t)
+}
+
+type RegistryV2Dispatcher = canonical.RegistryV2Dispatcher
 type Applications = canonical.Applications
 type ApplicationsTransport = canonical.ApplicationsTransport
 type ApplicationsClient = canonical.ApplicationsClient

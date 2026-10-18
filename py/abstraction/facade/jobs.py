@@ -1,7 +1,8 @@
 """Validated durable job binding. Transport cancellation changes waiting only."""
+from concurrent.futures import ThreadPoolExecutor, wait
 import threading
 import time
-from abstraction.ipc import FrameTransport, Library
+from abstraction.ipc import Cancellation, FrameTransport, Library
 import abstraction.job.acceptance as wire
 
 class JobError(RuntimeError):
@@ -185,12 +186,17 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
         self._receipt(c.receipt, requested, self._required)
         return result
 
-    def copy_result(self, requested, destination):
+    def copy_result(self, requested, destination, *, max_readers=1):
         """Copy under one call_scope() budget; preserve confirmed partial bytes.
 
         Injected transports must provide call_scope() with a shared deadline
         across its exchanges. The reusable binding is never mutated.
         """
+        if type(max_readers) is not int or not 1 <= max_readers <= 4:
+            error = JobError("invalid_request", "result readers must be 1..4")
+            raise ResultCopyError(0, error) from error
+        if max_readers != 1:
+            return self._copy_result_parallel(requested, destination, max_readers)
         written, operation, total = 0, None, None
         try:
             scope = getattr(self._transport, "call_scope", None)
@@ -214,6 +220,134 @@ class Jobs(wire.RecoverableAcceptance, wire.OperationControl):
                     return written
         except Exception as error:
             raise ResultCopyError(written, error) from error
+
+    def _copy_result_parallel(self, requested, destination, max_readers):
+        """Copy with a bounded read window and one ordered writer.
+
+        Only the native framed transport and its bindings can opt in: their
+        independent views retain the same absolute deadline and server proof.
+        """
+        written, pool, child = 0, None, None
+        active = set()
+        handed_off_cleanup = False
+        try:
+            from abstraction.facade.client import Binding
+            require(type(max_readers) is int and 2 <= max_readers <= 4,
+                    "invalid_request", "parallel result readers must be 2..4")
+            scope = getattr(self._transport, "call_scope", None)
+            require(callable(scope), "unsupported_waiting", "copy_result transport requires call_scope")
+            root = scope()
+            require(type(root) in (FrameTransport, Binding) and root.deadline is not None
+                    and (root.cancellation is None or isinstance(root.cancellation, Cancellation)),
+                    "unsupported_waiting", "parallel result copy requires a native framed call scope")
+            child = root.cancellation.child() if root.cancellation is not None else Cancellation(root.library)
+
+            def reader():
+                transport = root.with_waiting(deadline=root.deadline, cancellation=child)
+                require(transport is not root and transport.deadline == root.deadline
+                        and transport.cancellation is child and transport.server is root.server
+                        and transport.library is root.library and transport.endpoint == root.endpoint
+                        and transport.max_frame == root.max_frame and transport.sessions == root.sessions,
+                        "unsupported_waiting", "parallel reader lost its waiting policy or server proof")
+                return Jobs(transport, required_guarantees=self._required, _owner=self._owner)
+
+            first_reader = reader()
+            first = first_reader.read_result(requested, 0, 65536)
+            require(first.outcome == "data", first.outcome, "result copy unavailable")
+            chunk = first.chunk
+            operation, total = chunk.receipt.operation_id, chunk.total
+
+            def read_range(jobs, start, stop, initial=b""):
+                parts = [initial]
+                offset = start + len(initial)
+                while offset < stop:
+                    result = jobs.read_result(requested, offset, stop - offset)
+                    require(result.outcome == "data", result.outcome, "result copy unavailable")
+                    c = result.chunk
+                    require(c.receipt.operation_id == operation and c.total == total and c.offset == offset,
+                            "invalid_result", "result identity, total or offset changed")
+                    require(0 < len(c.data) <= stop - offset,
+                            "invalid_result", "result reader returned no progress or crossed its range")
+                    parts.append(c.data)
+                    offset += len(c.data)
+                return b"".join(parts)
+
+            def write(data):
+                nonlocal written
+                if data:
+                    n = destination.write(data)
+                    require(type(n) is int and 0 <= n <= len(data), "invalid_writer", "invalid write count")
+                    written += n
+                    require(n == len(data), "short_write", "result writer returned a short write")
+
+            if total == 0:
+                return 0
+            first_end = min(65536, total)
+            write(read_range(first_reader, 0, first_end, chunk.data))
+            if written == total:
+                return written
+
+            local = threading.local()
+            def worker(start, stop):
+                if not hasattr(local, "jobs"):
+                    local.jobs = reader()
+                return read_range(local.jobs, start, stop)
+
+            pool = ThreadPoolExecutor(max_workers=max_readers)
+            pending = []
+            next_offset = written
+            for _ in range(max_readers):
+                if next_offset >= total:
+                    break
+                stop = min(next_offset + 65536, total)
+                future = pool.submit(worker, next_offset, stop)
+                active.add(future)
+                pending.append((next_offset, stop, future))
+                next_offset = stop
+            while pending:
+                start, stop, future = pending.pop(0)
+                data = future.result()
+                active.discard(future)
+                require(len(data) == stop - start, "invalid_result", "result range was incomplete")
+                write(data)
+                # A later range may have failed while this ordered range was
+                # in flight. Observe that failure before scheduling more work.
+                for other in tuple(active):
+                    if other.done():
+                        other.result()
+                if next_offset < total:
+                    stop = min(next_offset + 65536, total)
+                    future = pool.submit(worker, next_offset, stop)
+                    active.add(future)
+                    pending.append((next_offset, stop, future))
+                    next_offset = stop
+            return written
+        except Exception as error:
+            if child is not None:
+                child.signal()
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
+                _, unfinished = wait(active, timeout=2.0)
+                if unfinished:
+                    # A native cancellation should drain promptly. Keep the
+                    # token alive until late calls finish without waiting past
+                    # the bounded cleanup interval on this caller's thread.
+                    cleanup_lock = threading.Lock()
+                    cleaned = [False]
+                    def close_after_drain(completed_future):
+                        with cleanup_lock:
+                            if not cleaned[0] and all(f.done() for f in active):
+                                cleaned[0] = True
+                                child.close()
+                    for future in unfinished:
+                        future.add_done_callback(close_after_drain)
+                    handed_off_cleanup = True
+            raise ResultCopyError(written, error) from error
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
+            if child is not None and not handed_off_cleanup:
+                child.close()
 
 class Inventory(wire.JobInventory):
     def __init__(self, transport, *, required_guarantees=(), expected_owner="", _owner=None):

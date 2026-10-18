@@ -745,6 +745,16 @@ struct DeclarationHost {
     std::optional<DeclarationCeiling> ceiling;
 };
 
+// One required inference extension key a provider or remote runtime asserts it
+// can examine for a declared profile. This operator-managed inventory lets the
+// selecting runtime refuse unknown required keys before activating a provider;
+// the selected service still validates values and model-specific support before
+// accepting work.
+struct DeclarationExtension {
+    std::string profile;
+    std::string key;
+};
+
 // One program the runtime knows. name is 1..64 bytes of a-z 0-9 _ - and unique.
 // role names what it is, and each role validates its own fields (FAC-R6). A
 // provider declares program, the absolute executable path the runtime launches
@@ -761,9 +771,14 @@ struct DeclarationHost {
 // of declaration_resource_kinds, name 1..64 bytes of a-z 0-9 _ . -;
 // profile:<name> is what a host or a remote serves. models is the 0..64
 // distinct model names a native inference provider is trusted to serve, each
-// 1..256 UTF-8 bytes without controls. on_demand launches program as a
-// supervised child when a resolution first needs it; attach reads a provider
-// something else started.
+// 1..256 UTF-8 bytes without controls; an entry <profile>:<model> whose profile
+// the declaration serves (a listed profile whose contract it declares, or chat
+// for a chat-only declaration listing none) serves model for that profile
+// alone, any other entry serves every served profile, and a model named chat:x
+// is written chat:chat:x (abstraction.router ROUTE-D9). on_demand launches
+// program as a supervised child when a resolution first needs it; attach reads
+// a provider something else started. Extension inventory lives in registry@2
+// and is omitted from this strict registry@1 projection.
 struct Declaration {
     std::string name;
     std::string program;
@@ -778,6 +793,14 @@ struct Declaration {
     std::vector<std::string> models;
     DeclarationRole role{};
     std::optional<DeclarationHost> host;
+};
+
+// One atomic registry@2 edit. The extension inventory is validated against the
+// declaration's served inference profiles and stored with that declaration
+// generation. An empty inventory asserts no required extension support.
+struct DeclarationWithExtensions {
+    Declaration declaration;
+    std::vector<DeclarationExtension> supported_extensions;
 };
 
 // The router's latest reading of a host declaration: whether its last survey
@@ -851,6 +874,29 @@ struct DeclarationObservation {
     DeclarationListOutcome outcome{};
     std::string cursor;
     std::vector<DeclarationState> declarations;
+};
+
+// The registry@1 state and the extension inventory from the same declaration
+// snapshot.
+struct DeclarationStateV2 {
+    DeclarationState state;
+    std::vector<DeclarationExtension> supported_extensions;
+};
+
+// The registry@2 declarations and their edit revision. Refusals carry an empty
+// revision and no declarations.
+struct DeclarationListV2 {
+    DeclarationListOutcome outcome{};
+    std::string revision;
+    std::vector<DeclarationStateV2> declarations;
+};
+
+// The registry@2 declarations and readings from one snapshot. The cursor
+// includes extension inventory changes.
+struct DeclarationObservationV2 {
+    DeclarationListOutcome outcome{};
+    std::string cursor;
+    std::vector<DeclarationStateV2> declarations;
 };
 
 // An application's claimed interface metadata. name identifies it within one
@@ -927,11 +973,16 @@ struct ApplicationInstance {
 // One installed application's descriptor with its currently leased instances.
 // scope records directory provenance; this local profile supplies local and
 // never imports remote announcements. An empty instance list makes no claim
-// about whether an unregistered process is running.
+// about whether an unregistered process is running. self_registered is present
+// and true while the entry was registered by its own program under the
+// account-wide registration default and the person has not answered Keep to the
+// runtime's question about it (AskConfirmation). Only such entries carry the
+// field.
 struct ApplicationEntry {
     ApplicationDescriptor descriptor;
     std::vector<ApplicationInstance> instances;
     Scope scope{};
+    bool self_registered = false;
 };
 
 // applied confirms the change; an announcement returns its opaque instance.
@@ -968,6 +1019,36 @@ struct ApplicationActivationResult {
     std::string instance;
     bool started = false;
     std::string reason;
+};
+
+// One time an application became present in this runtime: the first announced
+// instance of a registered application in a local session where none of its
+// instances was live. application, program and title are the descriptor's at
+// that time. launched is true when this runtime's own activation attempt for
+// the application in that session was waiting for it; false means the
+// application announced itself. It records a fresh announcement, not process
+// lineage, and a runtime restart makes every running application announce
+// again.
+struct ApplicationStart {
+    std::string application;
+    std::string program;
+    std::string title;
+    std::int64_t started_unix_ms = 0;
+    bool launched = false;
+};
+
+// page carries at most the requested 1..64 starts, newest first. complete means
+// the log was exhausted; otherwise cursor continues it. complete_since_unix_ms
+// is zero while every retained start is listed; otherwise starts at or before
+// it may have been evicted. stale means the cursor's log changed or belongs to
+// another runtime: restart from an empty cursor. Other outcomes carry no starts
+// or cursor.
+struct ApplicationStartPage {
+    ApplicationOutcome outcome{};
+    std::vector<ApplicationStart> starts;
+    std::string cursor;
+    bool complete = false;
+    std::int64_t complete_since_unix_ms = 0;
 };
 
 // Codec machinery. Nothing here is API; it may change in any release.
@@ -1151,8 +1232,30 @@ struct OARegistryObserveArguments {
     std::int64_t wait_ms = 0;
 };
 
+struct OARegistryV2DeclarationsArguments {
+};
+
+struct OARegistryV2DeclareArguments {
+    std::string expected_revision;
+    DeclarationWithExtensions declaration;
+};
+
+struct OARegistryV2WithdrawArguments {
+    std::string expected_revision;
+    std::string name;
+};
+
+struct OARegistryV2ObserveArguments {
+    std::string cursor;
+    std::int64_t wait_ms = 0;
+};
+
 struct OAApplicationsRegisterArguments {
     ApplicationDescriptor descriptor;
+};
+
+struct OAApplicationsAskConfirmationArguments {
+    std::string application;
 };
 
 struct OAApplicationsRemoveArguments {
@@ -1175,6 +1278,11 @@ struct OAApplicationsObserveArguments {
 
 struct OAApplicationsActivateArguments {
     std::string application;
+};
+
+struct OAApplicationsListStartsArguments {
+    std::string cursor;
+    std::int64_t limit = 0;
 };
 
 struct OAServiceFrame {
@@ -1225,7 +1333,27 @@ struct OARegistryObserveResult {
     DeclarationObservation value;
 };
 
+struct OARegistryV2DeclarationsResult {
+    DeclarationListV2 value;
+};
+
+struct OARegistryV2DeclareResult {
+    DeclarationChange value;
+};
+
+struct OARegistryV2WithdrawResult {
+    DeclarationChange value;
+};
+
+struct OARegistryV2ObserveResult {
+    DeclarationObservationV2 value;
+};
+
 struct OAApplicationsRegisterResult {
+    ApplicationChange value;
+};
+
+struct OAApplicationsAskConfirmationResult {
     ApplicationChange value;
 };
 
@@ -1248,6 +1376,10 @@ struct OAApplicationsObserveResult {
 struct OAApplicationsActivateResult {
     ApplicationActivationResult value;
 };
+
+struct OAApplicationsListStartsResult {
+    ApplicationStartPage value;
+};
 inline void enc_resolve_request(std::string&, const ResolveRequest&, int);
 inline void enc_service_reference(std::string&, const ServiceReference&, int);
 inline void enc_resolve_result(std::string&, const ResolveResult&, int);
@@ -1261,12 +1393,17 @@ inline void enc_description(std::string&, const Description&, int);
 inline void enc_remote_trust(std::string&, const RemoteTrust&, int);
 inline void enc_declaration_ceiling(std::string&, const DeclarationCeiling&, int);
 inline void enc_declaration_host(std::string&, const DeclarationHost&, int);
+inline void enc_declaration_extension(std::string&, const DeclarationExtension&, int);
 inline void enc_declaration(std::string&, const Declaration&, int);
+inline void enc_declaration_with_extensions(std::string&, const DeclarationWithExtensions&, int);
 inline void enc_host_reading(std::string&, const HostReading&, int);
 inline void enc_declaration_state(std::string&, const DeclarationState&, int);
 inline void enc_declaration_list(std::string&, const DeclarationList&, int);
 inline void enc_declaration_change(std::string&, const DeclarationChange&, int);
 inline void enc_declaration_observation(std::string&, const DeclarationObservation&, int);
+inline void enc_declaration_state_v2(std::string&, const DeclarationStateV2&, int);
+inline void enc_declaration_list_v2(std::string&, const DeclarationListV2&, int);
+inline void enc_declaration_observation_v2(std::string&, const DeclarationObservationV2&, int);
 inline void enc_application_interface(std::string&, const ApplicationInterface&, int);
 inline void enc_application_activation_recipe(std::string&, const ApplicationActivationRecipe&, int);
 inline void enc_application_descriptor(std::string&, const ApplicationDescriptor&, int);
@@ -1277,6 +1414,8 @@ inline void enc_application_entry(std::string&, const ApplicationEntry&, int);
 inline void enc_application_change(std::string&, const ApplicationChange&, int);
 inline void enc_application_page(std::string&, const ApplicationPage&, int);
 inline void enc_application_activation_result(std::string&, const ApplicationActivationResult&, int);
+inline void enc_application_start(std::string&, const ApplicationStart&, int);
+inline void enc_application_start_page(std::string&, const ApplicationStartPage&, int);
 inline void enc_oa_resolver_resolve_arguments(std::string&, const OAResolverResolveArguments&, int);
 inline void enc_oa_caller_observe_arguments(std::string&, const OACallerObserveArguments&, int);
 inline void enc_oa_endpoint_describe_arguments(std::string&, const OAEndpointDescribeArguments&, int);
@@ -1284,12 +1423,18 @@ inline void enc_oa_registry_declarations_arguments(std::string&, const OARegistr
 inline void enc_oa_registry_declare_arguments(std::string&, const OARegistryDeclareArguments&, int);
 inline void enc_oa_registry_withdraw_arguments(std::string&, const OARegistryWithdrawArguments&, int);
 inline void enc_oa_registry_observe_arguments(std::string&, const OARegistryObserveArguments&, int);
+inline void enc_oa_registry_v2_declarations_arguments(std::string&, const OARegistryV2DeclarationsArguments&, int);
+inline void enc_oa_registry_v2_declare_arguments(std::string&, const OARegistryV2DeclareArguments&, int);
+inline void enc_oa_registry_v2_withdraw_arguments(std::string&, const OARegistryV2WithdrawArguments&, int);
+inline void enc_oa_registry_v2_observe_arguments(std::string&, const OARegistryV2ObserveArguments&, int);
 inline void enc_oa_applications_register_arguments(std::string&, const OAApplicationsRegisterArguments&, int);
+inline void enc_oa_applications_ask_confirmation_arguments(std::string&, const OAApplicationsAskConfirmationArguments&, int);
 inline void enc_oa_applications_remove_arguments(std::string&, const OAApplicationsRemoveArguments&, int);
 inline void enc_oa_applications_announce_arguments(std::string&, const OAApplicationsAnnounceArguments&, int);
 inline void enc_oa_applications_withdraw_arguments(std::string&, const OAApplicationsWithdrawArguments&, int);
 inline void enc_oa_applications_observe_arguments(std::string&, const OAApplicationsObserveArguments&, int);
 inline void enc_oa_applications_activate_arguments(std::string&, const OAApplicationsActivateArguments&, int);
+inline void enc_oa_applications_list_starts_arguments(std::string&, const OAApplicationsListStartsArguments&, int);
 inline void enc_oa_service_frame(std::string&, const OAServiceFrame&, int);
 inline void enc_oa_service_reply(std::string&, const OAServiceReply&, int);
 inline void enc_oa_service_error(std::string&, const OAServiceError&, int);
@@ -1300,12 +1445,18 @@ inline void enc_oa_registry_declarations_result(std::string&, const OARegistryDe
 inline void enc_oa_registry_declare_result(std::string&, const OARegistryDeclareResult&, int);
 inline void enc_oa_registry_withdraw_result(std::string&, const OARegistryWithdrawResult&, int);
 inline void enc_oa_registry_observe_result(std::string&, const OARegistryObserveResult&, int);
+inline void enc_oa_registry_v2_declarations_result(std::string&, const OARegistryV2DeclarationsResult&, int);
+inline void enc_oa_registry_v2_declare_result(std::string&, const OARegistryV2DeclareResult&, int);
+inline void enc_oa_registry_v2_withdraw_result(std::string&, const OARegistryV2WithdrawResult&, int);
+inline void enc_oa_registry_v2_observe_result(std::string&, const OARegistryV2ObserveResult&, int);
 inline void enc_oa_applications_register_result(std::string&, const OAApplicationsRegisterResult&, int);
+inline void enc_oa_applications_ask_confirmation_result(std::string&, const OAApplicationsAskConfirmationResult&, int);
 inline void enc_oa_applications_remove_result(std::string&, const OAApplicationsRemoveResult&, int);
 inline void enc_oa_applications_announce_result(std::string&, const OAApplicationsAnnounceResult&, int);
 inline void enc_oa_applications_withdraw_result(std::string&, const OAApplicationsWithdrawResult&, int);
 inline void enc_oa_applications_observe_result(std::string&, const OAApplicationsObserveResult&, int);
 inline void enc_oa_applications_activate_result(std::string&, const OAApplicationsActivateResult&, int);
+inline void enc_oa_applications_list_starts_result(std::string&, const OAApplicationsListStartsResult&, int);
 
 inline void enc_resolve_request(std::string& out, const ResolveRequest& v, int depth) {
     if (wire_name(v.scope).empty()) throw Refusal("bad_enum", 0);
@@ -1764,6 +1915,24 @@ inline void enc_declaration_host(std::string& out, const DeclarationHost& v, int
     out += '}';
 }
 
+inline void enc_declaration_extension(std::string& out, const DeclarationExtension& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "profile");
+    out += ": ";
+    esc(out, v.profile);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "key");
+    out += ": ";
+    esc(out, v.key);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
 inline void enc_declaration(std::string& out, const Declaration& v, int depth) {
     if (wire_name(v.transport).empty()) throw Refusal("bad_enum", 0);
     if (wire_name(v.activation).empty()) throw Refusal("bad_enum", 0);
@@ -1857,6 +2026,26 @@ inline void enc_declaration(std::string& out, const Declaration& v, int depth) {
         esc(out, "host");
         out += ": ";
         enc_declaration_host(out, *v.host, depth + 1);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_declaration_with_extensions(std::string& out, const DeclarationWithExtensions& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "declaration");
+    out += ": ";
+    enc_declaration(out, v.declaration, depth + 1);
+    if (!v.supported_extensions.empty()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "supported_extensions");
+        out += ": ";
+        enc_list<DeclarationExtension>(out, v.supported_extensions, depth + 1, enc_declaration_extension);
     }
     out += '\n';
     pad(out, depth);
@@ -2025,6 +2214,76 @@ inline void enc_declaration_observation(std::string& out, const DeclarationObser
     esc(out, "declarations");
     out += ": ";
     enc_list<DeclarationState>(out, v.declarations, depth + 1, enc_declaration_state);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_declaration_state_v2(std::string& out, const DeclarationStateV2& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "state");
+    out += ": ";
+    enc_declaration_state(out, v.state, depth + 1);
+    if (!v.supported_extensions.empty()) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "supported_extensions");
+        out += ": ";
+        enc_list<DeclarationExtension>(out, v.supported_extensions, depth + 1, enc_declaration_extension);
+    }
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_declaration_list_v2(std::string& out, const DeclarationListV2& v, int depth) {
+    if (wire_name(v.outcome).empty()) throw Refusal("bad_enum", 0);
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "outcome");
+    out += ": ";
+    esc(out, std::string(wire_name(v.outcome)));
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "revision");
+    out += ": ";
+    esc(out, v.revision);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "declarations");
+    out += ": ";
+    enc_list<DeclarationStateV2>(out, v.declarations, depth + 1, enc_declaration_state_v2);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_declaration_observation_v2(std::string& out, const DeclarationObservationV2& v, int depth) {
+    if (wire_name(v.outcome).empty()) throw Refusal("bad_enum", 0);
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "outcome");
+    out += ": ";
+    esc(out, std::string(wire_name(v.outcome)));
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out += ": ";
+    esc(out, v.cursor);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "declarations");
+    out += ": ";
+    enc_list<DeclarationStateV2>(out, v.declarations, depth + 1, enc_declaration_state_v2);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -2226,6 +2485,14 @@ inline void enc_application_entry(std::string& out, const ApplicationEntry& v, i
     esc(out, "scope");
     out += ": ";
     esc(out, std::string(wire_name(v.scope)));
+    if (v.self_registered) {
+        out += ',';
+        out += '\n';
+        pad(out, depth + 1);
+        esc(out, "self_registered");
+        out += ": ";
+        out += v.self_registered ? "true" : "false";
+    }
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -2312,6 +2579,79 @@ inline void enc_application_activation_result(std::string& out, const Applicatio
     out += '}';
 }
 
+inline void enc_application_start(std::string& out, const ApplicationStart& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "application");
+    out += ": ";
+    esc(out, v.application);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "program");
+    out += ": ";
+    esc(out, v.program);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "title");
+    out += ": ";
+    esc(out, v.title);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "started_unix_ms");
+    out += ": ";
+    num(out, v.started_unix_ms);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "launched");
+    out += ": ";
+    out += v.launched ? "true" : "false";
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_application_start_page(std::string& out, const ApplicationStartPage& v, int depth) {
+    if (wire_name(v.outcome).empty()) throw Refusal("bad_enum", 0);
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "outcome");
+    out += ": ";
+    esc(out, std::string(wire_name(v.outcome)));
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "starts");
+    out += ": ";
+    enc_list<ApplicationStart>(out, v.starts, depth + 1, enc_application_start);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out += ": ";
+    esc(out, v.cursor);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "complete");
+    out += ": ";
+    out += v.complete ? "true" : "false";
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "complete_since_unix_ms");
+    out += ": ";
+    num(out, v.complete_since_unix_ms);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
 inline void enc_oa_resolver_resolve_arguments(std::string& out, const OAResolverResolveArguments& v, int depth) {
     out += '{';
     out += '\n';
@@ -2325,16 +2665,22 @@ inline void enc_oa_resolver_resolve_arguments(std::string& out, const OAResolver
 }
 
 inline void enc_oa_caller_observe_arguments(std::string& out, const OACallerObserveArguments& v, int depth) {
+    (void)v;
+    (void)depth;
     out += '{';
     out += '}';
 }
 
 inline void enc_oa_endpoint_describe_arguments(std::string& out, const OAEndpointDescribeArguments& v, int depth) {
+    (void)v;
+    (void)depth;
     out += '{';
     out += '}';
 }
 
 inline void enc_oa_registry_declarations_arguments(std::string& out, const OARegistryDeclarationsArguments& v, int depth) {
+    (void)v;
+    (void)depth;
     out += '{';
     out += '}';
 }
@@ -2393,6 +2739,67 @@ inline void enc_oa_registry_observe_arguments(std::string& out, const OARegistry
     out += '}';
 }
 
+inline void enc_oa_registry_v2_declarations_arguments(std::string& out, const OARegistryV2DeclarationsArguments& v, int depth) {
+    (void)v;
+    (void)depth;
+    out += '{';
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_declare_arguments(std::string& out, const OARegistryV2DeclareArguments& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "expected_revision");
+    out += ": ";
+    esc(out, v.expected_revision);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "declaration");
+    out += ": ";
+    enc_declaration_with_extensions(out, v.declaration, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_withdraw_arguments(std::string& out, const OARegistryV2WithdrawArguments& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "expected_revision");
+    out += ": ";
+    esc(out, v.expected_revision);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "name");
+    out += ": ";
+    esc(out, v.name);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_observe_arguments(std::string& out, const OARegistryV2ObserveArguments& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out += ": ";
+    esc(out, v.cursor);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "wait_ms");
+    out += ": ";
+    num(out, v.wait_ms);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
 inline void enc_oa_applications_register_arguments(std::string& out, const OAApplicationsRegisterArguments& v, int depth) {
     out += '{';
     out += '\n';
@@ -2400,6 +2807,18 @@ inline void enc_oa_applications_register_arguments(std::string& out, const OAApp
     esc(out, "descriptor");
     out += ": ";
     enc_application_descriptor(out, v.descriptor, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_applications_ask_confirmation_arguments(std::string& out, const OAApplicationsAskConfirmationArguments& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "application");
+    out += ": ";
+    esc(out, v.application);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -2472,6 +2891,24 @@ inline void enc_oa_applications_activate_arguments(std::string& out, const OAApp
     esc(out, "application");
     out += ": ";
     esc(out, v.application);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_applications_list_starts_arguments(std::string& out, const OAApplicationsListStartsArguments& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "cursor");
+    out += ": ";
+    esc(out, v.cursor);
+    out += ',';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "limit");
+    out += ": ";
+    num(out, v.limit);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -2645,7 +3082,67 @@ inline void enc_oa_registry_observe_result(std::string& out, const OARegistryObs
     out += '}';
 }
 
+inline void enc_oa_registry_v2_declarations_result(std::string& out, const OARegistryV2DeclarationsResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_declaration_list_v2(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_declare_result(std::string& out, const OARegistryV2DeclareResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_declaration_change(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_withdraw_result(std::string& out, const OARegistryV2WithdrawResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_declaration_change(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_registry_v2_observe_result(std::string& out, const OARegistryV2ObserveResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_declaration_observation_v2(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
 inline void enc_oa_applications_register_result(std::string& out, const OAApplicationsRegisterResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_application_change(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_applications_ask_confirmation_result(std::string& out, const OAApplicationsAskConfirmationResult& v, int depth) {
     out += '{';
     out += '\n';
     pad(out, depth + 1);
@@ -2712,6 +3209,18 @@ inline void enc_oa_applications_activate_result(std::string& out, const OAApplic
     esc(out, "value");
     out += ": ";
     enc_application_activation_result(out, v.value, depth + 1);
+    out += '\n';
+    pad(out, depth);
+    out += '}';
+}
+
+inline void enc_oa_applications_list_starts_result(std::string& out, const OAApplicationsListStartsResult& v, int depth) {
+    out += '{';
+    out += '\n';
+    pad(out, depth + 1);
+    esc(out, "value");
+    out += ": ";
+    enc_application_start_page(out, v.value, depth + 1);
     out += '\n';
     pad(out, depth);
     out += '}';
@@ -3075,12 +3584,17 @@ inline Description decode_description(Reader& r);
 inline RemoteTrust decode_remote_trust(Reader& r);
 inline DeclarationCeiling decode_declaration_ceiling(Reader& r);
 inline DeclarationHost decode_declaration_host(Reader& r);
+inline DeclarationExtension decode_declaration_extension(Reader& r);
 inline Declaration decode_declaration(Reader& r);
+inline DeclarationWithExtensions decode_declaration_with_extensions(Reader& r);
 inline HostReading decode_host_reading(Reader& r);
 inline DeclarationState decode_declaration_state(Reader& r);
 inline DeclarationList decode_declaration_list(Reader& r);
 inline DeclarationChange decode_declaration_change(Reader& r);
 inline DeclarationObservation decode_declaration_observation(Reader& r);
+inline DeclarationStateV2 decode_declaration_state_v2(Reader& r);
+inline DeclarationListV2 decode_declaration_list_v2(Reader& r);
+inline DeclarationObservationV2 decode_declaration_observation_v2(Reader& r);
 inline ApplicationInterface decode_application_interface(Reader& r);
 inline ApplicationActivationRecipe decode_application_activation_recipe(Reader& r);
 inline ApplicationDescriptor decode_application_descriptor(Reader& r);
@@ -3091,6 +3605,8 @@ inline ApplicationEntry decode_application_entry(Reader& r);
 inline ApplicationChange decode_application_change(Reader& r);
 inline ApplicationPage decode_application_page(Reader& r);
 inline ApplicationActivationResult decode_application_activation_result(Reader& r);
+inline ApplicationStart decode_application_start(Reader& r);
+inline ApplicationStartPage decode_application_start_page(Reader& r);
 inline OAResolverResolveArguments decode_oa_resolver_resolve_arguments(Reader& r);
 inline OACallerObserveArguments decode_oa_caller_observe_arguments(Reader& r);
 inline OAEndpointDescribeArguments decode_oa_endpoint_describe_arguments(Reader& r);
@@ -3098,12 +3614,18 @@ inline OARegistryDeclarationsArguments decode_oa_registry_declarations_arguments
 inline OARegistryDeclareArguments decode_oa_registry_declare_arguments(Reader& r);
 inline OARegistryWithdrawArguments decode_oa_registry_withdraw_arguments(Reader& r);
 inline OARegistryObserveArguments decode_oa_registry_observe_arguments(Reader& r);
+inline OARegistryV2DeclarationsArguments decode_oa_registry_v2_declarations_arguments(Reader& r);
+inline OARegistryV2DeclareArguments decode_oa_registry_v2_declare_arguments(Reader& r);
+inline OARegistryV2WithdrawArguments decode_oa_registry_v2_withdraw_arguments(Reader& r);
+inline OARegistryV2ObserveArguments decode_oa_registry_v2_observe_arguments(Reader& r);
 inline OAApplicationsRegisterArguments decode_oa_applications_register_arguments(Reader& r);
+inline OAApplicationsAskConfirmationArguments decode_oa_applications_ask_confirmation_arguments(Reader& r);
 inline OAApplicationsRemoveArguments decode_oa_applications_remove_arguments(Reader& r);
 inline OAApplicationsAnnounceArguments decode_oa_applications_announce_arguments(Reader& r);
 inline OAApplicationsWithdrawArguments decode_oa_applications_withdraw_arguments(Reader& r);
 inline OAApplicationsObserveArguments decode_oa_applications_observe_arguments(Reader& r);
 inline OAApplicationsActivateArguments decode_oa_applications_activate_arguments(Reader& r);
+inline OAApplicationsListStartsArguments decode_oa_applications_list_starts_arguments(Reader& r);
 inline OAServiceFrame decode_oa_service_frame(Reader& r);
 inline OAServiceReply decode_oa_service_reply(Reader& r);
 inline OAServiceError decode_oa_service_error(Reader& r);
@@ -3114,12 +3636,18 @@ inline OARegistryDeclarationsResult decode_oa_registry_declarations_result(Reade
 inline OARegistryDeclareResult decode_oa_registry_declare_result(Reader& r);
 inline OARegistryWithdrawResult decode_oa_registry_withdraw_result(Reader& r);
 inline OARegistryObserveResult decode_oa_registry_observe_result(Reader& r);
+inline OARegistryV2DeclarationsResult decode_oa_registry_v2_declarations_result(Reader& r);
+inline OARegistryV2DeclareResult decode_oa_registry_v2_declare_result(Reader& r);
+inline OARegistryV2WithdrawResult decode_oa_registry_v2_withdraw_result(Reader& r);
+inline OARegistryV2ObserveResult decode_oa_registry_v2_observe_result(Reader& r);
 inline OAApplicationsRegisterResult decode_oa_applications_register_result(Reader& r);
+inline OAApplicationsAskConfirmationResult decode_oa_applications_ask_confirmation_result(Reader& r);
 inline OAApplicationsRemoveResult decode_oa_applications_remove_result(Reader& r);
 inline OAApplicationsAnnounceResult decode_oa_applications_announce_result(Reader& r);
 inline OAApplicationsWithdrawResult decode_oa_applications_withdraw_result(Reader& r);
 inline OAApplicationsObserveResult decode_oa_applications_observe_result(Reader& r);
 inline OAApplicationsActivateResult decode_oa_applications_activate_result(Reader& r);
+inline OAApplicationsListStartsResult decode_oa_applications_list_starts_result(Reader& r);
 
 inline ResolveRequest decode_resolve_request(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
@@ -3793,6 +4321,45 @@ inline DeclarationHost decode_declaration_host(Reader& r) {
     return v;
 }
 
+inline DeclarationExtension decode_declaration_extension(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationExtension v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "profile") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.profile = r.str();
+            } else if (key == "key") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.key = r.str();
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
+    return v;
+}
+
 inline Declaration decode_declaration(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
     r.enter();
@@ -3891,6 +4458,45 @@ inline Declaration decode_declaration(Reader& r) {
         if (!parsed) r.refuse("bad_enum");
         v.role = *parsed;
     }
+    return v;
+}
+
+inline DeclarationWithExtensions decode_declaration_with_extensions(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationWithExtensions v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "declaration") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.declaration = decode_declaration(r);
+            } else if (key == "supported_extensions") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.supported_extensions = decode_list<DeclarationExtension>(r, decode_declaration_extension);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
     return v;
 }
 
@@ -4143,6 +4749,143 @@ inline DeclarationObservation decode_declaration_observation(Reader& r) {
                 if (seen & 4u) r.refuse("duplicate_field");
                 seen |= 4u;
                 v.declarations = decode_list<DeclarationState>(r, decode_declaration_state);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 7u) != 7u) r.refuse("missing_field");
+    if (wire_outcome) {
+        const auto parsed = parse_declaration_list_outcome(*wire_outcome);
+        if (!parsed) r.refuse("bad_enum");
+        v.outcome = *parsed;
+    }
+    return v;
+}
+
+inline DeclarationStateV2 decode_declaration_state_v2(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationStateV2 v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "state") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.state = decode_declaration_state(r);
+            } else if (key == "supported_extensions") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.supported_extensions = decode_list<DeclarationExtension>(r, decode_declaration_extension);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline DeclarationListV2 decode_declaration_list_v2(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationListV2 v;
+    std::optional<std::string> wire_outcome;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "outcome") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                wire_outcome = r.str();
+            } else if (key == "revision") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.revision = r.str();
+            } else if (key == "declarations") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.declarations = decode_list<DeclarationStateV2>(r, decode_declaration_state_v2);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 7u) != 7u) r.refuse("missing_field");
+    if (wire_outcome) {
+        const auto parsed = parse_declaration_list_outcome(*wire_outcome);
+        if (!parsed) r.refuse("bad_enum");
+        v.outcome = *parsed;
+    }
+    return v;
+}
+
+inline DeclarationObservationV2 decode_declaration_observation_v2(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    DeclarationObservationV2 v;
+    std::optional<std::string> wire_outcome;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "outcome") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                wire_outcome = r.str();
+            } else if (key == "cursor") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.cursor = r.str();
+            } else if (key == "declarations") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.declarations = decode_list<DeclarationStateV2>(r, decode_declaration_state_v2);
             } else {
                 r.refuse("unknown_field");
             }
@@ -4470,6 +5213,10 @@ inline ApplicationEntry decode_application_entry(Reader& r) {
                 if (seen & 4u) r.refuse("duplicate_field");
                 seen |= 4u;
                 wire_scope = r.str();
+            } else if (key == "self_registered") {
+                if (seen & 8u) r.refuse("duplicate_field");
+                seen |= 8u;
+                v.self_registered = r.boolean();
             } else {
                 r.refuse("unknown_field");
             }
@@ -4641,6 +5388,114 @@ inline ApplicationActivationResult decode_application_activation_result(Reader& 
     return v;
 }
 
+inline ApplicationStart decode_application_start(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    ApplicationStart v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "application") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.application = r.str();
+            } else if (key == "program") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.program = r.str();
+            } else if (key == "title") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.title = r.str();
+            } else if (key == "started_unix_ms") {
+                if (seen & 8u) r.refuse("duplicate_field");
+                seen |= 8u;
+                v.started_unix_ms = r.integer(INT64_MIN, INT64_MAX);
+            } else if (key == "launched") {
+                if (seen & 16u) r.refuse("duplicate_field");
+                seen |= 16u;
+                v.launched = r.boolean();
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 31u) != 31u) r.refuse("missing_field");
+    return v;
+}
+
+inline ApplicationStartPage decode_application_start_page(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    ApplicationStartPage v;
+    std::optional<std::string> wire_outcome;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "outcome") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                wire_outcome = r.str();
+            } else if (key == "starts") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.starts = decode_list<ApplicationStart>(r, decode_application_start);
+            } else if (key == "cursor") {
+                if (seen & 4u) r.refuse("duplicate_field");
+                seen |= 4u;
+                v.cursor = r.str();
+            } else if (key == "complete") {
+                if (seen & 8u) r.refuse("duplicate_field");
+                seen |= 8u;
+                v.complete = r.boolean();
+            } else if (key == "complete_since_unix_ms") {
+                if (seen & 16u) r.refuse("duplicate_field");
+                seen |= 16u;
+                v.complete_since_unix_ms = r.integer(INT64_MIN, INT64_MAX);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 31u) != 31u) r.refuse("missing_field");
+    if (wire_outcome) {
+        const auto parsed = parse_application_outcome(*wire_outcome);
+        if (!parsed) r.refuse("bad_enum");
+        v.outcome = *parsed;
+    }
+    return v;
+}
+
 inline OAResolverResolveArguments decode_oa_resolver_resolve_arguments(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
     r.enter();
@@ -4681,7 +5536,6 @@ inline OACallerObserveArguments decode_oa_caller_observe_arguments(Reader& r) {
     r.enter();
     ++r.pos;
     OACallerObserveArguments v;
-    std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
         for (;;) {
@@ -4712,7 +5566,6 @@ inline OAEndpointDescribeArguments decode_oa_endpoint_describe_arguments(Reader&
     r.enter();
     ++r.pos;
     OAEndpointDescribeArguments v;
-    std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
         for (;;) {
@@ -4743,7 +5596,6 @@ inline OARegistryDeclarationsArguments decode_oa_registry_declarations_arguments
     r.enter();
     ++r.pos;
     OARegistryDeclarationsArguments v;
-    std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
         for (;;) {
@@ -4886,6 +5738,153 @@ inline OARegistryObserveArguments decode_oa_registry_observe_arguments(Reader& r
     return v;
 }
 
+inline OARegistryV2DeclarationsArguments decode_oa_registry_v2_declarations_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2DeclarationsArguments v;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (false) {
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    return v;
+}
+
+inline OARegistryV2DeclareArguments decode_oa_registry_v2_declare_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2DeclareArguments v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "expected_revision") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.expected_revision = r.str();
+            } else if (key == "declaration") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.declaration = decode_declaration_with_extensions(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
+    return v;
+}
+
+inline OARegistryV2WithdrawArguments decode_oa_registry_v2_withdraw_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2WithdrawArguments v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "expected_revision") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.expected_revision = r.str();
+            } else if (key == "name") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.name = r.str();
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
+    return v;
+}
+
+inline OARegistryV2ObserveArguments decode_oa_registry_v2_observe_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2ObserveArguments v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "cursor") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.cursor = r.str();
+            } else if (key == "wait_ms") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.wait_ms = r.integer(INT64_MIN, INT64_MAX);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
+    return v;
+}
+
 inline OAApplicationsRegisterArguments decode_oa_applications_register_arguments(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
     r.enter();
@@ -4906,6 +5905,41 @@ inline OAApplicationsRegisterArguments decode_oa_applications_register_arguments
                 if (seen & 1u) r.refuse("duplicate_field");
                 seen |= 1u;
                 v.descriptor = decode_application_descriptor(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OAApplicationsAskConfirmationArguments decode_oa_applications_ask_confirmation_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OAApplicationsAskConfirmationArguments v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "application") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.application = r.str();
             } else {
                 r.refuse("unknown_field");
             }
@@ -5101,6 +6135,45 @@ inline OAApplicationsActivateArguments decode_oa_applications_activate_arguments
     ++r.pos;
     --r.depth;
     if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OAApplicationsListStartsArguments decode_oa_applications_list_starts_arguments(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OAApplicationsListStartsArguments v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "cursor") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.cursor = r.str();
+            } else if (key == "limit") {
+                if (seen & 2u) r.refuse("duplicate_field");
+                seen |= 2u;
+                v.limit = r.integer(INT64_MIN, INT64_MAX);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 3u) != 3u) r.refuse("missing_field");
     return v;
 }
 
@@ -5486,11 +6559,186 @@ inline OARegistryObserveResult decode_oa_registry_observe_result(Reader& r) {
     return v;
 }
 
+inline OARegistryV2DeclarationsResult decode_oa_registry_v2_declarations_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2DeclarationsResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_declaration_list_v2(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OARegistryV2DeclareResult decode_oa_registry_v2_declare_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2DeclareResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_declaration_change(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OARegistryV2WithdrawResult decode_oa_registry_v2_withdraw_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2WithdrawResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_declaration_change(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OARegistryV2ObserveResult decode_oa_registry_v2_observe_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OARegistryV2ObserveResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_declaration_observation_v2(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
 inline OAApplicationsRegisterResult decode_oa_applications_register_result(Reader& r) {
     if (r.at() != '{') r.refuse("wrong_type");
     r.enter();
     ++r.pos;
     OAApplicationsRegisterResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_application_change(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
+inline OAApplicationsAskConfirmationResult decode_oa_applications_ask_confirmation_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OAApplicationsAskConfirmationResult v;
     std::uint32_t seen = 0;
     r.skip_ws();
     if (r.at() != '}') {
@@ -5696,6 +6944,41 @@ inline OAApplicationsActivateResult decode_oa_applications_activate_result(Reade
     return v;
 }
 
+inline OAApplicationsListStartsResult decode_oa_applications_list_starts_result(Reader& r) {
+    if (r.at() != '{') r.refuse("wrong_type");
+    r.enter();
+    ++r.pos;
+    OAApplicationsListStartsResult v;
+    std::uint32_t seen = 0;
+    r.skip_ws();
+    if (r.at() != '}') {
+        for (;;) {
+            r.skip_ws();
+            if (r.at() != '"') r.refuse("malformed");
+            const std::string key = r.str();
+            r.skip_ws();
+            if (r.at() != ':') r.refuse("malformed");
+            ++r.pos;
+            r.skip_ws();
+            if (key == "value") {
+                if (seen & 1u) r.refuse("duplicate_field");
+                seen |= 1u;
+                v.value = decode_application_start_page(r);
+            } else {
+                r.refuse("unknown_field");
+            }
+            r.skip_ws();
+            if (r.at() != ',') break;
+            ++r.pos;
+        }
+    }
+    if (r.at() != '}') r.refuse("malformed");
+    ++r.pos;
+    --r.depth;
+    if ((seen & 1u) != 1u) r.refuse("missing_field");
+    return v;
+}
+
 }  // namespace detail
 
 inline std::string encode(const ResolveResult& v) {
@@ -5848,6 +7131,7 @@ throw ServiceError("unknown_method","");}catch(const ServiceError&e){return deta
 }
 private:
 Raw invoke_observe(const detail::OACallerObserveArguments&args){
+(void)args;
 CallerObservation result{};
 try{
 result=handler.observe();
@@ -5890,6 +7174,7 @@ throw ServiceError("unknown_method","");}catch(const ServiceError&e){return deta
 }
 private:
 Raw invoke_describe(const detail::OAEndpointDescribeArguments&args){
+(void)args;
 Description result{};
 try{
 result=handler.describe();
@@ -5968,6 +7253,7 @@ throw ServiceError("unknown_method","");}catch(const ServiceError&e){return deta
 }
 private:
 Raw invoke_declarations(const detail::OARegistryDeclarationsArguments&args){
+(void)args;
 DeclarationList result{};
 try{
 result=handler.declarations();
@@ -6015,62 +7301,191 @@ private:
 void* ready_self_=nullptr;
 bool(*ready_hook_)(void*,std::string&)=nullptr;
 };
+struct RegistryV2{virtual ~RegistryV2()=default;
+virtual DeclarationListV2 declarations()=0;
+virtual DeclarationChange declare(const std::string& expected_revision,const DeclarationWithExtensions& declaration)=0;
+virtual DeclarationChange withdraw(const std::string& expected_revision,const std::string& name)=0;
+virtual DeclarationObservationV2 observe(const std::string& cursor,const std::int64_t& wait_ms)=0;
+};
+template<class Transport>struct RegistryV2Client:RegistryV2{Transport& transport_;explicit RegistryV2Client(Transport&t):transport_(t){}
+DeclarationListV2 declarations()override{detail::OARegistryV2DeclarationsArguments args;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/registry@2";v.method="Declarations";detail::enc_oa_registry_v2_declarations_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_registry_v2_declarations_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
+DeclarationChange declare(const std::string& expected_revision,const DeclarationWithExtensions& declaration)override{detail::OARegistryV2DeclareArguments args;
+args.expected_revision=expected_revision;
+args.declaration=declaration;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/registry@2";v.method="Declare";detail::enc_oa_registry_v2_declare_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_registry_v2_declare_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
+DeclarationChange withdraw(const std::string& expected_revision,const std::string& name)override{detail::OARegistryV2WithdrawArguments args;
+args.expected_revision=expected_revision;
+args.name=name;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/registry@2";v.method="Withdraw";detail::enc_oa_registry_v2_withdraw_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_registry_v2_withdraw_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
+DeclarationObservationV2 observe(const std::string& cursor,const std::int64_t& wait_ms)override{detail::OARegistryV2ObserveArguments args;
+args.cursor=cursor;
+args.wait_ms=wait_ms;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/registry@2";v.method="Observe";detail::enc_oa_registry_v2_observe_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_registry_v2_observe_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
+};
+struct RegistryV2Service{inline static constexpr std::string_view kWireName="abstraction.facade/registry@2";inline static constexpr std::string_view kCapability="abstraction.facade";template<class Transport>using Client=RegistryV2Client<Transport>;};
+struct RegistryV2Dispatcher:FrameWriter,FrameExchanger{RegistryV2&handler;explicit RegistryV2Dispatcher(RegistryV2&h):handler(h){}
+// A handler whose own type has ready(), returning a pair of bool and std::string, reports its readiness through describe_service.
+template<class H,class=decltype(static_cast<RegistryV2&>(*static_cast<H*>(nullptr)))>explicit RegistryV2Dispatcher(H&h):handler(h),ready_self_(&h),ready_hook_(detail::ready_hook<H>(0)){}
+// This dispatcher's service as abstraction.facade/endpoint@1 Describe lists it.
+DescribedService describe_service()const{DescribedService s{"abstraction.facade/registry@2",true,std::string()};if(ready_hook_){s.ready=ready_hook_(ready_self_,s.why);if(s.ready)s.why.clear();}return s;}
+void write_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service!="abstraction.facade/registry@2")throw DispatchError("unknown_service");
+if(v.method=="Declarations"){
+throw DispatchError("wrong_mode");}
+if(v.method=="Declare"){
+throw DispatchError("wrong_mode");}
+if(v.method=="Withdraw"){
+throw DispatchError("wrong_mode");}
+if(v.method=="Observe"){
+throw DispatchError("wrong_mode");}
+throw DispatchError("unknown_method");}
+std::string exchange_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service==kEndpointContract)return describe_endpoint(frame,std::string(),std::string(),*this);if(v.service!="abstraction.facade/registry@2"){ServiceError e("unknown_service","");return detail::service_reply(v,"",&e);}
+try{
+if(v.method=="Declarations"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_registry_v2_declarations_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_declarations(args);return detail::service_reply(v,payload);}
+if(v.method=="Declare"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_registry_v2_declare_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_declare(args);return detail::service_reply(v,payload);}
+if(v.method=="Withdraw"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_registry_v2_withdraw_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_withdraw(args);return detail::service_reply(v,payload);}
+if(v.method=="Observe"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_registry_v2_observe_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_observe(args);return detail::service_reply(v,payload);}
+throw ServiceError("unknown_method","");}catch(const ServiceError&e){return detail::service_reply(v,"",&e);}catch(const Refusal&e){ServiceError error(e.word,"");return detail::service_reply(v,"",&error);}
+}
+private:
+Raw invoke_declarations(const detail::OARegistryV2DeclarationsArguments&args){
+(void)args;
+DeclarationListV2 result{};
+try{
+result=handler.declarations();
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OARegistryV2DeclarationsResult value;
+value.value=result;
+Raw payload;detail::enc_oa_registry_v2_declarations_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_registry_v2_declarations_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+Raw invoke_declare(const detail::OARegistryV2DeclareArguments&args){
+DeclarationChange result{};
+try{
+result=handler.declare(args.expected_revision,args.declaration);
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OARegistryV2DeclareResult value;
+value.value=result;
+Raw payload;detail::enc_oa_registry_v2_declare_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_registry_v2_declare_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+Raw invoke_withdraw(const detail::OARegistryV2WithdrawArguments&args){
+DeclarationChange result{};
+try{
+result=handler.withdraw(args.expected_revision,args.name);
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OARegistryV2WithdrawResult value;
+value.value=result;
+Raw payload;detail::enc_oa_registry_v2_withdraw_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_registry_v2_withdraw_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+Raw invoke_observe(const detail::OARegistryV2ObserveArguments&args){
+DeclarationObservationV2 result{};
+try{
+result=handler.observe(args.cursor,args.wait_ms);
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OARegistryV2ObserveResult value;
+value.value=result;
+Raw payload;detail::enc_oa_registry_v2_observe_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_registry_v2_observe_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+private:
+void* ready_self_=nullptr;
+bool(*ready_hook_)(void*,std::string&)=nullptr;
+};
 struct Applications{virtual ~Applications()=default;
 virtual ApplicationChange register_(const ApplicationDescriptor& descriptor)=0;
+virtual ApplicationChange ask_confirmation(const std::string& application)=0;
 virtual ApplicationChange remove(const std::string& application)=0;
 virtual ApplicationChange announce(const ApplicationPresence& presence)=0;
 virtual ApplicationChange withdraw(const std::string& application,const std::string& instance)=0;
 virtual ApplicationPage observe(const std::string& cursor,const std::int64_t& wait_ms)=0;
 virtual ApplicationActivationResult activate(const std::string& application)=0;
+virtual ApplicationStartPage list_starts(const std::string& cursor,const std::int64_t& limit)=0;
 };
 template<class Transport>struct ApplicationsClient:Applications{Transport& transport_;explicit ApplicationsClient(Transport&t):transport_(t){}
 ApplicationChange register_(const ApplicationDescriptor& descriptor)override{detail::OAApplicationsRegisterArguments args;
 args.descriptor=descriptor;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Register";detail::enc_oa_applications_register_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Register";detail::enc_oa_applications_register_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_register_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
+ApplicationChange ask_confirmation(const std::string& application)override{detail::OAApplicationsAskConfirmationArguments args;
+args.application=application;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="AskConfirmation";detail::enc_oa_applications_ask_confirmation_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_ask_confirmation_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
 ApplicationChange remove(const std::string& application)override{detail::OAApplicationsRemoveArguments args;
 args.application=application;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Remove";detail::enc_oa_applications_remove_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Remove";detail::enc_oa_applications_remove_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_remove_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
 ApplicationChange announce(const ApplicationPresence& presence)override{detail::OAApplicationsAnnounceArguments args;
 args.presence=presence;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Announce";detail::enc_oa_applications_announce_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Announce";detail::enc_oa_applications_announce_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_announce_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
 ApplicationChange withdraw(const std::string& application,const std::string& instance)override{detail::OAApplicationsWithdrawArguments args;
 args.application=application;
 args.instance=instance;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Withdraw";detail::enc_oa_applications_withdraw_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Withdraw";detail::enc_oa_applications_withdraw_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_withdraw_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
 ApplicationPage observe(const std::string& cursor,const std::int64_t& wait_ms)override{detail::OAApplicationsObserveArguments args;
 args.cursor=cursor;
 args.wait_ms=wait_ms;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Observe";detail::enc_oa_applications_observe_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Observe";detail::enc_oa_applications_observe_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_observe_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
 ApplicationActivationResult activate(const std::string& application)override{detail::OAApplicationsActivateArguments args;
 args.application=application;
-detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@1";v.method="Activate";detail::enc_oa_applications_activate_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="Activate";detail::enc_oa_applications_activate_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
 auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_activate_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
 return result.value;
 }
+ApplicationStartPage list_starts(const std::string& cursor,const std::int64_t& limit)override{detail::OAApplicationsListStartsArguments args;
+args.cursor=cursor;
+args.limit=limit;
+detail::OAServiceFrame v;v.version=1;v.service="abstraction.facade/applications@2";v.method="ListStarts";detail::enc_oa_applications_list_starts_arguments(v.arguments,args,1);std::string frame;detail::enc_oa_service_frame(frame,v,0);detail::service_payload(frame);
+auto response=transport_.exchange_frame(frame);auto payload=detail::service_response(response,v.service,v.method);detail::Reader r{payload};r.depth=1;r.skip_ws();auto result=detail::decode_oa_applications_list_starts_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");
+return result.value;
+}
 };
-struct ApplicationsService{inline static constexpr std::string_view kWireName="abstraction.facade/applications@1";inline static constexpr std::string_view kCapability="abstraction.facade";template<class Transport>using Client=ApplicationsClient<Transport>;};
+struct ApplicationsService{inline static constexpr std::string_view kWireName="abstraction.facade/applications@2";inline static constexpr std::string_view kCapability="abstraction.facade";template<class Transport>using Client=ApplicationsClient<Transport>;};
 struct ApplicationsDispatcher:FrameWriter,FrameExchanger{Applications&handler;explicit ApplicationsDispatcher(Applications&h):handler(h){}
 // A handler whose own type has ready(), returning a pair of bool and std::string, reports its readiness through describe_service.
 template<class H,class=decltype(static_cast<Applications&>(*static_cast<H*>(nullptr)))>explicit ApplicationsDispatcher(H&h):handler(h),ready_self_(&h),ready_hook_(detail::ready_hook<H>(0)){}
 // This dispatcher's service as abstraction.facade/endpoint@1 Describe lists it.
-DescribedService describe_service()const{DescribedService s{"abstraction.facade/applications@1",true,std::string()};if(ready_hook_){s.ready=ready_hook_(ready_self_,s.why);if(s.ready)s.why.clear();}return s;}
-void write_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service!="abstraction.facade/applications@1")throw DispatchError("unknown_service");
+DescribedService describe_service()const{DescribedService s{"abstraction.facade/applications@2",true,std::string()};if(ready_hook_){s.ready=ready_hook_(ready_self_,s.why);if(s.ready)s.why.clear();}return s;}
+void write_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service!="abstraction.facade/applications@2")throw DispatchError("unknown_service");
 if(v.method=="Register"){
+throw DispatchError("wrong_mode");}
+if(v.method=="AskConfirmation"){
 throw DispatchError("wrong_mode");}
 if(v.method=="Remove"){
 throw DispatchError("wrong_mode");}
@@ -6082,11 +7497,15 @@ if(v.method=="Observe"){
 throw DispatchError("wrong_mode");}
 if(v.method=="Activate"){
 throw DispatchError("wrong_mode");}
+if(v.method=="ListStarts"){
+throw DispatchError("wrong_mode");}
 throw DispatchError("unknown_method");}
-std::string exchange_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service==kEndpointContract)return describe_endpoint(frame,std::string(),std::string(),*this);if(v.service!="abstraction.facade/applications@1"){ServiceError e("unknown_service","");return detail::service_reply(v,"",&e);}
+std::string exchange_frame(std::string_view frame)override{auto v=detail::service_payload(frame);if(v.service==kEndpointContract)return describe_endpoint(frame,std::string(),std::string(),*this);if(v.service!="abstraction.facade/applications@2"){ServiceError e("unknown_service","");return detail::service_reply(v,"",&e);}
 try{
 if(v.method=="Register"){
 detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_register_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_register_(args);return detail::service_reply(v,payload);}
+if(v.method=="AskConfirmation"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_ask_confirmation_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_ask_confirmation(args);return detail::service_reply(v,payload);}
 if(v.method=="Remove"){
 detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_remove_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_remove(args);return detail::service_reply(v,payload);}
 if(v.method=="Announce"){
@@ -6097,6 +7516,8 @@ if(v.method=="Observe"){
 detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_observe_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_observe(args);return detail::service_reply(v,payload);}
 if(v.method=="Activate"){
 detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_activate_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_activate(args);return detail::service_reply(v,payload);}
+if(v.method=="ListStarts"){
+detail::Reader r{v.arguments};r.depth=1;r.skip_ws();auto args=detail::decode_oa_applications_list_starts_arguments(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");auto payload=invoke_list_starts(args);return detail::service_reply(v,payload);}
 throw ServiceError("unknown_method","");}catch(const ServiceError&e){return detail::service_reply(v,"",&e);}catch(const Refusal&e){ServiceError error(e.word,"");return detail::service_reply(v,"",&error);}
 }
 private:
@@ -6109,6 +7530,17 @@ try{
 detail::OAApplicationsRegisterResult value;
 value.value=result;
 Raw payload;detail::enc_oa_applications_register_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_applications_register_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+Raw invoke_ask_confirmation(const detail::OAApplicationsAskConfirmationArguments&args){
+ApplicationChange result{};
+try{
+result=handler.ask_confirmation(args.application);
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OAApplicationsAskConfirmationResult value;
+value.value=result;
+Raw payload;detail::enc_oa_applications_ask_confirmation_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_applications_ask_confirmation_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
 }catch(...){throw ServiceError("invalid_result","");}
 }
 Raw invoke_remove(const detail::OAApplicationsRemoveArguments&args){
@@ -6164,6 +7596,17 @@ try{
 detail::OAApplicationsActivateResult value;
 value.value=result;
 Raw payload;detail::enc_oa_applications_activate_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_applications_activate_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
+}catch(...){throw ServiceError("invalid_result","");}
+}
+Raw invoke_list_starts(const detail::OAApplicationsListStartsArguments&args){
+ApplicationStartPage result{};
+try{
+result=handler.list_starts(args.cursor,args.limit);
+}catch(const ServiceError&){throw;}catch(...){throw ServiceError("handler_error","handler failed");}
+try{
+detail::OAApplicationsListStartsResult value;
+value.value=result;
+Raw payload;detail::enc_oa_applications_list_starts_result(payload,value,1);detail::Reader r{payload};r.depth=1;r.skip_ws();detail::decode_oa_applications_list_starts_result(r);r.skip_ws();if(r.pos!=r.buf.size())r.refuse("trailing_bytes");return payload;
 }catch(...){throw ServiceError("invalid_result","");}
 }
 private:

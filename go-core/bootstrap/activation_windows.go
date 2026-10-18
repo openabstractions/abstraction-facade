@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	identity "github.com/openabstractions/abstraction-identity"
 )
 
 // exitUpgradeInProgress is `openabstractions start`'s refusal while an
@@ -46,7 +48,7 @@ func activateInstalled(ctx context.Context, selection Selection) error {
 
 func activateWith(ctx context.Context, selection Selection, env activationEnv) error {
 	program := selection.Server.Program
-	if !filepath.IsAbs(program) || !strings.EqualFold(filepath.Base(program), "openabstractions.exe") {
+	if !filepath.IsAbs(program) || !identity.SamePathName(filepath.Base(program), "openabstractions.exe") {
 		return fmt.Errorf("%w: the selected installation names no openabstractions.exe", ErrActivationRefused)
 	}
 	info, err := env.stat(program)

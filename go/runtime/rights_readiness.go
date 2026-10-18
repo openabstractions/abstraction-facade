@@ -33,13 +33,19 @@ func (h *Host) watchRightsState(ctx context.Context) {
 func (h *Host) refreshRights(readable bool) {
 	h.mu.Lock()
 	changed := false
-	for _, index := range []int{h.rightsIndex, h.rightsOperatorIndex} {
-		if index < 0 {
+	for index, candidate := range h.candidates {
+		if candidate.Reference.Capability != "abstraction.rights" || candidate.Reference.Endpoint != h.candidates[h.rightsIndex].Reference.Endpoint {
 			continue
 		}
 		ready := readable && h.rights.Available()
-		if index == h.rightsOperatorIndex {
+		if candidate.Reference.Contract == "abstraction.rights/operator@1" {
 			ready = ready && h.rights.OperatorAvailable()
+		}
+		if candidate.Reference.Contract == "abstraction.rights/authorization@2" {
+			ready = ready && h.rights.SelectorAvailable()
+		}
+		if candidate.Reference.Contract == "abstraction.rights/operator@2" {
+			ready = ready && h.rights.SelectorOperatorAvailable()
 		}
 		if h.candidates[index].Ready != ready {
 			h.candidates[index].Ready, changed = ready, true

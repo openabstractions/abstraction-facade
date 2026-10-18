@@ -89,6 +89,25 @@ func InventoryOutcomeValues() []InventoryOutcome { return api.InventoryOutcomeVa
 
 type InventoryPage = api.InventoryPage
 
+type LinkOutcome = api.LinkOutcome
+
+const (
+	LinkOutcomeLinked      = api.LinkOutcomeLinked
+	LinkOutcomeNotReady    = api.LinkOutcomeNotReady
+	LinkOutcomeUnavailable = api.LinkOutcomeUnavailable
+	LinkOutcomeUnsupported = api.LinkOutcomeUnsupported
+	LinkOutcomeUnknown     = api.LinkOutcomeUnknown
+	LinkOutcomeForbidden   = api.LinkOutcomeForbidden
+	LinkOutcomeInvalid     = api.LinkOutcomeInvalid
+	LinkOutcomeExists      = api.LinkOutcomeExists
+	LinkOutcomeOtherVolume = api.LinkOutcomeOtherVolume
+	LinkOutcomeNoHardLinks = api.LinkOutcomeNoHardLinks
+	LinkOutcomeRemote      = api.LinkOutcomeRemote
+)
+
+// LinkOutcomeValues returns every member of LinkOutcome in declaration order, in a new slice.
+func LinkOutcomeValues() []LinkOutcome { return api.LinkOutcomeValues() }
+
 type OperatorCancellation = api.OperatorCancellation
 
 type OperatorCancellationOutcome = api.OperatorCancellationOutcome
@@ -148,6 +167,8 @@ func ResultOutcomeValues() []ResultOutcome { return api.ResultOutcomeValues() }
 
 type ResultRead = api.ResultRead
 
+type ResultLink = api.ResultLink
+
 type ServiceError = api.ServiceError
 
 type ServiceErrorCode = api.ServiceErrorCode
@@ -199,9 +220,15 @@ type DeclarationState = wire.DeclarationState
 
 type DeclarationList = wire.DeclarationList
 
+type DeclarationListV2 = wire.DeclarationListV2
+
 type DeclarationChange = wire.DeclarationChange
 
 type DeclarationObservation = wire.DeclarationObservation
+
+type DeclarationObservationV2 = wire.DeclarationObservationV2
+
+type DeclarationWithExtensions = wire.DeclarationWithExtensions
 
 type RemoteTrust = wire.RemoteTrust
 
@@ -252,3 +279,5 @@ func ApplicationOutcomeValues() []ApplicationOutcome { return wire.ApplicationOu
 
 type ApplicationPage = wire.ApplicationPage
 type ApplicationPresence = wire.ApplicationPresence
+type ApplicationStart = wire.ApplicationStart
+type ApplicationStartPage = wire.ApplicationStartPage

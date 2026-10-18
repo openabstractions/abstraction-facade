@@ -2,6 +2,7 @@
 #include <functional>
 #include <iostream>
 #include <sstream>
+#include <type_traits>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -79,8 +80,14 @@ public:
 struct OperationsFixture : f::job_api::OperationControl {
     f::job_api::ObservationResult observation;
     f::job_api::ResultRead result;
+    f::job_api::ResultLink link;
+    f::job_api::RequestIdentity linked_identity;
+    std::string destination;
     f::job_api::ObservationResult observe_work(const f::job_api::RequestIdentity&) override {return observation;}
     f::job_api::ResultRead read_result(const f::job_api::RequestIdentity&,const std::int64_t&,const std::int64_t&) override {return result;}
+    f::job_api::ResultLink link_result(const f::job_api::RequestIdentity& id,const std::string& path) override {
+        linked_identity=id;destination=path;return link;
+    }
 };
 void job_operations() {
     namespace a=f::job_api;
@@ -138,6 +145,61 @@ void job_operations() {
     }
     auto expired=unused.with_deadline(abstraction::ipc::Clock::now()-std::chrono::seconds(1));
     try{expired.observe_work(id);throw std::runtime_error("expired observation sent");}catch(const abstraction::ipc::FrameError&e){require(e.status==abstraction::ipc::Status::Timeout);}
+}
+void job_links() {
+    namespace a=f::job_api;
+    static_assert(!std::is_abstract_v<f::JobsClient>,"JobsClient must implement the generated operation contract");
+    const a::RequestIdentity id{"key","epoch"};
+    std::string destination=R"(C:\fixture\result)";
+    a::Receipt receipt;receipt.identity=id;receipt.logical_owner="owner";receipt.operation_id="op";
+    receipt.history_retention_ms=1000;receipt.accepted_guarantees={"required@1"};
+    a::ResultLink linked;linked.outcome=a::LinkOutcome::Linked;linked.receipt=receipt;linked.size=3;
+    auto probe=[&](a::ResultLink reply,bool reject){
+        OperationsFixture fixture;fixture.link=reply;
+        a::OperationControlDispatcher dispatch(fixture);
+        SingleFrame pipe([&](const std::string& frame){
+            require(a::detail::service_payload(frame).method=="LinkResult");return dispatch.exchange_frame(frame);
+        });
+        f::JobsClient client(pipe.endpoint,5000,{"required@1"},"owner");
+        bool refused=false;
+        try {
+            auto value=client.link_result(id,destination);
+            require(value.outcome==reply.outcome&&value.size==reply.size&&value.receipt.has_value()==reply.receipt.has_value());
+            if(value.receipt)require(value.receipt->operation_id==receipt.operation_id);
+        } catch(const a::ServiceError& e){require(e.code=="invalid_result"||e.code=="invalid_acceptance");refused=true;}
+        pipe.finish();require(refused==reject);
+        require(fixture.destination==destination&&fixture.linked_identity.key==id.key&&fixture.linked_identity.history_epoch==id.history_epoch&&fixture.linked_identity.attempt==id.attempt);
+    };
+    probe(linked,false);
+    {auto saved=destination;destination=std::string(4096,'x');probe(linked,false);destination=saved;}
+    for(auto outcome:{a::LinkOutcome::NotReady,a::LinkOutcome::Unavailable,a::LinkOutcome::Unsupported,a::LinkOutcome::Unknown,
+                      a::LinkOutcome::Forbidden,a::LinkOutcome::Invalid,a::LinkOutcome::Exists,a::LinkOutcome::OtherVolume,
+                      a::LinkOutcome::NoHardLinks,a::LinkOutcome::Remote}){
+        a::ResultLink refused;refused.outcome=outcome;probe(refused,false);
+    }
+    const std::vector<std::function<void(a::ResultLink&)>> malformed={
+        [](auto& r){r.receipt.reset();},[](auto& r){r.size=-1;},
+        [](auto& r){r.receipt->identity.key="other";},[](auto& r){r.receipt->identity.history_epoch="other";},
+        [](auto& r){r.receipt->identity.attempt=1;},
+        [](auto& r){r.receipt->logical_owner="other";},[](auto& r){r.receipt->accepted_guarantees.clear();}
+    };
+    for(auto edit:malformed){auto reply=linked;edit(reply);probe(reply,true);}
+    {auto reply=linked;reply.outcome=a::LinkOutcome::Remote;reply.size=0;probe(reply,true);}
+    {a::ResultLink reply;reply.outcome=a::LinkOutcome::Remote;reply.size=1;probe(reply,true);}
+    f::JobsClient unused("unused");
+    for(auto bad:std::vector<a::RequestIdentity>{{"","epoch"},{"key",""},{"key","epoch",-1}}){
+        bool refused=false;try{unused.link_result(bad,destination);}catch(const a::ServiceError& e){refused=e.code=="invalid_submission";}require(refused);
+    }
+    for(const auto& path:std::vector<std::string>{"",std::string(4097,'x')}){
+        bool refused=false;try{unused.link_result(id,path);}catch(const a::ServiceError& e){refused=e.code=="invalid_request";}require(refused);
+    }
+    auto expired=unused.with_deadline(abstraction::ipc::Clock::now()-std::chrono::seconds(1));
+    try{expired.link_result(id,destination);throw std::runtime_error("expired result link sent");}
+    catch(const abstraction::ipc::FrameError& e){require(e.status==abstraction::ipc::Status::Timeout);}
+    abstraction::ipc::CancellationSource cancelled;cancelled.cancel();
+    try{unused.with_cancellation(cancelled.token()).link_result(id,destination);throw std::runtime_error("cancelled result link sent");}
+    catch(const abstraction::ipc::FrameError& e){require(e.status==abstraction::ipc::Status::Cancelled);}
+    std::cout<<"job result link checks passed\n";
 }
 struct CopyFixture : OperationsFixture {
     unsigned calls=0;
@@ -477,6 +539,7 @@ int main(int argc,char**argv){try{
  selected_endpoints(true);
  job_copy();
  job_operations();
+ job_links();
  job_binding();
  weak_job_receipts();
  job_owner_consistency();
